@@ -170,6 +170,24 @@ class PurchaseOrderController extends Controller
         try {
             \DB::beginTransaction();
 
+            Log::info('PAYLOAD OC STORE', [
+                'raw' => $request->all(),
+            ]);
+
+            // Mezclar flags new_win / muestra desde el raw si el validador los omitió
+            $validatedProducts = $validated['products'];
+            $rawProducts = $request->input('products', []);
+            foreach ($validatedProducts as $idx => $prod) {
+                if (!array_key_exists('new_win', $prod) && isset($rawProducts[$idx]['new_win'])) {
+                    $validatedProducts[$idx]['new_win'] = $rawProducts[$idx]['new_win'];
+                }
+                if (!array_key_exists('muestra', $prod) && isset($rawProducts[$idx]['muestra'])) {
+                    $validatedProducts[$idx]['muestra'] = $rawProducts[$idx]['muestra'];
+                }
+            }
+
+            Log::info('VALIDATED PRODUCTS (after merge)', ['products' => $validatedProducts]);
+
             $data = [
                 'client_id'          => $validated['client_id'],
                 'order_consecutive'  => $validated['order_consecutive'],
@@ -203,7 +221,7 @@ class PurchaseOrderController extends Controller
             $purchaseOrder->save();
 
             // Productos
-            $this->syncProducts($purchaseOrder, $validated['products']);
+            $this->syncProducts($purchaseOrder, $validatedProducts);
 
             // Comentario de orden
             if (!empty($validated['observations'])) {
@@ -712,7 +730,12 @@ class PurchaseOrderController extends Controller
             // Send email if there are observations
             $cleanObservations = trim(strip_tags($validated['observations'] ?? ''));
             if (!empty($cleanObservations)) {
-                $this->sendStatusUpdateEmail($order, $validated['emails'] ?? null, $invoicePdfPath);
+                $this->sendStatusUpdateEmail(
+                    $order,
+                    $validated['emails'] ?? null,
+                    $invoicePdfPath,
+                    $validated['observations'] ?? null
+                );
             }
 
             return response()->json([
@@ -738,7 +761,7 @@ class PurchaseOrderController extends Controller
     /**
      * Send status update email with proper recipient handling.
      */
-    private function sendStatusUpdateEmail(PurchaseOrder $order, ?string $emailsJson, ?string $invoicePdfPath): void
+    private function sendStatusUpdateEmail(PurchaseOrder $order, ?string $emailsJson, ?string $invoicePdfPath, ?string $statusCommentHtml = null): void
     {
         try {
             // Parse emails from request
@@ -800,7 +823,7 @@ class PurchaseOrderController extends Controller
             $ccEmails = array_values(array_unique(array_filter($ccEmails)));
 
             // Send email
-            $mailable = new \App\Mail\PurchaseOrderStatusMail($order, $invoicePdfPath);
+            $mailable = new \App\Mail\PurchaseOrderStatusMail($order, $invoicePdfPath, $statusCommentHtml);
             
             $mail = \Mail::to($toEmail);
             
@@ -855,7 +878,7 @@ class PurchaseOrderController extends Controller
                     $pivot = $partialGroup['pivot'] ?? [];
                     $productId = $pivot['product_id'] ?? null;
                     $productOrderId = $pivot['id'] ?? null;
-                    $cierreCartera = $pivot['cierre_cartera'] ?? false;
+                    $cierreCartera = $pivot['cierre_cartera'] ?? null;
                     $partials = $partialGroup['partials'] ?? [];
 
                     if (! $productId || ! $productOrderId) {
@@ -863,9 +886,25 @@ class PurchaseOrderController extends Controller
                     }
 
                     // Actualizar cierre_cartera en la tabla pivote
+                    $cierreCarteraValue = null;
+                    if (! empty($cierreCartera)) {
+                        try {
+                            // Normaliza a datetime; si solo viene la fecha, se convierte con hora 00:00:00
+                            $cierreCarteraValue = Carbon::parse($cierreCartera)->toDateTimeString();
+                        } catch (\Throwable $parseError) {
+                            \Log::warning('cierre_cartera inválido, se almacena null', [
+                                'order_id' => $orderId,
+                                'product_order_id' => $productOrderId,
+                                'raw' => $cierreCartera,
+                                'error' => $parseError->getMessage(),
+                            ]);
+                            $cierreCarteraValue = null;
+                        }
+                    }
+
                     \DB::table('purchase_order_product')
                         ->where('id', $productOrderId)
-                        ->update(['cierre_cartera' => $cierreCartera]);
+                        ->update(['cierre_cartera' => $cierreCarteraValue]);
 
                     if (is_array($partials)) {
                         foreach ($partials as $partialEntry) {
@@ -894,8 +933,12 @@ class PurchaseOrderController extends Controller
                 $order->observations_extra = $validated['new_observation'] . $currentObservations;
             }
 
+            $cleanInternal = trim(strip_tags($validated['internal_observation'] ?? ''));
+            // Ignore placeholder "internal" or empty content
+            $shouldStoreInternal = $cleanInternal !== '' && strtolower($cleanInternal) !== 'internal';
+
             // Observaciones internas (solo planta)
-            if (! empty($validated['internal_observation'])) {
+            if ($shouldStoreInternal) {
                 $currentInternal = $order->internal_observations ?? '';
                 $order->internal_observations = $validated['internal_observation'] . $currentInternal;
             }
@@ -917,20 +960,30 @@ class PurchaseOrderController extends Controller
             \Log::error('Error al guardar observaciones', [
                 'order_id' => $orderId,
                 'message'  => $e->getMessage(),
+                'file'     => $e->getFile(),
+                'line'     => $e->getLine(),
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'No se pudieron guardar las observaciones',
+                'error'   => $e->getMessage(),
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
             ], 500);
         }
 
         // Enviar correos solo si hay observación visible
         $cleanObservation = trim(strip_tags($validated['new_observation'] ?? ''));
-        if (! empty($cleanObservation)) {
-            $order->loadMissing('client');
-            $this->sendObservationEmails($order, $validated['new_observation'], $validated['internal_observation'] ?? null, $request);
-        }
+            if (! empty($cleanObservation)) {
+                $order->loadMissing('client');
+                $this->sendObservationEmails(
+                    $order,
+                    $validated['new_observation'],
+                    $shouldStoreInternal ? $validated['internal_observation'] : null,
+                    $request
+                );
+            }
 
         return response()->json([
             'success' => true,
@@ -947,7 +1000,6 @@ class PurchaseOrderController extends Controller
             $tablesOnly = $this->extractHtmlTables($observationHtml);
             $userEmail = auth()->user()?->email ?? config('mail.from.address');
             $internalSection = '';
-
             if (! empty($internalObservation)) {
                 $internalSection = '<br><br><strong>Observaciones internas (solo planta)</strong><br>' . $internalObservation;
             }
@@ -962,19 +1014,24 @@ class PurchaseOrderController extends Controller
 
             // Correos destino (tags o procesos)
             $emailsRaw = $request->input('emails-tags', []);
-            $emailsNormalized = $this->normalizeEmails($emailsRaw);
+            $tagEmails = $this->normalizeEmails($emailsRaw);
+            $processEmails = $this->normalizeEmails(
+                Process::where('process_type', 'orden_de_compra')->pluck('email')->toArray()
+            );
 
-            if (count($emailsNormalized) === 0) {
-                $emailsNormalized = $this->normalizeEmails(
-                    Process::where('process_type', 'orden_de_compra')
-                        ->pluck('email')
-                        ->toArray()
-                );
-            }
+            // Correos que se consideran del cliente (no deben recibir internos)
+            $clientEmails = $this->normalizeEmails([
+                $order->client->email,
+                $order->client->dispatch_confirmation_email,
+                $order->tag_email_despachos,
+                $order->tag_email_pedidos,
+            ]);
 
-            $ccEmails = array_values(array_unique($emailsNormalized));
+            // Solo internos: despachos/planta (procesos) + tags, excluyendo correos cliente
+            $internalPool = array_merge($processEmails, $tagEmails);
+            $ccEmails = array_values(array_unique(array_diff($internalPool, $clientEmails)));
 
-            $primaryTo = array_shift($ccEmails);
+            $primaryTo = array_shift($ccEmails) ?: null;
 
             // Agregar ejecutivo si aplica
             $subject = ($order->is_new_win ? 'Re: NEW WIN - ' : 'Re: ') .
@@ -986,7 +1043,6 @@ class PurchaseOrderController extends Controller
 
             // --- PRIVACY ENHANCEMENT ---
             // Identify client emails to exclude them from internal notification
-            $clientEmails = $this->normalizeEmails($order->client->email);
             $internalCcEmails = array_values(array_diff($ccEmails, $clientEmails));
             
             // Re-evaluate primaryTo if it was the client
@@ -994,6 +1050,13 @@ class PurchaseOrderController extends Controller
             if (in_array($internalTo, $clientEmails)) {
                 $internalTo = array_shift($internalCcEmails);
             }
+
+            $internalBody = view('emails.purchase_order_observation', [
+                'order'           => $order,
+                'observationHtml' => $observationHtml,
+                'internalHtml'    => $internalObservation,
+                'forClient'       => false,
+            ])->render();
 
             if ($internalTo) {
                 $internalCcAddresses = array_map(fn ($email) => new Address($email), $internalCcEmails);
@@ -1003,7 +1066,7 @@ class PurchaseOrderController extends Controller
                     ->to($internalTo)
                     ->cc(...$internalCcAddresses)
                     ->subject($subject)
-                    ->html('OC.' . $order->order_consecutive . '  <br>' . $observationHtml . $internalSection);
+                    ->html($internalBody);
 
                 if ($threadId) {
                     $internalEmail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
@@ -1018,11 +1081,17 @@ class PurchaseOrderController extends Controller
                 foreach ($clientEmails as $cEmail) {
                     if (!$this->isValidEmail($cEmail)) continue;
 
+                    $clientBody = view('emails.purchase_order_observation', [
+                        'order'           => $order,
+                        'observationHtml' => $tablesOnly,
+                        'forClient'       => true,
+                    ])->render();
+
                     $clientMail = (new Email())
                         ->from($userEmail)
                         ->to($cEmail)
                         ->subject('Re: ' . ($order->subject_client ?: $subject))
-                        ->html('OC.' . $order->order_consecutive . '  <br>' . $tablesOnly);
+                        ->html($clientBody);
 
                     if ($threadId) {
                         $clientMail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
@@ -1129,13 +1198,20 @@ class PurchaseOrderController extends Controller
         $isMuestra = 0;
 
         foreach ($products as $product) {
-            // Handle new_win - puede venir como 'true', 'false', true, false, 1, 0, 'undefined' o no existir
-            $newWinValue = $product['new_win'] ?? false;
-            $newWinFlag = ($newWinValue === 'true' || $newWinValue === true || $newWinValue === 1 || $newWinValue === '1');
+            // Normalizar flags new_win y muestra de forma robusta (acepta "true","1","on","yes")
+            $newWinRaw = $product['new_win'] ?? null;
+            $muestraRaw = $product['muestra'] ?? null;
 
-            // Handle muestra - puede venir como 'true', 'false', true, false, 1, 0, 'undefined' o no existir
-            $muestraValue = $product['muestra'] ?? false;
-            $muestraFlag = ($muestraValue === 'true' || $muestraValue === true || $muestraValue === 1 || $muestraValue === '1');
+            $newWinFlag = !in_array(strtolower((string) $newWinRaw), ['0', 'false', 'off', 'no', '', 'undefined'], true);
+            $muestraFlag = !in_array(strtolower((string) $muestraRaw), ['0', 'false', 'off', 'no', '', 'undefined'], true);
+
+            Log::info('SYNC PRODUCTS (create) flags', [
+                'product_id' => $product['product_id'] ?? null,
+                'raw_new_win' => $newWinRaw,
+                'raw_muestra' => $muestraRaw,
+                'newWinFlag' => $newWinFlag,
+                'muestraFlag' => $muestraFlag,
+            ]);
 
             if ($newWinFlag && !$isNewWin) {
                 $isNewWin = 1;
@@ -1180,13 +1256,8 @@ class PurchaseOrderController extends Controller
 
             foreach ($products as $productData) {
                 // Procesar flags
-                $newWinFlag = isset($productData['new_win']) && $productData['new_win'] !== 'undefined'
-                    ? filter_var($productData['new_win'], FILTER_VALIDATE_BOOLEAN)
-                    : false;
-
-                $muestraFlag = isset($productData['muestra']) && $productData['muestra'] !== 'undefined'
-                    ? filter_var($productData['muestra'], FILTER_VALIDATE_BOOLEAN)
-                    : false;
+                $newWinFlag = !in_array(strtolower((string) ($productData['new_win'] ?? '')), ['0', 'false', 'off', 'no', '', 'undefined'], true);
+                $muestraFlag = !in_array(strtolower((string) ($productData['muestra'] ?? '')), ['0', 'false', 'off', 'no', '', 'undefined'], true);
 
                 if ($newWinFlag) $isNewWin = 1;
                 if ($muestraFlag) $isMuestra = 1;
@@ -1525,10 +1596,20 @@ class PurchaseOrderController extends Controller
             'context' => $processTypeContext,
             'tag_email_pedidos' => $validated['tag_email_pedidos'] ?? 'vacío',
             'tag_email_despachos' => $validated['tag_email_despachos'] ?? 'vacío',
+            'is_new_win' => (int) $purchaseOrder->is_new_win,
         ]);
 
         // Reload with relationships
-        $purchaseOrder->load(['client', 'products']);
+        $purchaseOrder->load(['client', 'products', 'comments']);
+
+        Log::info('EMAIL PRODUCTS FLAGS', [
+            'order_id' => $purchaseOrder->id,
+            'is_new_win' => (int) $purchaseOrder->is_new_win,
+            'products' => $purchaseOrder->products->map(fn($p) => [
+                'id' => $p->id,
+                'pivot_new_win' => $p->pivot->new_win,
+            ])->toArray(),
+        ]);
         
         // Metadata básica
         $metadata = [
@@ -1546,7 +1627,12 @@ class PurchaseOrderController extends Controller
         $clientEmail = $purchaseOrder->client->email;
         $executiveEmail = $purchaseOrder->client->executive_email ?? $purchaseOrder->client->executive;
         $coordinator = 'monica.castano@finearom.com';
-        $filePath = $validated['attachment'] ?? null;
+        // Usar el adjunto ya almacenado en la orden; evitar pasar rutas temporales
+        $filePath = $purchaseOrder->attachment ?? null;
+        $validatedAttachment = $validated['attachment'] ?? null;
+        if (empty($filePath) && is_string($validatedAttachment)) {
+            $filePath = $validatedAttachment;
+        }
 
         // ============ EMAIL PEDIDOS ============
         if (empty($validated['tag_email_pedidos'])) {
@@ -1610,6 +1696,10 @@ class PurchaseOrderController extends Controller
         if (empty($validated['tag_email_despachos'])) {
             // Si no hay tag_email_despachos, usar Process emails
             $processEmails = Process::where('process_type', 'orden_de_compra')->pluck('email')->toArray();
+            Log::info('EMAIL DESPACHOS - usaremos correos de Process (orden_de_compra)', [
+                'order_id' => $purchaseOrder->id,
+                'process_emails' => $processEmails,
+            ]);
 
             // Expandir emails separados por comas
             $expandedEmails = [];
@@ -1624,10 +1714,29 @@ class PurchaseOrderController extends Controller
         } else {
             // Si hay tag_email_despachos, usarlos
             $ccEmails = explode(',', $validated['tag_email_despachos']);
+            Log::info('EMAIL DESPACHOS - usando tag_email_despachos', [
+                'order_id' => $purchaseOrder->id,
+                'raw_tags' => $validated['tag_email_despachos'],
+            ]);
         }
 
         // TO: primer email de la lista
         $toEmail = array_shift($ccEmails);
+
+        // Fallbacks si no hay destinatario principal:
+        // 1) usar el correo del cliente
+        // 2) usar el usuario autenticado como último recurso
+        if (empty($toEmail)) {
+            Log::warning('EMAIL DESPACHOS - no se encontró destinatario principal, aplicando fallback', [
+                'order_id' => $purchaseOrder->id,
+                'client_email' => $clientEmail,
+                'auth_user' => auth()->user()?->email,
+            ]);
+            $clientCandidates = array_filter(array_map('trim', explode(',', (string) $clientEmail)));
+            $toEmail = array_shift($clientCandidates) ?: (auth()->user()->email ?? null);
+            // Reincorporar el resto de candidates a CC
+            $ccEmails = array_merge($clientCandidates, $ccEmails);
+        }
 
         // Limpiar duplicados
         $ccEmails = array_filter(array_map('trim', $ccEmails));

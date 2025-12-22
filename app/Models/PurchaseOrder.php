@@ -26,6 +26,7 @@ class PurchaseOrder extends Model
         'dispatch_date',
         'tracking_number',
         'observations_extra',
+        'internal_observations',
         'tag_email_despachos',
         'tag_email_pedidos',
         'trm_updated_at',

@@ -17,14 +17,16 @@ class PurchaseOrderStatusMail extends Mailable
 
     public PurchaseOrder $purchaseOrder;
     public ?string $invoicePdfPath;
+    public ?string $statusCommentHtml;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(PurchaseOrder $purchaseOrder, ?string $invoicePdfPath = null)
+    public function __construct(PurchaseOrder $purchaseOrder, ?string $invoicePdfPath = null, ?string $statusCommentHtml = null)
     {
         $this->purchaseOrder = $purchaseOrder;
         $this->invoicePdfPath = $invoicePdfPath;
+        $this->statusCommentHtml = $statusCommentHtml;
     }
 
     /**
@@ -65,6 +67,7 @@ class PurchaseOrderStatusMail extends Mailable
             view: 'emails.purchase_order_status_update',
             with: [
                 'purchaseOrder' => $this->purchaseOrder,
+                'statusCommentHtml' => $this->statusCommentHtml,
             ]
         );
     }
