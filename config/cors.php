@@ -27,6 +27,7 @@ return [
         'http://ordenes.finearom.co:8000',
         'https://ordenes.finearom.co',
         'http://ordenes.finearom.co',
+        'http://ordenes.finearom.co:8080',
     ],
 
     'allowed_origins_patterns' => [],
