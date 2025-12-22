@@ -34,6 +34,9 @@ class EventServiceProvider extends ServiceProvider
         \Illuminate\Mail\Events\MessageSending::class => [
             \App\Listeners\LogSentMessage::class,
         ],
+        \Illuminate\Mail\Events\MessageSent::class => [
+            \App\Listeners\EmailSentListener::class,
+        ],
     ];
 
     /**
