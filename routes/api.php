@@ -50,6 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Dashboard Stats
     Route::get('/dashboard/stats', [DashboardController::class, 'getStats']);
     Route::get('/dashboard/export-planned-stats', [DashboardController::class, 'exportPlannedStats']);
+    Route::get('/dashboard/client-stats', [DashboardController::class, 'clientQuickStats']);
     
     // Cuenta del usuario autenticado
     Route::get('/account', [AccountController::class, 'show']);

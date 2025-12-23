@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Partial;
 use App\Models\PartialLog;
 use App\Models\PurchaseOrder;
+use App\Models\Client;
 use App\Services\TrmService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,116 @@ class DashboardController extends Controller
             'success' => false,
             'message' => 'Export functionality not available yet (Package missing)'
         ], 501);
+    }
+
+    /**
+     * Quick stats for a single client (current month, on-demand)
+     */
+    public function clientQuickStats(Request $request)
+    {
+        $request->validate([
+            'nit' => 'required|string'
+        ]);
+
+        $client = Client::where('nit', $request->nit)->first();
+        if (!$client) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cliente no encontrado'
+            ], 404);
+        }
+
+        $startDate = Carbon::now()->startOfMonth()->toDateString();
+        $endDate = Carbon::now()->endOfMonth()->toDateString();
+
+        try {
+            // Planned: productos de órdenes creadas en el mes
+            $plannedProducts = DB::table('purchase_order_product as pop')
+                ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+                ->where('po.client_id', $client->id)
+                ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+                ->select('pop.quantity', 'pop.price', 'po.trm')
+                ->get();
+
+            $plannedUsd = $plannedProducts->sum(function ($row) {
+                return (float) $row->price * (float) $row->quantity;
+            });
+            $plannedCop = $plannedProducts->sum(function ($row) {
+                $trm = $row->trm ?? 4000;
+                return (float) $row->price * (float) $row->quantity * $trm;
+            });
+
+            // Dispatched: partials del mes
+            $partials = DB::table('partials')
+                ->join('purchase_order_product as pop', 'partials.product_order_id', '=', 'pop.id')
+                ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+                ->where('po.client_id', $client->id)
+                ->whereNotNull('partials.dispatch_date')
+                ->whereBetween('partials.dispatch_date', [$startDate, $endDate])
+                ->select('partials.quantity', 'pop.price', 'partials.trm as partial_trm', 'po.trm as order_trm')
+                ->get();
+
+            $dispatchedUsd = $partials->sum(function ($row) {
+                return (float) $row->price * (float) $row->quantity;
+            });
+            $dispatchedCop = $partials->sum(function ($row) {
+                $trm = $row->partial_trm ?? $row->order_trm ?? 4000;
+                return (float) $row->price * (float) $row->quantity * $trm;
+            });
+
+            $averageTrm = $partials->count() > 0
+                ? round($partials->avg(function ($row) {
+                    return $row->partial_trm ?? $row->order_trm ?? 4000;
+                }), 2)
+                : 0;
+
+            $pendingUsd = max(0, $plannedUsd - $dispatchedUsd);
+            $pendingCop = max(0, $plannedCop - $dispatchedCop);
+
+            $totalOrdersDispatched = DB::table('purchase_orders')
+                ->where('client_id', $client->id)
+                ->whereBetween('order_creation_date', [$startDate, $endDate])
+                ->where('status', 'completed')
+                ->count();
+
+            $totalOrdersPartial = DB::table('purchase_orders')
+                ->where('client_id', $client->id)
+                ->whereBetween('order_creation_date', [$startDate, $endDate])
+                ->where('status', 'parcial_status')
+                ->count();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'client' => [
+                        'id' => $client->id,
+                        'name' => $client->client_name,
+                        'nit' => $client->nit
+                    ],
+                    'period' => [
+                        'start_date' => $startDate,
+                        'end_date' => $endDate
+                    ],
+                    'financial_analysis' => [
+                        'planned_value_usd' => round($plannedUsd, 2),
+                        'planned_value_cop' => round($plannedCop, 0),
+                        'dispatched_value_usd' => round($dispatchedUsd, 2),
+                        'dispatched_value_cop' => round($dispatchedCop, 0),
+                        'pending_value_usd' => round($pendingUsd, 2),
+                        'pending_value_cop' => round($pendingCop, 0),
+                        'average_trm' => $averageTrm,
+                        'orders_dispatched' => $totalOrdersDispatched ?? 0,
+                        'orders_partial' => $totalOrdersPartial ?? 0,
+                    ]
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in clientQuickStats: '.$e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error obteniendo estadisticas del cliente'
+            ], 500);
+        }
     }
 
 
