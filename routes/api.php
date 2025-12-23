@@ -143,7 +143,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/purchase-orders/{id}', [PurchaseOrderController::class, 'show']);
     Route::post('/purchase-orders/{id}/update-status', [PurchaseOrderController::class, 'updateStatus']);
     Route::post('/purchase-orders/{id}/observations', [PurchaseOrderController::class, 'updateObservations']);
-    Route::post('/recaudos/import', [RecaudoImportController::class, 'import']);
+    Route::post('/recaudo/import', [RecaudoImportController::class, 'import']);
+    Route::get('/recaudo/recent', [RecaudoImportController::class, 'recent']);
 
     // Clientes y sucursales
     Route::get('/clients', [ClientController::class, 'index']);

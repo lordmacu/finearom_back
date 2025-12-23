@@ -43,8 +43,8 @@ class CarteraQuery
         // Proyección: usamos la foto de cartera (por vencer y vencidos) en el snapshot más reciente,
         // no acumulamos parciales históricos.
         $projectedFromPartials = $this->snapshotProjectedCollectable($snapshotDate, $filters);
-        $currentDebt = $this->snapshotDebtTotal($snapshotDate, $filters, false);
-        $overdueDebt = $this->snapshotDebtTotal($snapshotDate, $filters, true);
+        $currentDebt = $this->snapshotNetDebtTotal($snapshotDate, $filters, false);
+        $overdueDebt = $this->snapshotNetDebtTotal($snapshotDate, $filters, true);
         $totalCollected = $this->collectedInRange($from, $to, $filters, $snapshotDate);
 
         return [
@@ -86,7 +86,9 @@ class CarteraQuery
             )
             ->selectRaw('MAX(r.fecha_recaudo) as fecha_recaudo')
             ->selectRaw('SUM(r.valor_cancelado) as collected_amount')
-            ->selectRaw("CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2)) as snapshot_debt");
+            ->selectRaw('(SELECT SUM(r2.valor_cancelado) FROM recaudos r2 WHERE r2.numero_factura = car.documento) as collected_total')
+            ->selectRaw("CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2)) as snapshot_debt")
+            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2)) - COALESCE((SELECT SUM(r3.valor_cancelado) FROM recaudos r3 WHERE r3.numero_factura = car.documento),0), 0) as net_debt");
 
         if (! empty($filters['client_id'])) {
             $query->where('c.id', (int) $filters['client_id']);
@@ -127,17 +129,16 @@ class CarteraQuery
             ->get();
 
         return $rows->map(function ($row) use ($today) {
-            $currentDebt = round($this->parseNumber($row->snapshot_debt), 2);
+            $currentDebt = round($this->parseNumber($row->net_debt), 2);
             $collected = round((float) ($row->collected_amount ?? 0), 2);
+            $collectedTotal = round((float) ($row->collected_total ?? 0), 2);
 
-            $overdue = ($row->fecha_vencimiento && $row->fecha_vencimiento < $today)
+            $overdue = ($row->fecha_vencimiento && $row->fecha_vencimiento < $today && $currentDebt > 0)
                 ? $currentDebt
                 : 0;
 
-            $estadoPagado = 'PAGADO';
-            if ($currentDebt > 0) {
-                $estadoPagado = $overdue > 0 ? 'EN MORA' : 'PENDIENTE';
-            }
+            // Mejorar la lógica de estado
+            $estadoPagado = $this->calculateEstadoPagado($currentDebt, $collectedTotal, $overdue);
 
             return [
                 'client_id' => (int) ($row->client_id ?? 0),
@@ -149,6 +150,7 @@ class CarteraQuery
                 'fecha_vencimiento' => $row->fecha_vencimiento ? Carbon::parse($row->fecha_vencimiento)->toDateString() : null,
                 'valor_cancelado' => $collected,
                 'collected_amount' => $collected,
+                'collected_total' => $collectedTotal,
                 'current_debt' => $currentDebt,
                 'overdue_amount' => round((float) $overdue, 2),
                 'estado_pagado' => $estadoPagado,
@@ -286,6 +288,58 @@ class CarteraQuery
     }
 
     /**
+     * Deuda neta = saldo snapshot - recaudos totales por factura (no menor a 0).
+     *
+     * @param array{executive_email?:string,client_id?:int,catera_type?:string} $filters
+     */
+    private function snapshotNetDebtTotal(string $snapshotDate, array $filters, bool $overdueOnly = false): float
+    {
+        $query = DB::table('cartera as car')
+            ->leftJoin('clients as c', 'car.nit', '=', 'c.nit')
+            ->leftJoin('recaudos as r', 'r.numero_factura', '=', 'car.documento')
+            ->where('car.fecha_cartera', '=', $snapshotDate);
+
+        if ($overdueOnly) {
+            $today = Carbon::now('America/Bogota')->toDateString();
+            $query->where(function ($q) use ($today) {
+                $q->where('car.vence', '<', $today)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('car.dias')->where('car.dias', '<', 0);
+                    });
+            });
+        }
+
+        if (! empty($filters['client_id'])) {
+            $query->where('c.id', (int) $filters['client_id']);
+        }
+
+        if (! empty($filters['executive_email'])) {
+            $email = strtolower(trim($filters['executive_email']));
+            $query->where(function ($q) use ($email) {
+                $q->whereRaw('FIND_IN_SET(?, REPLACE(LOWER(c.executive_email), " ", "")) > 0', [$email])
+                    ->orWhereRaw('JSON_SEARCH(c.executive_email, "one", ?) IS NOT NULL', [$email]);
+            });
+        }
+
+        if (! empty($filters['catera_type'])) {
+            $type = (string) $filters['catera_type'];
+            if ($type === 'internacional') {
+                $query->where('car.catera_type', '=', 'internacional');
+            } else {
+                $query->where(function ($q) {
+                    $q->whereNull('car.catera_type')->orWhere('car.catera_type', '=', 'nacional');
+                });
+            }
+        }
+
+        return (float) $query
+            ->groupBy('car.documento', 'car.saldo_contable')
+            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt_sum")
+            ->pluck('net_debt_sum')
+            ->sum();
+    }
+
+    /**
      * Proyección basada en snapshot: suma de saldo_contable por vencer (días >= 0).
      *
      * @param array{executive_email?:string,client_id?:int,catera_type?:string} $filters
@@ -417,18 +471,15 @@ class CarteraQuery
      * @param \Illuminate\Support\Collection<int,object> $rows
      * @return array<int,array<string,mixed>>
      */
-    private function mapClientRows(Collection $rows, string $today): Collection
+    private function mapClientRows(Collection $rows): Collection
     {
-        return $rows->map(function ($row) use ($today) {
-            $estadoPagado = 'PAGADO';
+        return $rows->map(function ($row) {
+            $currentDebt = round((float) ($row->current_debt ?? 0), 2);
+            $collectedTotal = round((float) ($row->collected_total ?? 0), 2);
+            $overdueAmount = round((float) ($row->overdue_amount ?? 0), 2);
 
-            if ($row->numero_factura !== null && (float) ($row->current_debt ?? 0) > 0) {
-                if ($row->fecha_vencimiento && $row->fecha_vencimiento < $today) {
-                    $estadoPagado = 'EN MORA';
-                } else {
-                    $estadoPagado = 'PENDIENTE';
-                }
-            }
+            // Usar la nueva lógica de cálculo de estado
+            $estadoPagado = $this->calculateEstadoPagado($currentDebt, $collectedTotal, $overdueAmount);
 
             return [
                 'client_id' => (int) ($row->client_id ?? 0),
@@ -438,8 +489,8 @@ class CarteraQuery
                 'fecha_recaudo' => $row->fecha_recaudo ? Carbon::parse($row->fecha_recaudo)->toDateString() : null,
                 'fecha_vencimiento' => $row->fecha_vencimiento ? Carbon::parse($row->fecha_vencimiento)->toDateString() : null,
                 'valor_cancelado' => round((float) ($row->valor_cancelado ?? 0), 2),
-                'current_debt' => round((float) ($row->current_debt ?? 0), 2),
-                'overdue_amount' => round((float) ($row->overdue_amount ?? 0), 2),
+                'current_debt' => $currentDebt,
+                'overdue_amount' => $overdueAmount,
                 'estado_pagado' => $estadoPagado,
                 'catera_type' => $row->catera_type,
             ];
@@ -496,5 +547,43 @@ class CarteraQuery
 
         $stringValue = preg_replace('/[^0-9.\-]/', '', $stringValue) ?? $stringValue;
         return (float) $stringValue;
+    }
+
+    /**
+     * Calcula el estado de pago de una factura de forma más precisa.
+     *
+     * @param float $currentDebt Deuda actual (saldo - recaudos)
+     * @param float $collectedTotal Total recaudado histórico
+     * @param float $overdue Monto vencido
+     * @return string Estado de la factura
+     */
+    private function calculateEstadoPagado(float $currentDebt, float $collectedTotal, float $overdue): string
+    {
+        // En mora: tiene deuda y está vencida
+        if ($overdue > 0) {
+            return 'EN MORA';
+        }
+
+        // Pagado: no tiene deuda y tiene recaudos
+        if ($currentDebt === 0.0 && $collectedTotal > 0) {
+            return 'PAGADO';
+        }
+
+        // Al día (pago parcial): tiene deuda pero no está vencida Y tiene recaudos parciales
+        if ($currentDebt > 0 && $collectedTotal > 0) {
+            return 'PENDIENTE'; // PENDIENTE indica "al día" en el sistema
+        }
+
+        // Pendiente sin pago: tiene deuda, no vencida, pero sin recaudos
+        if ($currentDebt > 0 && $collectedTotal === 0.0) {
+            return 'PENDIENTE SIN PAGO';
+        }
+
+        // Sin información: no tiene deuda ni recaudos (posible error de datos)
+        if ($currentDebt === 0.0 && $collectedTotal === 0.0) {
+            return 'SIN INFORMACION';
+        }
+
+        return 'DESCONOCIDO';
     }
 }
