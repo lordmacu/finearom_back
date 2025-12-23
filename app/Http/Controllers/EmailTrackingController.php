@@ -27,6 +27,14 @@ class EmailTrackingController extends Controller
             });
         }
 
+        if ($request->filled('recipient_email')) {
+            $query->where('recipient_email', 'like', '%' . $request->recipient_email . '%');
+        }
+
+        if ($request->filled('sender_email')) {
+            $query->where('sender_email', 'like', '%' . $request->sender_email . '%');
+        }
+
         if ($request->has('process_type') && $request->process_type) {
             $query->where('process_type', $request->process_type);
         }
