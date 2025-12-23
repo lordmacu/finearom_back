@@ -28,6 +28,11 @@ class TrmService
     }
     /**
      * Obtiene la TRM para una fecha dada, usando caché.
+     * Sistema de fallback en cascada:
+     * 1. Servicio SOAP principal
+     * 2. API alternativa (Exchange Rates)
+     * 3. Último valor exitoso en caché
+     * 4. Valor por defecto (4000)
      *
      * @param string|null $custom_date La fecha en formato 'Y-m-d'. Si es nulo, usa la fecha actual.
      * @return float La TRM para la fecha especificada
@@ -38,13 +43,38 @@ class TrmService
 
         try {
             $trm_from_service = $this->fetchTrmFromSoapService($date);
+            $trmValue = (float) ($trm_from_service["value"] ?? 0);
 
-            return (float) ($trm_from_service["value"] ?? 0);
+            // Si obtuvimos un valor válido del SOAP, guardarlo como último exitoso
+            if ($trmValue > TrmNormalizer::MIN_VALID_TRM) {
+                $this->saveLastSuccessfulTrm($trmValue, $date, 'soap');
+                return $trmValue;
+            }
         } catch (Exception $e) {
-            // Si hay cualquier error, retorna el valor de la API alternativa
             Log::warning("Error obteniendo TRM del servicio SOAP para fecha {$date}: " . $e->getMessage());
-            return (float) ($this->getExchangeRates($date) ?? 0);
         }
+
+        // Fallback 2: Intentar con API alternativa
+        try {
+            $exchangeRate = $this->getExchangeRates($date);
+            if ($exchangeRate && $exchangeRate > TrmNormalizer::MIN_VALID_TRM) {
+                $this->saveLastSuccessfulTrm($exchangeRate, $date, 'exchange_api');
+                return (float) $exchangeRate;
+            }
+        } catch (Exception $e) {
+            Log::warning("Error obteniendo TRM de Exchange API para fecha {$date}: " . $e->getMessage());
+        }
+
+        // Fallback 3: Último valor exitoso en caché
+        $lastSuccessful = $this->getLastSuccessfulTrm();
+        if ($lastSuccessful) {
+            Log::info("Usando último valor TRM exitoso del caché: {$lastSuccessful['value']} (fecha: {$lastSuccessful['date']}, fuente: {$lastSuccessful['source']})");
+            return (float) $lastSuccessful['value'];
+        }
+
+        // Fallback 4: Valor por defecto
+        Log::error("No se pudo obtener TRM de ninguna fuente para fecha {$date}. Usando valor por defecto: 4000");
+        return 4000.0;
     }
 
     /**
@@ -141,7 +171,12 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
         if (Storage::disk('local')->exists($cacheFile)) {
             $cachedData = json_decode(Storage::disk('local')->get($cacheFile), true);
             if ($cachedData && isset($cachedData['date']) && $cachedData['date'] === $currentDate) {
-                return (float) $cachedData['exchangeRate'];
+                $cachedValue = (float) $cachedData['exchangeRate'];
+                // Guardar como último exitoso si es válido
+                if ($cachedValue > TrmNormalizer::MIN_VALID_TRM) {
+                    $this->saveLastSuccessfulTrm($cachedValue, $currentDate, 'exchange_api_cache');
+                }
+                return $cachedValue;
             }
         }
 
@@ -160,11 +195,16 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
 
             $exchangeRate = (float) $data['rates'][$currentDate]['USD'];
 
-            // Guardar en caché
+            // Guardar en caché diario
             Storage::disk('local')->put($cacheFile, json_encode([
                 'exchangeRate' => $exchangeRate,
                 'date' => $currentDate
             ]));
+
+            // Guardar como último exitoso si es válido
+            if ($exchangeRate > TrmNormalizer::MIN_VALID_TRM) {
+                $this->saveLastSuccessfulTrm($exchangeRate, $currentDate, 'exchange_api');
+            }
 
             return $exchangeRate;
         } catch (Exception $e) {
@@ -247,11 +287,71 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
     }
 
     /**
+     * Guarda el último valor exitoso de TRM en caché persistente
+     *
+     * @param float $value
+     * @param string $date
+     * @param string $source Fuente del valor (soap, exchange_api, etc.)
+     * @return void
+     */
+    private function saveLastSuccessfulTrm(float $value, string $date, string $source): void
+    {
+        try {
+            $cacheData = [
+                'value' => $value,
+                'date' => $date,
+                'source' => $source,
+                'saved_at' => Carbon::now()->toDateTimeString(),
+            ];
+
+            Storage::disk('local')->put('trm_last_successful.json', json_encode($cacheData));
+
+            Log::debug("TRM exitoso guardado en caché: {$value} (fecha: {$date}, fuente: {$source})");
+        } catch (Exception $e) {
+            Log::error("Error guardando último TRM exitoso: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Obtiene el último valor exitoso de TRM desde el caché persistente
+     *
+     * @return array|null ['value' => float, 'date' => string, 'source' => string, 'saved_at' => string]
+     */
+    private function getLastSuccessfulTrm(): ?array
+    {
+        try {
+            $cacheFile = 'trm_last_successful.json';
+
+            if (!Storage::disk('local')->exists($cacheFile)) {
+                return null;
+            }
+
+            $cachedData = json_decode(Storage::disk('local')->get($cacheFile), true);
+
+            if (!$cachedData || !isset($cachedData['value'])) {
+                return null;
+            }
+
+            // Verificar que el valor sea válido
+            if ($cachedData['value'] < TrmNormalizer::MIN_VALID_TRM) {
+                Log::warning("Último TRM en caché es inválido: {$cachedData['value']}");
+                return null;
+            }
+
+            return $cachedData;
+        } catch (Exception $e) {
+            Log::error("Error leyendo último TRM exitoso del caché: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Limpia el caché de TRM y exchange rates
      *
+     * @param bool $includeLast Si es true, también elimina el último valor exitoso
      * @return bool
      */
-    public function clearCache(): bool
+    public function clearCache(bool $includeLast = false): bool
     {
         try {
             $files = Storage::disk('local')->files();
@@ -262,6 +362,13 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
                     Storage::disk('local')->delete($file);
                     $deleted++;
                 }
+            }
+
+            // Opcionalmente eliminar el último valor exitoso
+            if ($includeLast && Storage::disk('local')->exists('trm_last_successful.json')) {
+                Storage::disk('local')->delete('trm_last_successful.json');
+                $deleted++;
+                Log::info("Último valor TRM exitoso eliminado del caché.");
             }
 
             Log::info("TRM Cache cleared. {$deleted} files deleted.");
@@ -281,6 +388,7 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
     {
         return [
             'current_trm' => $this->getTrm(),
+            'last_successful_trm' => $this->getLastSuccessfulTrm(),
             'cache_files' => $this->getCacheFiles(),
             'service_status' => $this->testTrmService(),
             'normalizer_config' => $this->normalizer->getConfig(),

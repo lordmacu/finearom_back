@@ -39,14 +39,20 @@ class CarteraQuery
      */
     public function summary(Carbon $from, Carbon $to, array $filters): array
     {
-        $projectedFromPartials = $this->projectedFromPartials($from, $to, $filters);
-        $currentDebt = $this->currentDebt($filters);
-        $overdueDebt = $this->overdueDebt($filters);
+        $snapshotDate = $this->latestSnapshotDate($filters['catera_type'] ?? null);
+        // Proyección: usamos la foto de cartera (por vencer y vencidos) en el snapshot más reciente,
+        // no acumulamos parciales históricos.
+        $projectedFromPartials = $this->snapshotProjectedCollectable($snapshotDate, $filters);
+        $currentDebt = $this->snapshotDebtTotal($snapshotDate, $filters, false);
+        $overdueDebt = $this->snapshotDebtTotal($snapshotDate, $filters, true);
+        $totalCollected = $this->collectedInRange($from, $to, $filters, $snapshotDate);
 
         return [
+            'snapshot_date' => $snapshotDate,
             'projected_from_partials' => round($projectedFromPartials, 2),
             'current_debt' => round($currentDebt, 2),
             'overdue_debt' => round($overdueDebt, 2),
+            'total_collected' => round($totalCollected, 2),
             'projection_vs_debt_diff' => round($projectedFromPartials - $currentDebt, 2),
         ];
     }
@@ -62,28 +68,25 @@ class CarteraQuery
         $snapshotDate = $this->latestSnapshotDate($filters['catera_type'] ?? null);
         $today = Carbon::now('America/Bogota')->toDateString();
 
-        $query = DB::table('recaudos as r')
-            ->leftJoin('cartera as car', function ($join) use ($snapshotDate) {
+        $query = DB::table('cartera as car')
+            ->leftJoin('clients as c', 'car.nit', '=', 'c.nit')
+            ->leftJoin('recaudos as r', function ($join) use ($from, $to) {
                 $join->on('r.numero_factura', '=', 'car.documento')
-                    ->where('car.fecha_cartera', '=', $snapshotDate);
+                    ->whereBetween('r.fecha_recaudo', [$from->toDateString(), $to->toDateString()]);
             })
-            ->leftJoin('clients as c', 'r.nit', '=', 'c.nit')
-            ->whereBetween('r.fecha_recaudo', [$from->toDateString(), $to->toDateString()])
+            ->where('car.fecha_cartera', '=', $snapshotDate)
             ->select(
                 'c.id as client_id',
                 'c.client_name',
-                'r.nit',
-                'r.numero_factura',
-                'r.fecha_recaudo',
-                'r.valor_cancelado',
-                'r.fecha_vencimiento',
+                'car.nit',
+                'car.documento as numero_factura',
+                'car.vence as fecha_vencimiento',
+                'car.catera_type',
+                'car.fecha_cartera'
             )
-            ->selectRaw('MAX(car.catera_type) as catera_type')
-            ->selectRaw('SUM(CASE WHEN car.documento IS NOT NULL THEN r.valor_cancelado ELSE 0 END) AS current_debt')
-            ->selectRaw(
-                'SUM(CASE WHEN car.documento IS NOT NULL AND r.fecha_vencimiento < ? THEN r.valor_cancelado ELSE 0 END) AS overdue_amount',
-                [$today]
-            );
+            ->selectRaw('MAX(r.fecha_recaudo) as fecha_recaudo')
+            ->selectRaw('SUM(r.valor_cancelado) as collected_amount')
+            ->selectRaw("CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2)) as snapshot_debt");
 
         if (! empty($filters['client_id'])) {
             $query->where('c.id', (int) $filters['client_id']);
@@ -99,8 +102,6 @@ class CarteraQuery
 
         if (! empty($filters['catera_type'])) {
             $type = (string) $filters['catera_type'];
-            $query->whereNotNull('car.documento');
-
             if ($type === 'internacional') {
                 $query->where('car.catera_type', '=', 'internacional');
             } else {
@@ -114,50 +115,46 @@ class CarteraQuery
             ->groupBy(
                 'c.id',
                 'c.client_name',
-                'r.nit',
-                'r.numero_factura',
-                'r.fecha_recaudo',
-                'r.valor_cancelado',
-                'r.fecha_vencimiento',
-            )
-            ->orderBy('c.client_name')
-            ->orderBy('r.numero_factura')
-            ->get();
-
-        $mapped = $this->mapClientRows($rows, $today);
-        if ($mapped->isNotEmpty()) {
-            return $mapped->values()->toArray();
-        }
-
-        // Fallback: si no hay recaudos en el período seleccionado, mostrar la foto de cartera (snapshotDate).
-        $carteraRows = DB::table('cartera as car')
-            ->leftJoin('clients as c', 'car.nit', '=', 'c.nit')
-            ->where('car.fecha_cartera', '=', $snapshotDate)
-            ->select(
-                'c.id as client_id',
-                'c.client_name',
                 'car.nit',
-                'car.documento as numero_factura',
-                DB::raw('NULL as fecha_recaudo'),
-                DB::raw('car.saldo_contable as valor_cancelado'),
-                'car.vence as fecha_vencimiento',
+                'car.documento',
+                'car.vence',
                 'car.catera_type',
-                'car.saldo_contable as current_debt',
-                DB::raw('car.saldo_contable as overdue_amount')
+                'car.fecha_cartera',
+                'car.saldo_contable',
             )
             ->orderBy('c.client_name')
             ->orderBy('car.documento')
             ->get();
 
-        // Ajustar overdue usando fecha de vencimiento comparada con hoy.
-        $carteraRows = $carteraRows->map(function ($row) use ($today) {
-            $row->overdue_amount = ($row->fecha_vencimiento && $row->fecha_vencimiento < $today)
-                ? $row->current_debt
-                : 0;
-            return $row;
-        });
+        return $rows->map(function ($row) use ($today) {
+            $currentDebt = round($this->parseNumber($row->snapshot_debt), 2);
+            $collected = round((float) ($row->collected_amount ?? 0), 2);
 
-        return $this->mapClientRows($carteraRows, $today)->values()->toArray();
+            $overdue = ($row->fecha_vencimiento && $row->fecha_vencimiento < $today)
+                ? $currentDebt
+                : 0;
+
+            $estadoPagado = 'PAGADO';
+            if ($currentDebt > 0) {
+                $estadoPagado = $overdue > 0 ? 'EN MORA' : 'PENDIENTE';
+            }
+
+            return [
+                'client_id' => (int) ($row->client_id ?? 0),
+                'client_name' => $row->client_name ?? 'Cliente sin nombre',
+                'nit' => $row->nit,
+                'numero_factura' => $row->numero_factura,
+                'fecha_cartera' => $row->fecha_cartera ? Carbon::parse($row->fecha_cartera)->toDateString() : null,
+                'fecha_recaudo' => $row->fecha_recaudo ? Carbon::parse($row->fecha_recaudo)->toDateString() : null,
+                'fecha_vencimiento' => $row->fecha_vencimiento ? Carbon::parse($row->fecha_vencimiento)->toDateString() : null,
+                'valor_cancelado' => $collected,
+                'collected_amount' => $collected,
+                'current_debt' => $currentDebt,
+                'overdue_amount' => round((float) $overdue, 2),
+                'estado_pagado' => $estadoPagado,
+                'catera_type' => $row->catera_type ?: 'nacional',
+            ];
+        })->values()->toArray();
     }
 
     /**
@@ -246,19 +243,21 @@ class CarteraQuery
         })->toArray();
     }
 
-    /**
-     * @param array{executive_email?:string,client_id?:int,catera_type?:string} $filters
-     */
-    private function currentDebt(array $filters): float
+    private function snapshotDebtTotal(string $snapshotDate, array $filters, bool $overdueOnly = false): float
     {
-        $snapshotDate = $this->latestSnapshotDate($filters['catera_type'] ?? null);
+        $query = DB::table('cartera as car')
+            ->leftJoin('clients as c', 'car.nit', '=', 'c.nit')
+            ->where('car.fecha_cartera', '=', $snapshotDate);
 
-        $query = DB::table('recaudos as r')
-            ->join('cartera as car', function ($join) use ($snapshotDate) {
-                $join->on('r.numero_factura', '=', 'car.documento')
-                    ->where('car.fecha_cartera', '=', $snapshotDate);
-            })
-            ->leftJoin('clients as c', 'r.nit', '=', 'c.nit');
+        if ($overdueOnly) {
+            $today = Carbon::now('America/Bogota')->toDateString();
+            $query->where(function ($q) use ($today) {
+                $q->where('car.vence', '<', $today)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('car.dias')->where('car.dias', '<', 0);
+                    });
+            });
+        }
 
         if (! empty($filters['client_id'])) {
             $query->where('c.id', (int) $filters['client_id']);
@@ -283,24 +282,61 @@ class CarteraQuery
             }
         }
 
-        return (float) $query->sum('r.valor_cancelado');
+        return (float) $query->sum(DB::raw("CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2))"));
+    }
+
+    /**
+     * Proyección basada en snapshot: suma de saldo_contable por vencer (días >= 0).
+     *
+     * @param array{executive_email?:string,client_id?:int,catera_type?:string} $filters
+     */
+    private function snapshotProjectedCollectable(string $snapshotDate, array $filters): float
+    {
+        $query = DB::table('cartera as car')
+            ->leftJoin('clients as c', 'car.nit', '=', 'c.nit')
+            ->where('car.fecha_cartera', '=', $snapshotDate)
+            ->where(function ($q) {
+                $q->whereNull('car.dias')->orWhere('car.dias', '>=', 0);
+            });
+
+        if (! empty($filters['client_id'])) {
+            $query->where('c.id', (int) $filters['client_id']);
+        }
+
+        if (! empty($filters['executive_email'])) {
+            $email = strtolower(trim($filters['executive_email']));
+            $query->where(function ($q) use ($email) {
+                $q->whereRaw('FIND_IN_SET(?, REPLACE(LOWER(c.executive_email), " ", "")) > 0', [$email])
+                    ->orWhereRaw('JSON_SEARCH(c.executive_email, "one", ?) IS NOT NULL', [$email]);
+            });
+        }
+
+        if (! empty($filters['catera_type'])) {
+            $type = (string) $filters['catera_type'];
+            if ($type === 'internacional') {
+                $query->where('car.catera_type', '=', 'internacional');
+            } else {
+                $query->where(function ($q) {
+                    $q->whereNull('car.catera_type')->orWhere('car.catera_type', '=', 'nacional');
+                });
+            }
+        }
+
+        return (float) $query->sum(DB::raw("CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2))"));
     }
 
     /**
      * @param array{executive_email?:string,client_id?:int,catera_type?:string} $filters
      */
-    private function overdueDebt(array $filters): float
+    private function collectedInRange(Carbon $from, Carbon $to, array $filters, string $snapshotDate): float
     {
-        $snapshotDate = $this->latestSnapshotDate($filters['catera_type'] ?? null);
-        $today = Carbon::now('America/Bogota')->toDateString();
-
         $query = DB::table('recaudos as r')
             ->join('cartera as car', function ($join) use ($snapshotDate) {
                 $join->on('r.numero_factura', '=', 'car.documento')
                     ->where('car.fecha_cartera', '=', $snapshotDate);
             })
-            ->leftJoin('clients as c', 'r.nit', '=', 'c.nit')
-            ->where('r.fecha_vencimiento', '<', $today);
+            ->leftJoin('clients as c', 'car.nit', '=', 'c.nit')
+            ->whereBetween('r.fecha_recaudo', [$from->toDateString(), $to->toDateString()]);
 
         if (! empty($filters['client_id'])) {
             $query->where('c.id', (int) $filters['client_id']);
@@ -362,7 +398,7 @@ class CarteraQuery
         return (float) ($row->total_projected ?? 0);
     }
 
-    private function latestSnapshotDate(?string $cateraType): string
+    public function latestSnapshotDate(?string $cateraType): string
     {
         $query = DB::table('cartera');
 

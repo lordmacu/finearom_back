@@ -50,14 +50,17 @@ Calcula las m\u00e9tricas principales (proyecci\u00f3n desde parciales, deuda ac
 {
   "success": true,
   "data": {
+    "snapshot_date": "2025-12-18",
     "projected_from_partials": 123456.78,
+    "total_collected": 54321.00,
     "current_debt": 98765.43,
     "overdue_debt": 1000.00,
     "projection_vs_debt_diff": 24691.35
   },
   "meta": {
     "from": "2025-12-01",
-    "to": "2025-12-31"
+    "to": "2025-12-31",
+    "snapshot_date": "2025-12-18"
   }
 }
 ```
@@ -76,13 +79,15 @@ Devuelve el listado de facturas con c\u00e1lculos de deuda y mora para el period
   "success": true,
   "data": [
     {
+      "fecha_cartera": "2025-12-18",
       "client_id": 10,
       "client_name": "Cliente Ejemplo",
       "nit": "900000000",
       "numero_factura": "FV-123",
       "fecha_recaudo": "2025-12-05",
       "fecha_vencimiento": "2025-12-20",
-      "valor_cancelado": 5000000,
+      "valor_cancelado": 500000,
+      "collected_amount": 500000,
       "current_debt": 5000000,
       "overdue_amount": 0,
       "estado_pagado": "PENDIENTE",
@@ -92,7 +97,8 @@ Devuelve el listado de facturas con c\u00e1lculos de deuda y mora para el period
   "meta": {
     "from": "2025-12-01",
     "to": "2025-12-31",
-    "total": 1
+    "total": 1,
+    "snapshot_date": "2025-12-18"
   }
 }
 ```

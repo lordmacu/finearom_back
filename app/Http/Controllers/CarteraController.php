@@ -48,6 +48,7 @@ class CarteraController extends Controller
             'meta' => [
                 'from' => $from->toDateString(),
                 'to' => $to->toDateString(),
+                'snapshot_date' => $data['snapshot_date'] ?? null,
             ],
         ]);
     }
@@ -56,6 +57,7 @@ class CarteraController extends Controller
     {
         [$from, $to] = $this->carteraPeriod->resolve($request->validated());
         $filters = $this->carteraQuery->filtersFromParams($request->validated());
+        $snapshotDate = $this->carteraQuery->latestSnapshotDate($filters['catera_type'] ?? null);
 
         $rows = $this->carteraQuery->clients($from, $to, $filters);
 
@@ -66,6 +68,7 @@ class CarteraController extends Controller
                 'from' => $from->toDateString(),
                 'to' => $to->toDateString(),
                 'total' => count($rows),
+                'snapshot_date' => $snapshotDate,
             ],
         ]);
     }

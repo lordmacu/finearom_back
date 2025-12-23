@@ -132,7 +132,7 @@ class GenerateOrderStatistics extends Command
     private function calculateAllStatistics(Carbon $from, Carbon $to): array
     {
         $now = Carbon::now();
-        
+
         $stats = [
             'date' => $from->format('Y-m-d'),
             'hour' => 23, // End of day
@@ -159,23 +159,37 @@ class GenerateOrderStatistics extends Command
         $pendingStats = $this->calculatePendingDispatchStats($dispatchStats, $plannedStats);
         $stats = array_merge($stats, $pendingStats);
 
-        // 5. Completion Statistics
-        $this->line('   Calculating completion stats...');
-        $completionStats = $this->calculateCompletionStats($from, $to);
-        $stats = array_merge($stats, $completionStats);
-
-        // 6. Financial and TRM Statistics
+        // 5. Financial Statistics (only average_trm is used in dashboard)
         $this->line('   Calculating financial stats...');
         $financialStats = $this->calculateFinancialStats($from, $to);
-        $stats = array_merge($stats, $financialStats);
+        // Only keep average_trm, set unused fields to 0
+        $stats['average_trm'] = $financialStats['average_trm'];
+        $stats['partials_with_default_trm'] = 0;  // Not used in dashboard
+        $stats['partials_with_custom_trm'] = 0;   // Not used in dashboard
 
-        // 7. Client Statistics
-        $this->line('   Calculating client stats...');
-        $clientStats = $this->calculateClientStats($from, $to);
-        $stats = array_merge($stats, $clientStats);
+        // 6. Completion/Client stats (not used in dashboard) - set to 0 by default
+        $unusedStats = [
+            'orders_fully_dispatched' => 0,
+            'orders_partially_dispatched' => 0,
+            'orders_not_dispatched' => 0,
+            'avg_days_order_to_first_dispatch' => 0,
+            'dispatch_completion_percentage' => 0,
+            'unique_clients_with_orders' => 0,
+            'unique_clients_with_dispatches' => 0,
+            'unique_clients_with_planned_dispatches' => 0,
+        ];
+        $stats = array_merge($stats, $unusedStats);
+
+        // 7. Extended stats snapshot (compute KPIs to avoid frontend recalculation)
+        // Encode to JSON because we insert via query builder
+        $stats['extended_stats'] = json_encode(
+            $this->buildExtendedStatsSnapshot($from, $to, $orderStats, $dispatchStats, $plannedStats)
+        );
 
         return $stats;
     }
+
+
 
     /**
      * Calculate order creation statistics for orders created on this specific day
@@ -268,8 +282,6 @@ class GenerateOrderStatistics extends Command
         $total_value_cop = 0.0;
         $commercial_products_dispatched = 0;
         $sample_products_dispatched = 0;
-        $commercial_partials_real = 0;
-        $sample_partials_real = 0;
 
         foreach ($orders as $order) {
             $dispatched_any_for_order = false;
@@ -307,15 +319,13 @@ class GenerateOrderStatistics extends Command
                 $total_value_usd += $price_usd * (float) $partial->quantity;
                 $total_value_cop += $amount_cop;
 
-                // Count products and partials by type
+                // Count products by type
                 $isSample = isset($partial->muestra) && (int) $partial->muestra === 1;
-                
+
                 if ($isSample) {
                     $sample_products_dispatched += (int) $partial->quantity;
-                    $sample_partials_real++;
                 } else {
                     $commercial_products_dispatched += (int) $partial->quantity;
-                    $commercial_partials_real++;
                 }
 
                 $dispatched_any_for_order = true;
@@ -332,10 +342,11 @@ class GenerateOrderStatistics extends Command
             'commercial_dispatched_value_cop' => $total_value_cop,
             'commercial_products_dispatched' => $commercial_products_dispatched,
             'sample_products_dispatched' => $sample_products_dispatched,
-            'commercial_partials_real' => $commercial_partials_real,
-            'commercial_partials_temporal' => 0, // Only counting 'real' type
-            'sample_partials_real' => $sample_partials_real,
-            'sample_partials_temporal' => 0, // Only counting 'real' type
+            // Unused fields set to 0 (not displayed in dashboard)
+            'commercial_partials_real' => 0,
+            'commercial_partials_temporal' => 0,
+            'sample_partials_real' => 0,
+            'sample_partials_temporal' => 0,
         ];
     }
 
@@ -457,9 +468,22 @@ class GenerateOrderStatistics extends Command
 
     /**
      * Calculate completion statistics
+     * NOT USED - All fields set to 0 in main calculation
+     * Kept for reference only
+     *
+     * @param Carbon $from - Not used in current implementation
+     * @param Carbon $to - Not used in current implementation
+     * @return array
      */
     private function calculateCompletionStats(Carbon $from, Carbon $to): array
     {
+        // This method is no longer called as these metrics are not displayed in the dashboard
+        // Suppress unused parameter warnings - parameters kept for method signature consistency
+        unset($from, $to);
+
+        // If needed in the future, uncomment the code below:
+
+        /*
         // Get all orders with their partials dispatched up to the end of the day
         $orders = PurchaseOrder::with(['products', 'partials' => function ($query) use ($to) {
             $query->where('type', 'real')
@@ -538,10 +562,22 @@ class GenerateOrderStatistics extends Command
             'avg_days_order_to_first_dispatch' => $ordersWithDispatch > 0 ? round($totalDaysToFirstDispatch / $ordersWithDispatch, 2) : 0,
             'dispatch_completion_percentage' => $dispatchCompletionPercentage,
         ];
+        */
+
+        return [
+            'orders_fully_dispatched' => 0,
+            'orders_partially_dispatched' => 0,
+            'orders_not_dispatched' => 0,
+            'pending_dispatch_value_usd' => 0,
+            'pending_dispatch_value_cop' => 0,
+            'avg_days_order_to_first_dispatch' => 0,
+            'dispatch_completion_percentage' => 0,
+        ];
     }
 
     /**
      * Calculate financial and TRM statistics
+     * Only average_trm is used in dashboard, other fields set to 0
      */
     private function calculateFinancialStats(Carbon $from, Carbon $to): array
     {
@@ -558,8 +594,6 @@ class GenerateOrderStatistics extends Command
             $q->where('type', 'real')->whereBetween('dispatch_date', [$from, $to]);
         })->get()->fresh();
 
-        $defaultTrmCount = 0;
-        $customTrmCount = 0;
         $trmSum = 0;
         $totalPartials = 0;
 
@@ -581,13 +615,6 @@ class GenerateOrderStatistics extends Command
                         $trm = 4000;
                     }
                 }
-                $is_default_trm = $trm_data['is_default'];
-
-                if ($is_default_trm) {
-                    $defaultTrmCount++;
-                } else {
-                    $customTrmCount++;
-                }
 
                 $trmSum += $trm;
                 $totalPartials++;
@@ -598,16 +625,27 @@ class GenerateOrderStatistics extends Command
 
         return [
             'average_trm' => $averageTrm,
-            'partials_with_default_trm' => $defaultTrmCount,
-            'partials_with_custom_trm' => $customTrmCount,
         ];
     }
 
     /**
      * Calculate client statistics
+     * NOT USED - All fields set to 0 in main calculation
+     * Kept for reference only
+     *
+     * @param Carbon $from - Not used in current implementation
+     * @param Carbon $to - Not used in current implementation
+     * @return array
      */
     private function calculateClientStats(Carbon $from, Carbon $to): array
     {
+        // This method is no longer called as these metrics are not displayed in the dashboard
+        // Suppress unused parameter warnings - parameters kept for method signature consistency
+        unset($from, $to);
+
+        // If needed in the future, uncomment the code below:
+
+        /*
         // Unique clients with orders created on this day
         $clientsWithOrders = PurchaseOrder::whereBetween('order_creation_date', [$from, $to])
             ->distinct('client_id')
@@ -631,6 +669,263 @@ class GenerateOrderStatistics extends Command
             'unique_clients_with_orders' => $clientsWithOrders,
             'unique_clients_with_dispatches' => $clientsWithDispatches,
             'unique_clients_with_planned_dispatches' => $clientsWithPlannedDispatches,
+        ];
+        */
+
+        return [
+            'unique_clients_with_orders' => 0,
+            'unique_clients_with_dispatches' => 0,
+            'unique_clients_with_planned_dispatches' => 0,
+        ];
+    }
+
+    /**
+     * Build an extended stats payload to be expanded with detailed KPIs without recomputing on frontend.
+     */
+    private function buildExtendedStatsSnapshot(
+        Carbon $from,
+        Carbon $to,
+        array $orderStats,
+        array $dispatchStats,
+        array $plannedStats
+    ): array
+    {
+        // Orders with products and partials (real) in the day
+        $orders = PurchaseOrder::with([
+            'products',
+            'partials' => function ($q) use ($from, $to) {
+                $q->where('type', 'real')
+                    ->whereBetween('dispatch_date', [$from, $to])
+                    ->join('purchase_order_product', 'partials.product_order_id', '=', 'purchase_order_product.id')
+                    ->select('partials.*', 'purchase_order_product.muestra as muestra', 'purchase_order_product.price as pivot_price');
+            }
+        ])->whereHas('partials', function ($q) use ($from, $to) {
+            $q->where('type', 'real')->whereBetween('dispatch_date', [$from, $to]);
+        })->get()->fresh();
+
+        // Lead time and on-time
+        $leadTimes = [];
+        $onTimeCount = 0;
+        foreach ($orders as $order) {
+            $firstDispatch = $order->partials->sortBy('dispatch_date')->first();
+            if ($firstDispatch && $order->order_creation_date) {
+                $days = Carbon::parse($order->order_creation_date)->diffInDays(Carbon::parse($firstDispatch->dispatch_date));
+                $leadTimes[] = $days;
+                if ($order->required_delivery_date && Carbon::parse($firstDispatch->dispatch_date)->lte(Carbon::parse($order->required_delivery_date))) {
+                    $onTimeCount++;
+                }
+            }
+        }
+        $leadTimeAvg = count($leadTimes) > 0 ? round(array_sum($leadTimes) / count($leadTimes), 2) : null;
+        $onTimePct = count($leadTimes) > 0 ? round(($onTimeCount / count($leadTimes)) * 100, 2) : null;
+
+        // Fill rate (qty/value) using partials of the day vs ordered
+        $totalOrderedQty = 0;
+        $totalDispatchedQty = 0;
+        $totalOrderedValue = 0.0;
+        $totalDispatchedValue = 0.0;
+
+        foreach ($orders as $order) {
+            foreach ($order->products as $product) {
+                $orderedQty = $product->pivot->quantity ?? 0;
+                $priceUsd = $product->pivot->price ?? $product->price ?? 0;
+                $isSample = $product->pivot->muestra == 1;
+
+                $totalOrderedQty += $orderedQty;
+                if (!$isSample) {
+                    $totalOrderedValue += $orderedQty * $priceUsd;
+                }
+            }
+
+            foreach ($order->partials as $partial) {
+                // skip if out of range or not real (already filtered)
+                $qty = (int) $partial->quantity;
+                $isSample = isset($partial->muestra) && (int) $partial->muestra === 1;
+                $priceUsd = $isSample ? 0.0 : (float) ($partial->pivot_price ?? $partial->pivot_price ?? 0);
+
+                $totalDispatchedQty += $qty;
+                $totalDispatchedValue += $qty * $priceUsd;
+            }
+        }
+
+        $fillRateQty = $totalOrderedQty > 0 ? round(($totalDispatchedQty / $totalOrderedQty) * 100, 2) : null;
+        $fillRateValue = $totalOrderedValue > 0 ? round(($totalDispatchedValue / $totalOrderedValue) * 100, 2) : null;
+
+        // Samples vs commercial
+        $ordersWithSamples = $orders->filter(function ($order) {
+            return $order->products->contains(function ($p) {
+                return (int) ($p->pivot->muestra ?? 0) === 1;
+            });
+        })->count();
+        $commercialOrders = $orders->filter(function ($order) {
+            return $order->products->every(function ($p) {
+                return (int) ($p->pivot->muestra ?? 0) === 0;
+            });
+        })->count();
+        $sampleProductsDispatched = $orders->flatMap->partials->filter(function ($partial) {
+            return isset($partial->muestra) && (int) $partial->muestra === 1;
+        })->sum('quantity');
+
+        // Logistics: partials per order (of the day)
+        $partialsPerOrder = $orders->map->partials->map->count();
+        $avgPartialsPerOrder = $partialsPerOrder->count() > 0 ? round($partialsPerOrder->avg(), 2) : null;
+        $ordersGt2Partials = $partialsPerOrder->filter(fn ($c) => $c > 2)->count();
+        // Avg days between partials (per order, then average)
+        $daysBetweenAll = [];
+        foreach ($orders as $order) {
+            $dates = $order->partials->pluck('dispatch_date')->sort()->values();
+            for ($i = 1; $i < $dates->count(); $i++) {
+                $daysBetweenAll[] = Carbon::parse($dates[$i - 1])->diffInDays(Carbon::parse($dates[$i]));
+            }
+        }
+        $avgDaysBetweenPartials = count($daysBetweenAll) > 0 ? round(array_sum($daysBetweenAll) / count($daysBetweenAll), 2) : null;
+
+        // New accounts
+        $newAccountsCount = PurchaseOrder::select('client_id')
+            ->selectRaw('MIN(order_creation_date) as first_date')
+            ->groupBy('client_id')
+            ->having('first_date', '=', $from->toDateString())
+            ->get()
+            ->count();
+        $winRatePct = ($orderStats['total_orders_created'] ?? 0) > 0
+            ? round((($orderStats['orders_new_win'] ?? 0) / $orderStats['total_orders_created']) * 100, 2)
+            : null;
+
+        // Billing projection: reuse planned values of the day
+        $billingProjectionUsd = $plannedStats['planned_dispatch_value_usd'] ?? null;
+        $billingProjectionCop = $plannedStats['planned_dispatch_value_cop'] ?? null;
+
+        // Helpers to hydrate related, aggregated arrays so they are not empty
+        $dayTrm = $this->getDayAverageTrm($from, $to);
+
+        // Dispatch value per client (usd/cop) for the day
+        $dispatchByClient = DB::table('partials')
+            ->join('purchase_orders', 'partials.order_id', '=', 'purchase_orders.id')
+            ->join('purchase_order_product', 'partials.product_order_id', '=', 'purchase_order_product.id')
+            ->where('partials.type', 'real')
+            ->whereBetween('partials.dispatch_date', [$from, $to])
+            ->groupBy('purchase_orders.client_id')
+            ->selectRaw('purchase_orders.client_id, SUM(partials.quantity * purchase_order_product.price) as value_usd')
+            ->get();
+
+        $clientNits = DB::table('clients')
+            ->whereIn('id', $dispatchByClient->pluck('client_id'))
+            ->pluck('nit', 'id')
+            // Normalise NITs so lookups against cartera/recaudos always match
+            ->mapWithKeys(function ($nit, $id) {
+                $cleanNit = preg_replace('/\D/', '', (string) $nit);
+                return [$id => $cleanNit];
+            });
+
+        // Cartera: obtener el saldo total más reciente por NIT
+        // Suma todos los documentos (facturas) del NIT en la fecha_cartera más reciente
+        $carteraByNit = DB::table('cartera as c1')
+            ->whereIn('c1.nit', $clientNits->values()->filter()->unique())
+            ->whereRaw('c1.fecha_cartera = (
+                SELECT MAX(c2.fecha_cartera)
+                FROM cartera c2
+                WHERE c2.nit = c1.nit
+            )')
+            ->groupBy('c1.nit')
+            ->selectRaw("c1.nit, SUM(CAST(REPLACE(REPLACE(c1.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2))) as saldo")
+            ->pluck('saldo', 'nit');
+
+        $carteraVsDespachos = $dispatchByClient->map(function ($row) use ($clientNits, $carteraByNit, $dayTrm) {
+            $nit = $clientNits[$row->client_id] ?? null;
+            $saldo = $nit ? (float) ($carteraByNit[$nit] ?? 0) : 0;
+            return [
+                'client_id' => $row->client_id,
+                'nit' => $nit,
+                'dispatch_value_cop' => round(((float) $row->value_usd) * $dayTrm, 2),
+                'cartera_saldo' => round($saldo, 2),
+            ];
+        })->values()->all();
+
+        // Completion per executive (using client executive field)
+        $execStats = PurchaseOrder::with('client')
+            ->whereBetween('order_creation_date', [$from, $to])
+            ->get()
+            ->groupBy(fn ($order) => $order->client->executive ?? 'Sin ejecutivo')
+            ->map(function ($orders, $executive) {
+                $total = $orders->count();
+                $completed = $orders->where('status', 'completed')->count();
+                $partial = $orders->where('status', 'parcial_status')->count();
+                $pending = $orders->whereIn('status', ['pending', 'processing'])->count();
+                $completionPct = $total > 0 ? round(($completed / $total) * 100, 2) : null;
+                return [
+                    'executive' => $executive,
+                    'total_orders' => $total,
+                    'completed' => $completed,
+                    'partial' => $partial,
+                    'pending' => $pending,
+                    'completion_pct' => $completionPct,
+                ];
+            })
+            ->values()
+            ->all();
+
+        // Obtener nombres de clientes desde la tabla clients
+        $clientNames = DB::table('clients')
+            ->whereIn('id', $dispatchByClient->pluck('client_id'))
+            ->pluck('client_name', 'id');
+
+        // Recaudos vs dispatch per client (day range)
+        $recaudosByClient = DB::table('recaudos')
+            ->whereBetween('fecha_recaudo', [$from, $to])
+            ->groupBy('nit', 'cliente')
+            ->selectRaw('nit, cliente, SUM(valor_cancelado) as valor')
+            ->get()
+            ->keyBy(function ($row) {
+                return preg_replace('/\D/', '', (string) $row->nit);
+            });
+
+        $recaudosVsDispatch = $dispatchByClient->map(function ($row) use ($clientNits, $recaudosByClient, $clientNames, $dayTrm) {
+            $nit = $clientNits[$row->client_id] ?? null;
+            $recaudoRow = $nit ? ($recaudosByClient[$nit] ?? null) : null;
+
+            // Prioridad: nombre de recaudos, si no existe usar nombre de clients
+            $clienteName = $recaudoRow->cliente ?? ($clientNames[$row->client_id] ?? null);
+
+            return [
+                'client_id' => $row->client_id,
+                'nit' => $nit,
+                'cliente' => $clienteName,
+                'dispatch_value_cop' => round(((float) $row->value_usd) * $dayTrm, 2),
+                'recaudo_cop' => $recaudoRow ? (float) $recaudoRow->valor : 0,
+            ];
+        })->values()->all();
+
+        return [
+            'lead_time' => [
+                'avg_days' => $leadTimeAvg,
+                'on_time_orders_pct' => $onTimePct,
+            ],
+            'fill_rate' => [
+                'qty_pct' => $fillRateQty,
+                'value_pct' => $fillRateValue,
+            ],
+            'samples_vs_commercial' => [
+                'orders_with_samples' => $ordersWithSamples,
+                'sample_products_dispatched' => (int) $sampleProductsDispatched,
+                'commercial_orders' => $commercialOrders,
+            ],
+            'cartera_vs_despachos' => $carteraVsDespachos,
+            'executive_completion' => $execStats,
+            'new_accounts' => [
+                'count' => $newAccountsCount,
+                'win_rate_pct' => $winRatePct,
+            ],
+            'recaudos_vs_dispatch' => $recaudosVsDispatch,
+            'billing_projection' => [
+                'usd' => $billingProjectionUsd,
+                'cop' => $billingProjectionCop,
+            ],
+            'alerts' => [], // early alerts: orders without partials, low TRM, etc.
+            'logistics' => [
+                'avg_partials_per_order' => $avgPartialsPerOrder,
+                'orders_gt2_partials' => $ordersGt2Partials,
+                'avg_days_between_partials' => $avgDaysBetweenPartials,
+            ],
         ];
     }
 

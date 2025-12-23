@@ -219,6 +219,9 @@ class DashboardController extends Controller
             // Note: In legacy this method was private inside controller, creating it here too.
             $additionalMetrics = $this->calculateAdditionalMetrics($dailyStats);
 
+            // Decodificar y agregar extended_stats de todos los días
+            $extendedStatsAggregated = $this->aggregateExtendedStats($dailyStats);
+
             $dashboardData = [
                 'period' => [
                     'start_date' => $startDate,
@@ -292,6 +295,9 @@ class DashboardController extends Controller
                     'planned_value_usd' => $additionalMetrics['planned_dispatch_value_usd'],
                     'planned_value_cop' => $additionalMetrics['planned_dispatch_value_cop'],
                 ],
+
+                // ✨ NUEVO: Extended Stats (KPIs avanzados)
+                'extended_stats' => $extendedStatsAggregated,
 
                 // Para debug/análisis avanzado (opcional)
                 'stats' => $dailyStats, // Datos día por día para gráficos futuros
@@ -422,6 +428,316 @@ class DashboardController extends Controller
             : 4000;
 
         return $totals;
+    }
+
+    /**
+     * Agrega y decodifica los extended_stats de todos los días del período
+     * Acumula datos de múltiples días para mostrar estadísticas del rango completo
+     *
+     * @param \Illuminate\Support\Collection $dailyStats
+     * @return array
+     */
+    private function aggregateExtendedStats($dailyStats): array
+    {
+        if ($dailyStats->isEmpty()) {
+            return $this->getEmptyExtendedStats();
+        }
+
+        // Decodificar todos los extended_stats del período
+        $allStats = [];
+        foreach ($dailyStats as $dayStat) {
+            if (!empty($dayStat->extended_stats)) {
+                $decoded = json_decode($dayStat->extended_stats, true);
+                if ($decoded) {
+                    $allStats[] = $decoded;
+                }
+            }
+        }
+
+        if (empty($allStats)) {
+            return $this->getEmptyExtendedStats();
+        }
+
+        // Agregar datos de todos los días
+        $aggregated = [
+            'lead_time' => $this->aggregateLeadTime($allStats),
+            'fill_rate' => $this->aggregateFillRate($allStats),
+            'samples_vs_commercial' => $this->aggregateSamplesVsCommercial($allStats),
+            'cartera_vs_despachos' => $this->aggregateCarteraVsDespachos($allStats),
+            'executive_completion' => $this->aggregateExecutiveCompletion($allStats),
+            'new_accounts' => $this->aggregateNewAccounts($allStats),
+            'recaudos_vs_dispatch' => $this->aggregateRecaudosVsDispatch($allStats),
+            'billing_projection' => $this->aggregateBillingProjection($allStats),
+            'alerts' => [],
+            'logistics' => $this->aggregateLogistics($allStats),
+        ];
+
+        return $aggregated;
+    }
+
+    /**
+     * Agregar Lead Time de múltiples días
+     */
+    private function aggregateLeadTime(array $allStats): array
+    {
+        $avgDays = [];
+        $onTimePcts = [];
+
+        foreach ($allStats as $stat) {
+            if (isset($stat['lead_time']['avg_days']) && $stat['lead_time']['avg_days'] !== null) {
+                $avgDays[] = $stat['lead_time']['avg_days'];
+            }
+            if (isset($stat['lead_time']['on_time_orders_pct']) && $stat['lead_time']['on_time_orders_pct'] !== null) {
+                $onTimePcts[] = $stat['lead_time']['on_time_orders_pct'];
+            }
+        }
+
+        return [
+            'avg_days' => !empty($avgDays) ? round(array_sum($avgDays) / count($avgDays), 2) : null,
+            'on_time_orders_pct' => !empty($onTimePcts) ? round(array_sum($onTimePcts) / count($onTimePcts), 2) : null,
+        ];
+    }
+
+    /**
+     * Agregar Fill Rate de múltiples días
+     */
+    private function aggregateFillRate(array $allStats): array
+    {
+        $qtyPcts = [];
+        $valuePcts = [];
+
+        foreach ($allStats as $stat) {
+            if (isset($stat['fill_rate']['qty_pct']) && $stat['fill_rate']['qty_pct'] !== null) {
+                $qtyPcts[] = $stat['fill_rate']['qty_pct'];
+            }
+            if (isset($stat['fill_rate']['value_pct']) && $stat['fill_rate']['value_pct'] !== null) {
+                $valuePcts[] = $stat['fill_rate']['value_pct'];
+            }
+        }
+
+        return [
+            'qty_pct' => !empty($qtyPcts) ? round(array_sum($qtyPcts) / count($qtyPcts), 2) : null,
+            'value_pct' => !empty($valuePcts) ? round(array_sum($valuePcts) / count($valuePcts), 2) : null,
+        ];
+    }
+
+    /**
+     * Agregar Samples vs Commercial de múltiples días
+     */
+    private function aggregateSamplesVsCommercial(array $allStats): array
+    {
+        $totalCommercialOrders = 0;
+        $totalOrdersWithSamples = 0;
+        $totalSampleProductsDispatched = 0;
+
+        foreach ($allStats as $stat) {
+            $totalCommercialOrders += $stat['samples_vs_commercial']['commercial_orders'] ?? 0;
+            $totalOrdersWithSamples += $stat['samples_vs_commercial']['orders_with_samples'] ?? 0;
+            $totalSampleProductsDispatched += $stat['samples_vs_commercial']['sample_products_dispatched'] ?? 0;
+        }
+
+        return [
+            'commercial_orders' => $totalCommercialOrders,
+            'orders_with_samples' => $totalOrdersWithSamples,
+            'sample_products_dispatched' => $totalSampleProductsDispatched,
+        ];
+    }
+
+    /**
+     * Agregar Cartera vs Despachos - Consolidar por NIT
+     */
+    private function aggregateCarteraVsDespachos(array $allStats): array
+    {
+        $byNit = [];
+
+        foreach ($allStats as $stat) {
+            if (empty($stat['cartera_vs_despachos'])) continue;
+
+            foreach ($stat['cartera_vs_despachos'] as $item) {
+                $nit = $item['nit'] ?? 'unknown';
+
+                if (!isset($byNit[$nit])) {
+                    $byNit[$nit] = [
+                        'nit' => $nit,
+                        'client_id' => $item['client_id'] ?? null,
+                        'dispatch_value_cop' => 0,
+                        'cartera_saldo' => $item['cartera_saldo'] ?? 0, // Último valor
+                    ];
+                }
+
+                $byNit[$nit]['dispatch_value_cop'] += $item['dispatch_value_cop'] ?? 0;
+            }
+        }
+
+        // Ordenar por dispatch_value_cop descendente y retornar todos
+        usort($byNit, fn($a, $b) => $b['dispatch_value_cop'] <=> $a['dispatch_value_cop']);
+        return array_values($byNit);
+    }
+
+    /**
+     * Agregar Executive Completion - Consolidar por ejecutivo
+     */
+    private function aggregateExecutiveCompletion(array $allStats): array
+    {
+        $byExecutive = [];
+
+        foreach ($allStats as $stat) {
+            if (empty($stat['executive_completion'])) continue;
+
+            foreach ($stat['executive_completion'] as $exec) {
+                $name = $exec['executive'] ?? 'Sin ejecutivo';
+
+                if (!isset($byExecutive[$name])) {
+                    $byExecutive[$name] = [
+                        'executive' => $name,
+                        'total_orders' => 0,
+                        'completed' => 0,
+                        'partial' => 0,
+                        'pending' => 0,
+                    ];
+                }
+
+                $byExecutive[$name]['total_orders'] += $exec['total_orders'] ?? 0;
+                $byExecutive[$name]['completed'] += $exec['completed'] ?? 0;
+                $byExecutive[$name]['partial'] += $exec['partial'] ?? 0;
+                $byExecutive[$name]['pending'] += $exec['pending'] ?? 0;
+            }
+        }
+
+        // Calcular porcentaje de cumplimiento
+        foreach ($byExecutive as &$exec) {
+            $exec['completion_pct'] = $exec['total_orders'] > 0
+                ? round(($exec['completed'] / $exec['total_orders']) * 100, 2)
+                : null;
+        }
+
+        return array_values($byExecutive);
+    }
+
+    /**
+     * Agregar New Accounts de múltiples días
+     */
+    private function aggregateNewAccounts(array $allStats): array
+    {
+        $totalCount = 0;
+        $winRates = [];
+
+        foreach ($allStats as $stat) {
+            $totalCount += $stat['new_accounts']['count'] ?? 0;
+            if (isset($stat['new_accounts']['win_rate_pct']) && $stat['new_accounts']['win_rate_pct'] !== null) {
+                $winRates[] = $stat['new_accounts']['win_rate_pct'];
+            }
+        }
+
+        return [
+            'count' => $totalCount,
+            'win_rate_pct' => !empty($winRates) ? round(array_sum($winRates) / count($winRates), 2) : null,
+        ];
+    }
+
+    /**
+     * Agregar Recaudos vs Dispatch - Consolidar por NIT
+     */
+    private function aggregateRecaudosVsDispatch(array $allStats): array
+    {
+        $byNit = [];
+
+        foreach ($allStats as $stat) {
+            if (empty($stat['recaudos_vs_dispatch'])) continue;
+
+            foreach ($stat['recaudos_vs_dispatch'] as $item) {
+                $nit = $item['nit'] ?? 'unknown';
+
+                if (!isset($byNit[$nit])) {
+                    $byNit[$nit] = [
+                        'nit' => $nit,
+                        'cliente' => $item['cliente'] ?? null,
+                        'client_id' => $item['client_id'] ?? null,
+                        'dispatch_value_cop' => 0,
+                        'recaudo_cop' => 0,
+                    ];
+                }
+
+                $byNit[$nit]['dispatch_value_cop'] += $item['dispatch_value_cop'] ?? 0;
+                $byNit[$nit]['recaudo_cop'] += $item['recaudo_cop'] ?? 0;
+            }
+        }
+
+        // Ordenar por dispatch_value_cop descendente y retornar todos
+        usort($byNit, fn($a, $b) => $b['dispatch_value_cop'] <=> $a['dispatch_value_cop']);
+        return array_values($byNit);
+    }
+
+    /**
+     * Agregar Billing Projection de múltiples días
+     */
+    private function aggregateBillingProjection(array $allStats): array
+    {
+        $totalUsd = 0;
+        $totalCop = 0;
+
+        foreach ($allStats as $stat) {
+            $totalUsd += $stat['billing_projection']['usd'] ?? 0;
+            $totalCop += $stat['billing_projection']['cop'] ?? 0;
+        }
+
+        return [
+            'usd' => $totalUsd,
+            'cop' => $totalCop,
+        ];
+    }
+
+    /**
+     * Agregar Logistics de múltiples días
+     */
+    private function aggregateLogistics(array $allStats): array
+    {
+        $avgPartialsPerOrder = [];
+        $totalOrdersGt2 = 0;
+        $avgDaysBetween = [];
+
+        foreach ($allStats as $stat) {
+            if (isset($stat['logistics']['avg_partials_per_order']) && $stat['logistics']['avg_partials_per_order'] !== null) {
+                $avgPartialsPerOrder[] = $stat['logistics']['avg_partials_per_order'];
+            }
+            $totalOrdersGt2 += $stat['logistics']['orders_gt2_partials'] ?? 0;
+            if (isset($stat['logistics']['avg_days_between_partials']) && $stat['logistics']['avg_days_between_partials'] !== null) {
+                $avgDaysBetween[] = $stat['logistics']['avg_days_between_partials'];
+            }
+        }
+
+        return [
+            'avg_partials_per_order' => !empty($avgPartialsPerOrder) ? round(array_sum($avgPartialsPerOrder) / count($avgPartialsPerOrder), 2) : null,
+            'orders_gt2_partials' => $totalOrdersGt2,
+            'avg_days_between_partials' => !empty($avgDaysBetween) ? round(array_sum($avgDaysBetween) / count($avgDaysBetween), 2) : null,
+        ];
+    }
+
+    /**
+     * Return empty extended stats structure
+     */
+    private function getEmptyExtendedStats(): array
+    {
+        return [
+            'lead_time' => ['avg_days' => null, 'on_time_orders_pct' => null],
+            'fill_rate' => ['qty_pct' => null, 'value_pct' => null],
+            'samples_vs_commercial' => [
+                'orders_with_samples' => 0,
+                'sample_products_dispatched' => 0,
+                'commercial_orders' => 0,
+            ],
+            'cartera_vs_despachos' => [],
+            'executive_completion' => [],
+            'new_accounts' => ['count' => 0, 'win_rate_pct' => null],
+            'recaudos_vs_dispatch' => [],
+            'billing_projection' => ['usd' => null, 'cop' => null],
+            'alerts' => [],
+            'logistics' => [
+                'avg_partials_per_order' => null,
+                'orders_gt2_partials' => 0,
+                'avg_days_between_partials' => null,
+            ],
+        ];
     }
 
     /**
