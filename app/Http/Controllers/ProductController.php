@@ -407,4 +407,31 @@ class ProductController extends Controller
     {
         Cache::forever('products.last_modified', now()->timestamp);
     }
+
+    /**
+     * Get price history for a product
+     */
+    public function priceHistory(int $productId): JsonResponse
+    {
+        $product = Product::query()->findOrFail($productId);
+
+        $history = $product->priceHistory()
+            ->with('creator:id,name')
+            ->orderBy('effective_date', 'desc')
+            ->get()
+            ->map(function ($record) {
+                return [
+                    'id' => $record->id,
+                    'price' => $record->price,
+                    'effective_date' => $record->effective_date->format('Y-m-d H:i:s'),
+                    'created_by' => $record->creator?->name ?? 'Sistema',
+                    'created_at' => $record->created_at->format('Y-m-d H:i:s'),
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'data' => $history,
+        ]);
+    }
 }
