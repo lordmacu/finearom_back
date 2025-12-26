@@ -26,10 +26,12 @@ use Illuminate\Support\Facades\Cache;
 class PurchaseOrderController extends Controller
 {
     protected $trmService;
+    protected $emailTrackingService;
 
-    public function __construct(TrmService $trmService)
+    public function __construct(TrmService $trmService, \App\Services\EmailTrackingService $emailTrackingService)
     {
         $this->trmService = $trmService;
+        $this->emailTrackingService = $emailTrackingService;
         $this->middleware('can:purchase_order list')->only(['index']);
     }
 
@@ -790,15 +792,23 @@ class PurchaseOrderController extends Controller
             // Invalidar caché de análisis ya que se actualizaron parciales o estado
             $this->clearAnalyzeCache();
 
-            // Send email if there are observations
+            // Send email based on order status
             $cleanObservations = trim(strip_tags($validated['observations'] ?? ''));
-            if (!empty($cleanObservations)) {
-                $this->sendStatusUpdateEmail(
-                    $order,
-                    $validated['emails'] ?? null,
-                    $invoicePdfPath,
-                    $validated['observations'] ?? null
-                );
+
+            if (in_array($validated['status'], ['completed', 'parcial_status'])) {
+                // Para completed o parcial: enviar email con observaciones/parciales
+                if (!empty($cleanObservations)) {
+                    $this->sendStatusUpdateEmail(
+                        $order,
+                        $validated['emails'] ?? null,
+                        $invoicePdfPath,
+                        $validated['observations'] ?? null
+                    );
+                }
+            } else {
+               
+                // Para pending, processing, cancelled: enviar email de cambio de estado simple
+                $this->sendSimpleStatusChangeEmail($order);
             }
 
             return response()->json([
@@ -927,6 +937,116 @@ class PurchaseOrderController extends Controller
 
         } catch (\Exception $e) {
             \Log::error('Error sending status update email: ' . $e->getMessage(), [
+                'order_id' => $order->id,
+                'trace'    => $e->getTraceAsString(),
+            ]);
+            // Don't throw - email failure shouldn't break the update
+        }
+    }
+
+    /**
+     * Envía email de cambio de estado simple (pending, processing, cancelled).
+     */
+    private function sendSimpleStatusChangeEmail(PurchaseOrder $order): void
+    {
+        try {
+            $order->loadMissing('client');
+
+            $userEmail = auth()->user()?->email ?? config('mail.from.address');
+
+            // Obtener emails de procesos
+            $processEmails = \App\Models\Process::where('process_type', 'pedido')
+                ->pluck('email')
+                ->flatMap(fn($email) => array_map('trim', explode(',', $email)))
+                ->filter()
+                ->unique()
+                ->values()
+                ->toArray();
+
+            // Email del ejecutivo
+            $executiveEmail = $order->client->executive_email;
+
+            if (empty($executiveEmail) || !filter_var($executiveEmail, FILTER_VALIDATE_EMAIL)) {
+                Log::warning('No valid executive email for simple status change', [
+                    'order_id' => $order->id,
+                    'executive_email' => $executiveEmail,
+                ]);
+                return;
+            }
+
+            $dsn = $this->resolveMailerDsn($userEmail);
+            $mailer = new \Symfony\Component\Mailer\Mailer(\Symfony\Component\Mailer\Transport::fromDsn($dsn));
+
+            // Preparar destinatarios: ejecutivo + procesos en CC (igual que legacy)
+            $ccEmails = $processEmails;
+            if (filter_var($executiveEmail, FILTER_VALIDATE_EMAIL)) {
+                array_unshift($ccEmails, $executiveEmail); // Añadir ejecutivo al inicio (duplicado en TO y CC)
+            }
+            $ccAddresses = array_map(fn ($email) => new \Symfony\Component\Mime\Address($email), $ccEmails);
+
+            // Asunto
+            $subject = ($order->is_new_win == 1 ? 'Re: NEW WIN - ' : 'Re: ') .
+                       'Pedido - ' . $order->client->client_name . ' - ' .
+                       $order->client->nit . ' - ' .
+                       $order->order_consecutive;
+
+            // Cuerpo del email
+            $body = view('emails.purchase_order_status_changed', [
+                'order' => $order,
+            ])->render();
+
+            // Crear log de email y agregar pixel de tracking
+            $emailLog = $this->emailTrackingService->createLog([
+                'sender_email' => $userEmail,
+                'recipient_email' => $executiveEmail,
+                'subject' => $subject,
+                'content' => $body,
+                'process_type' => 'status_change',
+                'metadata' => json_encode([
+                    'order_id' => $order->id,
+                    'order_consecutive' => $order->order_consecutive,
+                    'old_status' => null,
+                    'new_status' => $order->status,
+                    'cc_emails' => $ccEmails, // Incluye ejecutivo + procesos
+                ]),
+            ]);
+
+            // Inyectar pixel de tracking
+            $bodyWithPixel = $this->emailTrackingService->injectPixel($body, $emailLog->uuid);
+
+            // Crear email
+            $email = (new \Symfony\Component\Mime\Email())
+                ->from($userEmail)
+                ->to($executiveEmail)
+                ->subject($subject)
+                ->html($bodyWithPixel);
+
+            // Agregar CC si hay emails de procesos
+            if (!empty($ccAddresses)) {
+                $email->cc(...$ccAddresses);
+            }
+
+            // Threading (usar message_despacho_id o message_id)
+            $threadId = $order->message_despacho_id ?: $order->message_id;
+            if ($threadId) {
+                $email->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
+                $email->getHeaders()->addTextHeader('References', '<' . $threadId . '>');
+            }
+
+            $mailer->send($email);
+
+            // Actualizar estado del email a enviado
+            $this->emailTrackingService->updateStatus($emailLog, 'sent');
+
+            Log::info('Simple status change email sent successfully', [
+                'order_id' => $order->id,
+                'status' => $order->status,
+                'to' => $executiveEmail,
+                'cc' => $processEmails,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error sending simple status change email: ' . $e->getMessage(), [
                 'order_id' => $order->id,
                 'trace'    => $e->getTraceAsString(),
             ]);
