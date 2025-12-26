@@ -38,12 +38,20 @@ class PurchaseOrderMailDespacho extends Mailable
      */
     public function envelope(): Envelope
     {
+        // Usar el subject_client guardado en la orden
+        // Si está vacío, generar uno por defecto
+        $subject = $this->purchaseOrder->subject_client;
+
+        if (empty($subject)) {
+            $subject = ($this->purchaseOrder->is_new_win == 1 ? 'NEW WIN - ' : '') .
+                       'Pedido - ' .
+                       $this->purchaseOrder->client->client_name . ' - ' .
+                       $this->purchaseOrder->client->nit . ' - ' .
+                       $this->purchaseOrder->order_consecutive;
+        }
+
         return new Envelope(
-            subject: ($this->purchaseOrder->is_new_win == 1 ? 'NEW WIN - ' : '') .
-                     'Pedido - ' .
-                     $this->purchaseOrder->client->client_name . ' - ' .
-                     $this->purchaseOrder->client->nit . ' - ' .
-                     $this->purchaseOrder->order_consecutive,
+            subject: $subject,
         );
     }
 
