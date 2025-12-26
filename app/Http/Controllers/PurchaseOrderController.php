@@ -1023,6 +1023,13 @@ class PurchaseOrderController extends Controller
             // Ignore placeholder "internal" or empty content
             $shouldStoreInternal = $cleanInternal !== '' && strtolower($cleanInternal) !== 'internal';
 
+            \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Internal observation check', [
+                'order_id' => $orderId,
+                'internal_observation_raw' => $validated['internal_observation'] ?? null,
+                'cleanInternal' => $cleanInternal,
+                'shouldStoreInternal' => $shouldStoreInternal,
+            ]);
+
             // Observaciones internas (solo planta)
             if ($shouldStoreInternal) {
                 $currentInternal = $order->internal_observations ?? '';
@@ -1086,7 +1093,12 @@ class PurchaseOrderController extends Controller
     private function sendObservationEmails(PurchaseOrder $order, string $observationHtml, ?string $internalObservation, Request $request): void
     {
         try {
-            $tablesOnly = $this->extractHtmlTables($observationHtml);
+            // Remover el wrapper <figure class="table"> de CKEditor que puede causar problemas en clientes de correo
+            $observationHtml = preg_replace('/<figure[^>]*class="table"[^>]*>(.*?)<\/figure>/s', '$1', $observationHtml);
+
+            // TEMPORAL: Comentado para pruebas - enviar todo el contenido al cliente también
+            // $tablesOnly = $this->extractHtmlTables($observationHtml);
+            $tablesOnly = $observationHtml; // Enviar contenido completo temporalmente
             $userEmail = auth()->user()?->email ?? config('mail.from.address');
             $internalSection = '';
             if (! empty($internalObservation)) {
@@ -1108,7 +1120,7 @@ class PurchaseOrderController extends Controller
                 Process::where('process_type', 'orden_de_compra')->pluck('email')->toArray()
             );
 
-            // Correos que se consideran del cliente (no deben recibir internos)
+            // Correos que se consideran del cliente
             $clientEmails = $this->normalizeEmails([
                 $order->client->email,
                 $order->client->dispatch_confirmation_email,
@@ -1116,18 +1128,22 @@ class PurchaseOrderController extends Controller
                 $order->tag_email_pedidos,
             ]);
 
+            // Separar emails del request entre cliente e internos
+            $clientEmailsFromRequest = array_values(array_intersect($tagEmails, $clientEmails));
+            $internalEmailsFromRequest = array_values(array_diff($tagEmails, $clientEmails));
+
+            // Emails internos = procesos + internos del request
+            $allInternalEmails = array_values(array_unique(array_merge($processEmails, $internalEmailsFromRequest)));
+
             \Log::info('OBSERVACIONES - Emails identificados', [
                 'order_id' => $order->id,
                 'tagEmails' => $tagEmails,
                 'processEmails' => $processEmails,
                 'clientEmails' => $clientEmails,
+                'clientEmailsFromRequest' => $clientEmailsFromRequest,
+                'internalEmailsFromRequest' => $internalEmailsFromRequest,
+                'allInternalEmails' => $allInternalEmails,
             ]);
-
-            // Solo internos: despachos/planta (procesos) + tags, excluyendo correos cliente
-            $internalPool = array_merge($processEmails, $tagEmails);
-            $ccEmails = array_values(array_unique(array_diff($internalPool, $clientEmails)));
-
-            $primaryTo = array_shift($ccEmails) ?: null;
 
             // Usar el subject_client que se guardó al enviar el correo de despacho
             // Si por alguna razón está vacío, generar el formato estándar
@@ -1144,25 +1160,27 @@ class PurchaseOrderController extends Controller
 
             $threadId = $order->message_despacho_id ?: $order->message_id;
 
-            // --- PRIVACY ENHANCEMENT ---
-            // Identify client emails to exclude them from internal notification
-            $internalCcEmails = array_values(array_diff($ccEmails, $clientEmails));
-            
-            // Re-evaluate primaryTo if it was the client
-            $internalTo = $primaryTo;
-            if (in_array($internalTo, $clientEmails)) {
-                $internalTo = array_shift($internalCcEmails);
-            }
+            // Restaurar extractHtmlTables para enviar solo tablas al cliente
+            $tablesOnly = $this->extractHtmlTables($observationHtml);
 
-            $internalBody = view('emails.purchase_order_observation', [
-                'order'           => $order,
-                'observationHtml' => $observationHtml,
-                'internalHtml'    => $internalObservation,
-                'forClient'       => false,
-            ])->render();
+            \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Contenido completo', [
+                'order_id' => $order->id,
+                'observationHtml_full' => $observationHtml,
+                'tablesOnly_full' => $tablesOnly,
+            ]);
 
-            if ($internalTo) {
-                $internalCcAddresses = array_map(fn ($email) => new Address($email), $internalCcEmails);
+            // 1. ENVIAR EMAIL INTERNO (texto + tabla + observaciones internas)
+            // A: Emails internos del request + emails de procesos
+            if (!empty($allInternalEmails)) {
+                $internalBody = view('emails.purchase_order_observation', [
+                    'order'           => $order,
+                    'observationHtml' => $observationHtml, // Contenido completo
+                    'internalHtml'    => $internalObservation,
+                    'forClient'       => false,
+                ])->render();
+
+                $internalTo = array_shift($allInternalEmails);
+                $internalCcAddresses = array_map(fn ($email) => new Address($email), $allInternalEmails);
 
                 $internalEmail = (new Email())
                     ->from($userEmail)
@@ -1176,39 +1194,48 @@ class PurchaseOrderController extends Controller
                     $internalEmail->getHeaders()->addTextHeader('References', '<' . $threadId . '>');
                 }
 
+                \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email interno', [
+                    'order_id' => $order->id,
+                    'to' => $internalTo,
+                    'cc' => $allInternalEmails,
+                    'subject' => $subject,
+                ]);
+
                 $mailer->send($internalEmail);
             }
 
-            // Always send tables-only to client if it's not empty
-            if (! empty($tablesOnly)) {
-                // Filtrar emails válidos
-                $validClientEmails = array_filter($clientEmails, fn($email) => $this->isValidEmail($email));
+            // 2. ENVIAR EMAIL AL CLIENTE (solo tabla)
+            // A: Emails del cliente que están en el request
+            if (!empty($clientEmailsFromRequest) && !empty($tablesOnly)) {
+                $clientBody = view('emails.purchase_order_observation', [
+                    'order'           => $order,
+                    'observationHtml' => $tablesOnly, // Solo tablas
+                    'forClient'       => true,
+                ])->render();
 
-                if (!empty($validClientEmails)) {
-                    $clientBody = view('emails.purchase_order_observation', [
-                        'order'           => $order,
-                        'observationHtml' => $tablesOnly,
-                        'forClient'       => true,
-                    ])->render();
+                $clientTo = array_shift($clientEmailsFromRequest);
+                $clientCcAddresses = array_map(fn ($email) => new Address($email), $clientEmailsFromRequest);
 
-                    // Enviar un solo correo con el primer email como TO y el resto como CC
-                    $clientTo = array_shift($validClientEmails);
-                    $clientCcAddresses = array_map(fn ($email) => new Address($email), $validClientEmails);
+                $clientMail = (new Email())
+                    ->from($userEmail)
+                    ->to($clientTo)
+                    ->cc(...$clientCcAddresses)
+                    ->subject($subject)
+                    ->html($clientBody);
 
-                    $clientMail = (new Email())
-                        ->from($userEmail)
-                        ->to($clientTo)
-                        ->cc(...$clientCcAddresses)
-                        ->subject($subject)
-                        ->html($clientBody);
-
-                    if ($threadId) {
-                        $clientMail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
-                        $clientMail->getHeaders()->addTextHeader('References', '<' . $threadId . '>');
-                    }
-
-                    $mailer->send($clientMail);
+                if ($threadId) {
+                    $clientMail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
+                    $clientMail->getHeaders()->addTextHeader('References', '<' . $threadId . '>');
                 }
+
+                \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email cliente', [
+                    'order_id' => $order->id,
+                    'to' => $clientTo,
+                    'cc' => $clientEmailsFromRequest,
+                    'subject' => $subject,
+                ]);
+
+                $mailer->send($clientMail);
             }
         } catch (\Throwable $e) {
             \Log::error('Error enviando correo de observaciones', [
