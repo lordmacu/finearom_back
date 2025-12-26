@@ -1116,6 +1116,13 @@ class PurchaseOrderController extends Controller
                 $order->tag_email_pedidos,
             ]);
 
+            \Log::info('OBSERVACIONES - Emails identificados', [
+                'order_id' => $order->id,
+                'tagEmails' => $tagEmails,
+                'processEmails' => $processEmails,
+                'clientEmails' => $clientEmails,
+            ]);
+
             // Solo internos: despachos/planta (procesos) + tags, excluyendo correos cliente
             $internalPool = array_merge($processEmails, $tagEmails);
             $ccEmails = array_values(array_unique(array_diff($internalPool, $clientEmails)));
@@ -1174,22 +1181,26 @@ class PurchaseOrderController extends Controller
 
             // Always send tables-only to client if it's not empty
             if (! empty($tablesOnly)) {
-                foreach ($clientEmails as $cEmail) {
-                    if (!$this->isValidEmail($cEmail)) continue;
+                // Filtrar emails válidos
+                $validClientEmails = array_filter($clientEmails, fn($email) => $this->isValidEmail($email));
 
+                if (!empty($validClientEmails)) {
                     $clientBody = view('emails.purchase_order_observation', [
                         'order'           => $order,
                         'observationHtml' => $tablesOnly,
                         'forClient'       => true,
                     ])->render();
 
+                    // Enviar un solo correo con el primer email como TO y el resto como CC
+                    $clientTo = array_shift($validClientEmails);
+                    $clientCcAddresses = array_map(fn ($email) => new Address($email), $validClientEmails);
+
                     $clientMail = (new Email())
                         ->from($userEmail)
-                        ->to($cEmail)
+                        ->to($clientTo)
+                        ->cc(...$clientCcAddresses)
                         ->subject($subject)
                         ->html($clientBody);
-
-                        //cambio
 
                     if ($threadId) {
                         $clientMail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
