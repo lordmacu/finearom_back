@@ -71,7 +71,12 @@ class PurchaseOrderController extends Controller
         }
 
         $query->selectRaw('purchase_orders.*, (
-            SELECT SUM(products.price * pop.quantity)
+            SELECT SUM(
+                CASE
+                    WHEN pop.price > 0 THEN pop.price * pop.quantity
+                    ELSE products.price * pop.quantity
+                END
+            )
             FROM purchase_order_product pop
             JOIN products ON products.id = pop.product_id
             WHERE pop.purchase_order_id = purchase_orders.id
@@ -527,7 +532,8 @@ class PurchaseOrderController extends Controller
 
         foreach ($purchase->products as $product) {
             $quantity = $product->pivot->quantity;
-            $unitPriceUSD = $product->pivot->price ?: $product->price;
+            // Usar precio efectivo: si pivot->price > 0, usar ese, sino usar product->price
+            $unitPriceUSD = ($product->pivot->price > 0) ? $product->pivot->price : $product->price;
 
             if ($isNational) {
                 $unitPrice = round($unitPriceUSD * $trm, 2);
@@ -1304,9 +1310,15 @@ class PurchaseOrderController extends Controller
                 $isMuestra = 1;
             }
 
+            // Solo guardar precio si fue editado manualmente
+            $priceToSave = 0;
+            if (!empty($product['price_manually_changed']) && $product['price_manually_changed']) {
+                $priceToSave = $product['price'] ?? 0;
+            }
+
             $purchaseOrder->products()->attach($product['product_id'], [
                 'quantity' => $product['quantity'],
-                'price' => $product['price'] ?? 0,
+                'price' => $priceToSave,
                 'new_win' => $newWinFlag ? 1 : 0,
                 'muestra' => $muestraFlag ? 1 : 0,
                 'branch_office_id' => $product['branch_office_id'],
@@ -1345,11 +1357,17 @@ class PurchaseOrderController extends Controller
                 if ($newWinFlag) $isNewWin = 1;
                 if ($muestraFlag) $isMuestra = 1;
 
+                // Solo guardar precio si fue editado manualmente
+                $priceToSave = 0;
+                if (!empty($productData['price_manually_changed']) && $productData['price_manually_changed']) {
+                    $priceToSave = (float) ($productData['price'] ?? 0);
+                }
+
                 // Preparar datos
                 $updateData = [
                     'product_id' => (int) ($productData['product_id'] ?? 0),
                     'quantity' => (float) ($productData['quantity'] ?? 0),
-                    'price' => (float) ($productData['price'] ?? 0),
+                    'price' => $priceToSave,
                     'branch_office_id' => (int) ($productData['branch_office_id'] ?? 0),
                     'new_win' => $newWinFlag ? 1 : 0,
                     'muestra' => $muestraFlag ? 1 : 0,

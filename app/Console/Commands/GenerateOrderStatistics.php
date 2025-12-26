@@ -222,14 +222,15 @@ class GenerateOrderStatistics extends Command
 
             foreach ($order->products as $product) {
                 $quantity = $product->pivot->quantity ?? 0;
-                $price = $product->pivot->price ?? $product->price ?? 0;
+                // Usar precio efectivo: si pivot->price > 0, usar ese, sino usar product->price
+                $effectivePrice = ($product->pivot->price > 0) ? $product->pivot->price : ($product->price ?? 0);
                 $isSample = $product->pivot->muestra == 1;
 
                 if ($isSample) {
                     $sampleProducts++;
                 } else {
                     $commercialProducts++;
-                    $orderValue += $quantity * $price;
+                    $orderValue += $quantity * $effectivePrice;
                 }
             }
 
@@ -295,10 +296,15 @@ class GenerateOrderStatistics extends Command
                     continue;
                 }
 
-                // Price USD: 0 if sample (muestra == 1), else product base price
-                $price_usd = (isset($partial->muestra) && (int) $partial->muestra === 1)
-                    ? 0.0
-                    : (float) ($partial->product->price ?? 0);
+                // Price USD: 0 if sample (muestra == 1), else effective price
+                $isSample = isset($partial->muestra) && (int) $partial->muestra === 1;
+                if ($isSample) {
+                    $price_usd = 0.0;
+                } else {
+                    // Usar precio efectivo: si pivot_price > 0, usar ese, sino usar product->price
+                    $effectivePrice = ($partial->pivot_price > 0) ? $partial->pivot_price : ($partial->product->price ?? 0);
+                    $price_usd = (float) $effectivePrice;
+                }
 
                 // Effective TRM identical call to the controller
                 $trm_data = $this->trm_service->getEffectiveTrm($partial->trm, $partial->dispatch_date);
@@ -728,12 +734,13 @@ class GenerateOrderStatistics extends Command
         foreach ($orders as $order) {
             foreach ($order->products as $product) {
                 $orderedQty = $product->pivot->quantity ?? 0;
-                $priceUsd = $product->pivot->price ?? $product->price ?? 0;
+                // Usar precio efectivo: si pivot->price > 0, usar ese, sino usar product->price
+                $effectivePrice = ($product->pivot->price > 0) ? $product->pivot->price : ($product->price ?? 0);
                 $isSample = $product->pivot->muestra == 1;
 
                 $totalOrderedQty += $orderedQty;
                 if (!$isSample) {
-                    $totalOrderedValue += $orderedQty * $priceUsd;
+                    $totalOrderedValue += $orderedQty * $effectivePrice;
                 }
             }
 
@@ -741,7 +748,14 @@ class GenerateOrderStatistics extends Command
                 // skip if out of range or not real (already filtered)
                 $qty = (int) $partial->quantity;
                 $isSample = isset($partial->muestra) && (int) $partial->muestra === 1;
-                $priceUsd = $isSample ? 0.0 : (float) ($partial->pivot_price ?? $partial->pivot_price ?? 0);
+
+                if ($isSample) {
+                    $priceUsd = 0.0;
+                } else {
+                    // Usar precio efectivo: si pivot_price > 0, usar ese, sino buscar el precio del producto
+                    $effectivePrice = ($partial->pivot_price > 0) ? $partial->pivot_price : ($partial->product->price ?? 0);
+                    $priceUsd = (float) $effectivePrice;
+                }
 
                 $totalDispatchedQty += $qty;
                 $totalDispatchedValue += $qty * $priceUsd;

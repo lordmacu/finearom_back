@@ -140,14 +140,15 @@ public function calculateCurrentMonthStatistics(?int $days = null): array
 
             foreach ($order->products as $product) {
                 $quantity = $product->pivot->quantity ?? 0;
-                $price = $product->pivot->price ?? $product->price ?? 0;
+                // Usar precio efectivo: si pivot->price > 0, usar ese, sino usar product->price
+                $effectivePrice = ($product->pivot->price > 0) ? $product->pivot->price : ($product->price ?? 0);
                 $isSample = $product->pivot->muestra == 1;
 
                 if ($isSample) {
                     $sampleProducts++;
                 } else {
                     $commercialProducts++;
-                    $orderValue += $quantity * $price;
+                    $orderValue += $quantity * $effectivePrice;
                 }
             }
 
@@ -185,7 +186,7 @@ public function calculateCurrentMonthStatistics(?int $days = null): array
                     ->whereBetween('dispatch_date', [$from, $to])
                     ->with('product')
                     ->join('purchase_order_product', 'partials.product_order_id', '=', 'purchase_order_product.id')
-                    ->select('partials.*', 'purchase_order_product.muestra as muestra')
+                    ->select('partials.*', 'purchase_order_product.muestra as muestra', 'purchase_order_product.price as pivot_price')
                     ->distinct();
             },
         ])->whereHas('partials', function ($q) use ($from, $to) {
@@ -211,9 +212,14 @@ public function calculateCurrentMonthStatistics(?int $days = null): array
                     continue;
                 }
 
-                $price_usd = (isset($partial->muestra) && (int) $partial->muestra === 1)
-                    ? 0.0
-                    : (float) $partial->product->price;
+                // Usar precio efectivo: 0 si es muestra, sino pivot_price si > 0, sino product->price
+                $isSampleCheck = isset($partial->muestra) && (int) $partial->muestra === 1;
+                if ($isSampleCheck) {
+                    $price_usd = 0.0;
+                } else {
+                    $effectivePrice = ($partial->pivot_price > 0) ? $partial->pivot_price : ($partial->product->price ?? 0);
+                    $price_usd = (float) $effectivePrice;
+                }
 
                 $trm_data = $this->trmService->getEffectiveTrm($partial->trm, $partial->dispatch_date);
                 $trm = (float) $trm_data['trm'];
@@ -382,11 +388,14 @@ public function calculateCurrentMonthStatistics(?int $days = null): array
                     ->where('product_id', $product->id)
                     ->sum('quantity');
 
+                // Usar precio efectivo: si pivot->price > 0, usar ese, sino usar product->price
+                $effectivePrice = ($product->pivot->price > 0) ? $product->pivot->price : ($product->price ?? 0);
+
                 $productStatus[$product->id] = [
                     'ordered' => $ordered,
                     'dispatched' => $dispatched,
                     'pending' => max(0, $ordered - $dispatched),
-                    'price' => $product->pivot->price ?? $product->price ?? 0,
+                    'price' => $effectivePrice,
                     'is_sample' => $product->pivot->muestra == 1
                 ];
             }

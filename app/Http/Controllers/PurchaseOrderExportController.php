@@ -53,7 +53,9 @@ class PurchaseOrderExportController extends Controller
 
         $orders = $query->get()->map(function (PurchaseOrder $order) {
             $total = $order->products->reduce(function ($carry, $item) {
-                return $carry + (($item->price ?? 0) * ($item->quantity ?? 0));
+                // Usar precio efectivo: si pivot->price > 0, usar ese, sino usar product->price
+                $effectivePrice = ($item->pivot->price > 0) ? $item->pivot->price : $item->price;
+                return $carry + ($effectivePrice * ($item->pivot->quantity ?? 0));
             }, 0);
 
             return [

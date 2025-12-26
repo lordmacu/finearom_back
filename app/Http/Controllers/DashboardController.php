@@ -56,9 +56,12 @@ class DashboardController extends Controller
             // Planned: productos de órdenes creadas en el mes
             $plannedProducts = DB::table('purchase_order_product as pop')
                 ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+                ->join('products as p', 'pop.product_id', '=', 'p.id')
                 ->where('po.client_id', $client->id)
                 ->whereBetween('po.order_creation_date', [$startDate, $endDate])
-                ->select('pop.quantity', 'pop.price', 'po.trm')
+                ->select('pop.quantity',
+                    DB::raw('CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END as price'),
+                    'po.trm')
                 ->get();
 
             $plannedUsd = $plannedProducts->sum(function ($row) {
@@ -73,10 +76,13 @@ class DashboardController extends Controller
             $partials = DB::table('partials')
                 ->join('purchase_order_product as pop', 'partials.product_order_id', '=', 'pop.id')
                 ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+                ->join('products as p', 'pop.product_id', '=', 'p.id')
                 ->where('po.client_id', $client->id)
                 ->whereNotNull('partials.dispatch_date')
                 ->whereBetween('partials.dispatch_date', [$startDate, $endDate])
-                ->select('partials.quantity', 'pop.price', 'partials.trm as partial_trm', 'po.trm as order_trm')
+                ->select('partials.quantity',
+                    DB::raw('CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END as price'),
+                    'partials.trm as partial_trm', 'po.trm as order_trm')
                 ->get();
 
             $dispatchedUsd = $partials->sum(function ($row) {

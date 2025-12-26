@@ -39,20 +39,24 @@ class PurchaseOrderProductExportController extends Controller
             'purchase_orders.status as order_status',
             'products.code as product_code',
             'products.product_name',
-            'products.price as price_product',
+            // Precio efectivo: si purchase_order_product.price > 0, usar ese, sino usar products.price
+            \DB::raw('CASE
+                        WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                        ELSE products.price
+                      END as price_product'),
             'clients.client_name',
             'clients.nit',
             // Subconsulta fecha despacho real
-            \DB::raw('(SELECT dispatch_date FROM partials 
-                      WHERE partials.order_id = purchase_orders.id 
-                      AND partials.type = "real" 
-                      ORDER BY partials.created_at DESC 
+            \DB::raw('(SELECT dispatch_date FROM partials
+                      WHERE partials.order_id = purchase_orders.id
+                      AND partials.type = "real"
+                      ORDER BY partials.created_at DESC
                       LIMIT 1) as real_dispatch_date'),
             // Subconsulta fecha despacho temporal
-            \DB::raw('(SELECT dispatch_date FROM partials 
-                      WHERE partials.order_id = purchase_orders.id 
-                      AND partials.type = "temporal" 
-                      ORDER BY partials.created_at DESC 
+            \DB::raw('(SELECT dispatch_date FROM partials
+                      WHERE partials.order_id = purchase_orders.id
+                      AND partials.type = "temporal"
+                      ORDER BY partials.created_at DESC
                       LIMIT 1) as temporal_dispatch_date')
         ])
             ->join('purchase_orders', 'purchase_order_product.purchase_order_id', '=', 'purchase_orders.id')

@@ -361,16 +361,19 @@
                     $subtotal = 0;
                 @endphp
                 @foreach ($purchaseOrder->products as $product)
+                    @php
+                        $effectivePrice = ($product->pivot->price > 0) ? $product->pivot->price : $product->price;
+                    @endphp
                     <tr>
                         <td>{{ $product->product_name }}</td>
-                        <td class="text-right">{{ number_format($product->price, 2) }}</td>
+                        <td class="text-right">{{ number_format($effectivePrice, 2) }}</td>
                         <td class="text-center">{{ $product->pivot->quantity }}</td>
                         <td class="text-right font-bold">
-                            {{ number_format($product->price * $product->pivot->quantity, 2) }}</td>
+                            {{ number_format($effectivePrice * $product->pivot->quantity, 2) }}</td>
                         <td>{{ $purchaseOrder->getBranchOfficeName($product) }}</td>
                     </tr>
                     @php
-                        $subtotal += $product->price * $product->pivot->quantity;
+                        $subtotal += $effectivePrice * $product->pivot->quantity;
                     @endphp
                 @endforeach
             </tbody>

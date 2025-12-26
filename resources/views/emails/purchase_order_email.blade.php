@@ -43,6 +43,9 @@
             </thead>
             <tbody>
                 @foreach ($purchaseOrder->products as $product)
+                    @php
+                        $effectivePrice = ($product->pivot->price > 0) ? $product->pivot->price : $product->price;
+                    @endphp
                     <tr>
                         <td><strong>{{ $product->product_name }}</strong></td>
                         <td>
@@ -51,9 +54,9 @@
                                 : $product->code }}
                         </td>
                         <td>{{ $product->pivot->quantity }}</td>
-                        <td>${{ number_format($product->price, 2) }}</td>
+                        <td>${{ number_format($effectivePrice, 2) }}</td>
                         <td>
-                            ${{ number_format($product->pivot->muestra == '1' ? 0 : $product->price * $product->pivot->quantity, 2) }}
+                            ${{ number_format($product->pivot->muestra == '1' ? 0 : $effectivePrice * $product->pivot->quantity, 2) }}
                         </td>
                         <td>
                             @if ($product->pivot->new_win == 1)
@@ -72,7 +75,8 @@
                     <td colspan="2">
                         <strong>${{ number_format(
                             $purchaseOrder->products->sum(function ($product) {
-                                return $product->pivot->muestra == '1' ? 0 : $product->price * $product->pivot->quantity;
+                                $effectivePrice = ($product->pivot->price > 0) ? $product->pivot->price : $product->price;
+                                return $product->pivot->muestra == '1' ? 0 : $effectivePrice * $product->pivot->quantity;
                             }),
                             2,
                         ) }}
