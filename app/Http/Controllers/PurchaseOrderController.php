@@ -1122,8 +1122,7 @@ class PurchaseOrderController extends Controller
 
             $primaryTo = array_shift($ccEmails) ?: null;
 
-            // Usar el mismo subject del correo original de la orden
-            $subject = 'Re: ' . $order->subject_client;
+             $subject = 'Re: ' . $order->subject_client;
 
             $threadId = $order->message_despacho_id ?: $order->message_id;
 
@@ -1178,6 +1177,8 @@ class PurchaseOrderController extends Controller
                         ->to($cEmail)
                         ->subject($subject)
                         ->html($clientBody);
+
+                        //cambio
 
                     if ($threadId) {
                         $clientMail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
