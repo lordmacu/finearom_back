@@ -1146,6 +1146,11 @@ class PurchaseOrderController extends Controller
 
             // Separar emails del request entre cliente e internos
             $clientEmailsFromRequest = array_values(array_intersect($tagEmails, $clientEmails));
+
+            // IMPORTANTE: Excluir emails de procesos de la lista de cliente
+            // Los emails de procesos NUNCA deben recibir el email de "solo tabla"
+            $clientEmailsFromRequest = array_values(array_diff($clientEmailsFromRequest, $processEmails));
+
             $internalEmailsFromRequest = array_values(array_diff($tagEmails, $clientEmails));
 
             // Emails internos = procesos + internos del request
