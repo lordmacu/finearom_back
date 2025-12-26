@@ -984,11 +984,17 @@ class PurchaseOrderController extends Controller
             }
             $ccAddresses = array_map(fn ($email) => new \Symfony\Component\Mime\Address($email), $ccEmails);
 
-            // Asunto
-            $subject = ($order->is_new_win == 1 ? 'Re: NEW WIN - ' : 'Re: ') .
-                       'Pedido - ' . $order->client->client_name . ' - ' .
-                       $order->client->nit . ' - ' .
-                       $order->order_consecutive;
+            // Asunto: usar subject_client guardado, o generar uno si está vacío
+            if (empty($order->subject_client)) {
+                $subject = 'Re: ' .
+                    ($order->is_new_win == 1 ? 'NEW WIN - ' : '') .
+                    'Pedido - ' .
+                    $order->client->client_name . ' - ' .
+                    $order->client->nit . ' - ' .
+                    $order->order_consecutive;
+            } else {
+                $subject = 'Re: ' . $order->subject_client;
+            }
 
             // Cuerpo del email
             $body = view('emails.purchase_order_status_changed', [

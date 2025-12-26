@@ -166,6 +166,7 @@ class PlannedStatsExport implements FromCollection, WithHeadings, WithStyles, Wi
                 'purchase_order_product.id as product_order_id',
                 'purchase_order_product.quantity',
                 'purchase_order_product.muestra',
+                'purchase_order_product.price as order_product_price',
                 'products.product_name as product_name',
                 'products.code as product_sku',
                 'products.price as product_price',
@@ -214,7 +215,9 @@ class PlannedStatsExport implements FromCollection, WithHeadings, WithStyles, Wi
                 continue;
             }
 
-            $priceUsd = (float) $firstProduct->product_price;
+            // Usar precio efectivo: si order_product_price > 0, usar ese, sino usar product_price
+            $effectivePrice = ($firstProduct->order_product_price > 0) ? $firstProduct->order_product_price : ($firstProduct->product_price ?? 0);
+            $priceUsd = (float) $effectivePrice;
             
             // Obtener TRM usando la función exacta de tu controlador
             $trmUsed = $this->getTrmForDateWithPartial(

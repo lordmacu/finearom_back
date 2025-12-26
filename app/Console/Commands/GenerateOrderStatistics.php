@@ -520,7 +520,7 @@ class GenerateOrderStatistics extends Command
                     'ordered' => $ordered,
                     'dispatched' => $dispatched,
                     'pending' => max(0, $ordered - $dispatched),
-                    'price' => $product->pivot->price ?? $product->price ?? 0,
+                    'price' => ($product->pivot->price > 0) ? $product->pivot->price : ($product->price ?? 0),
                     'is_sample' => $product->pivot->muestra == 1
                 ];
             }

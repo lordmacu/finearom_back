@@ -879,7 +879,9 @@ class DashboardController extends Controller
 
             // Solo calcular valor para productos comerciales (no muestras)
             if (!$isSample) {
-                $priceUsd = (float) $firstProduct->product_price;
+                // Usar precio efectivo: si order_product_price > 0, usar ese, sino usar product_price
+                $effectivePrice = ($firstProduct->order_product_price > 0) ? $firstProduct->order_product_price : ($firstProduct->product_price ?? 0);
+                $priceUsd = (float) $effectivePrice;
 
                 // Obtener TRM considerando si viene de partial real
                 $trmToUse = $this->getTrmForDateWithPartial(
