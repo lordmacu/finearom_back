@@ -39,8 +39,9 @@ class PurchaseOrderProductExportController extends Controller
             'purchase_orders.status as order_status',
             'products.code as product_code',
             'products.product_name',
-            // Precio efectivo: si purchase_order_product.price > 0, usar ese, sino usar products.price
+            // Precio efectivo: 0 si muestra, sino pivot > 0, sino products.price
             \DB::raw('CASE
+                        WHEN purchase_order_product.muestra = 1 THEN 0
                         WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
                         ELSE products.price
                       END as price_product'),

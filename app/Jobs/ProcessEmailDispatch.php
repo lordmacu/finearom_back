@@ -172,7 +172,11 @@ class ProcessEmailDispatch implements ShouldQueue
             po.client_id,
             pop.product_id,
             pop.quantity,
-            p.price,
+            CASE
+                WHEN pop.muestra = 1 THEN 0
+                WHEN pop.price > 0 THEN pop.price
+                ELSE p.price
+            END AS price,
             pop.branch_office_id,
             pop.new_win,
             pop.muestra,
@@ -237,4 +241,3 @@ class ProcessEmailDispatch implements ShouldQueue
         ];
     }
 }
-

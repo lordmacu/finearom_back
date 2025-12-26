@@ -304,7 +304,10 @@ public function calculateCurrentMonthStatistics(?int $days = null): array
                 $totalCommercialProducts += $quantity;
             }
 
-            $priceUsd = (float) $orderProduct->product_price;
+            $effectivePrice = ($orderProduct->order_product_price > 0)
+                ? $orderProduct->order_product_price
+                : ($orderProduct->product_price ?? 0);
+            $priceUsd = (float) $effectivePrice;
 
             $deliveryDate = $orderProduct->delivery_date;
             $trmToUse = null;

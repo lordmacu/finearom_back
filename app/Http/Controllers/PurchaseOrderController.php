@@ -75,6 +75,7 @@ class PurchaseOrderController extends Controller
         $query->selectRaw('purchase_orders.*, (
             SELECT SUM(
                 CASE
+                    WHEN pop.muestra = 1 THEN 0
                     WHEN pop.price > 0 THEN pop.price * pop.quantity
                     ELSE products.price * pop.quantity
                 END
@@ -534,8 +535,10 @@ class PurchaseOrderController extends Controller
 
         foreach ($purchase->products as $product) {
             $quantity = $product->pivot->quantity;
-            // Usar precio efectivo: si pivot->price > 0, usar ese, sino usar product->price
-            $unitPriceUSD = ($product->pivot->price > 0) ? $product->pivot->price : $product->price;
+            // Usar precio efectivo: 0 si muestra, sino pivot > 0, sino product->price
+            $unitPriceUSD = ($product->pivot->muestra == 1)
+                ? 0
+                : (($product->pivot->price > 0) ? $product->pivot->price : ($product->price ?? 0));
 
             if ($isNational) {
                 $unitPrice = round($unitPriceUSD * $trm, 2);

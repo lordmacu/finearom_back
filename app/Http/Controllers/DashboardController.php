@@ -60,7 +60,11 @@ class DashboardController extends Controller
                 ->where('po.client_id', $client->id)
                 ->whereBetween('po.order_creation_date', [$startDate, $endDate])
                 ->select('pop.quantity',
-                    DB::raw('CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END as price'),
+                    DB::raw('CASE
+                        WHEN pop.muestra = 1 THEN 0
+                        WHEN pop.price > 0 THEN pop.price
+                        ELSE p.price
+                    END as price'),
                     'po.trm')
                 ->get();
 
@@ -81,7 +85,11 @@ class DashboardController extends Controller
                 ->whereNotNull('partials.dispatch_date')
                 ->whereBetween('partials.dispatch_date', [$startDate, $endDate])
                 ->select('partials.quantity',
-                    DB::raw('CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END as price'),
+                    DB::raw('CASE
+                        WHEN pop.muestra = 1 THEN 0
+                        WHEN pop.price > 0 THEN pop.price
+                        ELSE p.price
+                    END as price'),
                     'partials.trm as partial_trm', 'po.trm as order_trm')
                 ->get();
 

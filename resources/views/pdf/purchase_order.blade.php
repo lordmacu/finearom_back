@@ -362,7 +362,9 @@
                 @endphp
                 @foreach ($purchaseOrder->products as $product)
                     @php
-                        $effectivePrice = ($product->pivot->price > 0) ? $product->pivot->price : $product->price;
+                        $effectivePrice = ($product->pivot->muestra == 1)
+                            ? 0
+                            : (($product->pivot->price > 0) ? $product->pivot->price : ($product->price ?? 0));
                     @endphp
                     <tr>
                         <td>{{ $product->product_name }}</td>

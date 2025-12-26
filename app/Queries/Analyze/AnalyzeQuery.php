@@ -81,12 +81,20 @@ class AnalyzeQuery
         return $base
             ->selectRaw('
                 SUM(
-                    (CASE WHEN purchase_order_product.muestra = 1 THEN 0 ELSE products.price END) * partials.quantity
+                    (CASE
+                        WHEN purchase_order_product.muestra = 1 THEN 0
+                        WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                        ELSE products.price
+                    END) * partials.quantity
                 ) as total_usd
             ')
             ->selectRaw('
                 SUM(
-                    (CASE WHEN purchase_order_product.muestra = 1 THEN 0 ELSE products.price END) *
+                    (CASE
+                        WHEN purchase_order_product.muestra = 1 THEN 0
+                        WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                        ELSE products.price
+                    END) *
                     partials.quantity *
                     (CASE
                         WHEN partials.trm IS NOT NULL AND partials.trm > 3800 THEN partials.trm
@@ -114,12 +122,20 @@ class AnalyzeQuery
             ->selectRaw('COUNT(partials.id) as partials_count')
             ->selectRaw('
                 SUM(
-                    (CASE WHEN purchase_order_product.muestra = 1 THEN 0 ELSE products.price END) * partials.quantity
+                    (CASE
+                        WHEN purchase_order_product.muestra = 1 THEN 0
+                        WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                        ELSE products.price
+                    END) * partials.quantity
                 ) as total_usd
             ')
             ->selectRaw('
                 SUM(
-                    (CASE WHEN purchase_order_product.muestra = 1 THEN 0 ELSE products.price END) *
+                    (CASE
+                        WHEN purchase_order_product.muestra = 1 THEN 0
+                        WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                        ELSE products.price
+                    END) *
                     partials.quantity *
                     (CASE
                         WHEN partials.trm IS NOT NULL AND partials.trm > 3800 THEN partials.trm
@@ -149,12 +165,20 @@ class AnalyzeQuery
             ->selectRaw('COUNT(partials.id) as partials_count')
             ->selectRaw('
                 SUM(
-                    (CASE WHEN purchase_order_product.muestra = 1 THEN 0 ELSE products.price END) * partials.quantity
+                    (CASE
+                        WHEN purchase_order_product.muestra = 1 THEN 0
+                        WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                        ELSE products.price
+                    END) * partials.quantity
                 ) as total_usd
             ')
             ->selectRaw('
                 SUM(
-                    (CASE WHEN purchase_order_product.muestra = 1 THEN 0 ELSE products.price END) *
+                    (CASE
+                        WHEN purchase_order_product.muestra = 1 THEN 0
+                        WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                        ELSE products.price
+                    END) *
                     partials.quantity *
                     (CASE
                         WHEN partials.trm IS NOT NULL AND partials.trm > 3800 THEN partials.trm
@@ -185,7 +209,11 @@ class AnalyzeQuery
             ->selectRaw('partials.id as partial')
             ->selectRaw('partials.quantity as quantity')
             ->selectRaw('partials.dispatch_date as date')
-            ->selectRaw('(CASE WHEN purchase_order_product.muestra = 1 THEN 0 ELSE products.price END) as price_usd')
+            ->selectRaw('(CASE
+                WHEN purchase_order_product.muestra = 1 THEN 0
+                WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                ELSE products.price
+            END) as price_usd')
             ->selectRaw('
                 (CASE
                     WHEN partials.trm IS NOT NULL AND partials.trm > 3800 THEN partials.trm
@@ -203,7 +231,11 @@ class AnalyzeQuery
             ->selectRaw('purchase_order_product.muestra as is_muestra')
             ->selectRaw('
                 (
-                    (CASE WHEN purchase_order_product.muestra = 1 THEN 0 ELSE products.price END) *
+                    (CASE
+                        WHEN purchase_order_product.muestra = 1 THEN 0
+                        WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                        ELSE products.price
+                    END) *
                     partials.quantity *
                     (CASE
                         WHEN partials.trm IS NOT NULL AND partials.trm > 3800 THEN partials.trm

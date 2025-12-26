@@ -404,8 +404,10 @@ class GenerateOrderStatistics extends Command
                 $totalCommercialProducts += $quantity;
             }
             
-            // Use product price (same as controller)
-            $priceUsd = (float) $orderProduct->product_price;
+            $effectivePrice = ($orderProduct->order_product_price > 0)
+                ? $orderProduct->order_product_price
+                : ($orderProduct->product_price ?? 0);
+            $priceUsd = (float) $effectivePrice;
             
             // TRM logic identical to controller
             $deliveryDate = $orderProduct->delivery_date;
@@ -816,10 +818,15 @@ class GenerateOrderStatistics extends Command
         $dispatchByClient = DB::table('partials')
             ->join('purchase_orders', 'partials.order_id', '=', 'purchase_orders.id')
             ->join('purchase_order_product', 'partials.product_order_id', '=', 'purchase_order_product.id')
+            ->join('products', 'purchase_order_product.product_id', '=', 'products.id')
             ->where('partials.type', 'real')
             ->whereBetween('partials.dispatch_date', [$from, $to])
             ->groupBy('purchase_orders.client_id')
-            ->selectRaw('purchase_orders.client_id, SUM(partials.quantity * purchase_order_product.price) as value_usd')
+            ->selectRaw('purchase_orders.client_id, SUM(partials.quantity * (CASE
+                WHEN purchase_order_product.muestra = 1 THEN 0
+                WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
+                ELSE products.price
+            END)) as value_usd')
             ->get();
 
         $clientNits = DB::table('clients')

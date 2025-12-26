@@ -440,12 +440,17 @@ class CarteraQuery
         $end = $to->toDateString();
 
         $query = DB::table('partials as p')
+            ->join('purchase_order_product as pop', 'p.product_order_id', '=', 'pop.id')
             ->join('products as prod', 'p.product_id', '=', 'prod.id')
             ->join('purchase_orders as po', 'p.order_id', '=', 'po.id')
             ->join('clients as c', 'po.client_id', '=', 'c.id')
             ->where('p.type', '=', 'real')
             ->whereRaw('DATE_ADD(p.dispatch_date, INTERVAL 15 DAY) BETWEEN ? AND ?', [$start, $end])
-            ->selectRaw('SUM(p.quantity * prod.price * COALESCE(p.trm, 1)) as total_projected');
+            ->selectRaw('SUM(p.quantity * (CASE
+                WHEN pop.muestra = 1 THEN 0
+                WHEN pop.price > 0 THEN pop.price
+                ELSE prod.price
+            END) * COALESCE(p.trm, 1)) as total_projected');
 
         if (! empty($filters['client_id'])) {
             $query->where('c.id', (int) $filters['client_id']);
