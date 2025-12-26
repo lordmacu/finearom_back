@@ -36,7 +36,9 @@ class DashboardController extends Controller
     public function clientQuickStats(Request $request)
     {
         $request->validate([
-            'nit' => 'required|string'
+            'nit' => 'required|string',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date'
         ]);
 
         $client = Client::where('nit', $request->nit)->first();
@@ -47,8 +49,8 @@ class DashboardController extends Controller
             ], 404);
         }
 
-        $startDate = Carbon::now()->startOfMonth()->toDateString();
-        $endDate = Carbon::now()->endOfMonth()->toDateString();
+        $startDate = $request->start_date ?? Carbon::now()->startOfMonth()->toDateString();
+        $endDate = $request->end_date ?? Carbon::now()->endOfMonth()->toDateString();
 
         try {
             // Planned: productos de órdenes creadas en el mes

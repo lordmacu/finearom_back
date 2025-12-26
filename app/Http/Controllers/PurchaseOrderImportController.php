@@ -141,6 +141,11 @@ class PurchaseOrderImportController extends Controller
             }
 
             DB::commit();
+
+            // Invalidar caché de productos si se crearon productos
+            if ($createdProducts > 0) {
+                ProductController::clearProductsCacheStatic();
+            }
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['success' => false, 'message' => 'Error al importar: ' . $e->getMessage()], 500);

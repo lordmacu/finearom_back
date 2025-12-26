@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Recaudo;
+use App\Queries\Cartera\CarteraQuery;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,6 +14,10 @@ use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
 class RecaudoImportController extends Controller
 {
+    public function __construct(
+        private readonly CarteraQuery $carteraQuery
+    ) {
+    }
     /**
      * Importa recaudos desde Excel usando el formato estándar.
      * Encabezados en fila 7, datos desde fila 8.
@@ -77,6 +82,9 @@ class RecaudoImportController extends Controller
                 }
 
                 DB::commit();
+
+                // Limpiar caché de customers después de importar recaudos
+                $this->carteraQuery->clearCustomersCache();
 
                 return response()->json([
                     'success' => true,

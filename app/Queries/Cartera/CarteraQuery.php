@@ -5,6 +5,7 @@ namespace App\Queries\Cartera;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class CarteraQuery
 {
@@ -201,20 +202,30 @@ class CarteraQuery
      */
     public function customers(): array
     {
-        return DB::table('clients as c')
-            ->join('recaudos as r', 'c.nit', '=', 'r.nit')
-            ->select('c.id', 'c.client_name', 'c.nit')
-            ->distinct()
-            ->orderBy('c.client_name')
-            ->get()
-            ->map(function ($row) {
-                return [
-                    'id' => (int) $row->id,
-                    'client_name' => $row->client_name,
-                    'nit' => $row->nit,
-                ];
-            })
-            ->toArray();
+        return Cache::remember('cartera:customers', now()->addHours(24), function () {
+            return DB::table('clients as c')
+                ->join('recaudos as r', 'c.nit', '=', 'r.nit')
+                ->select('c.id', 'c.client_name', 'c.nit')
+                ->distinct()
+                ->orderBy('c.client_name')
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'id' => (int) $row->id,
+                        'client_name' => $row->client_name,
+                        'nit' => $row->nit,
+                    ];
+                })
+                ->toArray();
+        });
+    }
+
+    /**
+     * Limpiar caché de customers.
+     */
+    public function clearCustomersCache(): void
+    {
+        Cache::forget('cartera:customers');
     }
 
     /**

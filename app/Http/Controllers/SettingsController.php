@@ -68,6 +68,9 @@ class SettingsController extends Controller
             }
         });
 
+        // Invalidar caché de emails de proceso
+        ProcessEmailController::clearProcessEmailsCache();
+
         return response()->json([
             'success' => true,
             'message' => 'Configuración de procesos actualizada',

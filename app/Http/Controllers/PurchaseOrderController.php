@@ -7,6 +7,7 @@ use App\Models\Partial;
 use App\Models\Process;
 use App\Models\PurchaseOrderProduct;
 use App\Rules\UniqueOrderConsecutiveForClient;
+use App\Services\TrmService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -20,11 +21,15 @@ use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 
 class PurchaseOrderController extends Controller
 {
-    public function __construct()
+    protected $trmService;
+
+    public function __construct(TrmService $trmService)
     {
+        $this->trmService = $trmService;
         $this->middleware('can:purchase_order list')->only(['index']);
     }
 
@@ -624,18 +629,41 @@ class PurchaseOrderController extends Controller
      */
     public function updateStatus(Request $request, int $orderId): JsonResponse
     {
-        $validated = $request->validate([
+        // Validaciones personalizadas con mensajes amigables
+        $validator = \Validator::make($request->all(), [
             'status'          => ['required', 'string', 'in:pending,processing,completed,parcial_status,cancelled'],
-            'invoiceNumber'   => ['nullable', 'string'],
-            'dispatchDate'    => ['nullable', 'string'], // Changed from 'date' to 'string' to accept JS date format
-            'trackingNumber'  => ['nullable', 'string'],
-            'trm'             => ['nullable', 'numeric'],
-            'transporter'     => ['nullable', 'string'],
-            'emails'          => ['nullable', 'string'], // JSON string
+            'invoiceNumber'   => ['nullable', 'string', 'max:255'],
+            'dispatchDate'    => ['nullable', 'string'],
+            'trackingNumber'  => ['nullable', 'string', 'max:255'],
+            'trm'             => ['nullable', 'numeric', 'min:0', 'max:99999'],
+            'transporter'     => ['nullable', 'string', 'max:255'],
+            'emails'          => ['nullable', 'string'],
             'observations'    => ['nullable', 'string'],
-            'parcials'        => ['nullable', 'string'], // JSON string
+            'parcials'        => ['nullable', 'string'],
             'invoice_pdf'     => ['nullable', 'file', 'mimes:pdf', 'max:4096'],
+        ], [
+            'status.required' => 'El estado es obligatorio',
+            'status.in' => 'El estado seleccionado no es válido',
+            'invoiceNumber.max' => 'El número de factura no puede exceder 255 caracteres',
+            'trackingNumber.max' => 'El número de guía no puede exceder 255 caracteres',
+            'trm.numeric' => 'El TRM debe ser un número válido',
+            'trm.min' => 'El TRM debe ser mayor o igual a 0',
+            'trm.max' => 'El TRM no puede ser mayor a 99999. Verifica que el formato sea correcto (ejemplo: 3817.93)',
+            'transporter.max' => 'El nombre de la transportadora no puede exceder 255 caracteres',
+            'invoice_pdf.file' => 'El archivo PDF no es válido',
+            'invoice_pdf.mimes' => 'El archivo debe ser un PDF',
+            'invoice_pdf.max' => 'El archivo PDF no puede superar 4MB',
         ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Errores de validación',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $validated = $validator->validated();
 
         try {
             \DB::beginTransaction();
@@ -644,21 +672,27 @@ class PurchaseOrderController extends Controller
 
             // Update order fields
             $order->status = $validated['status'];
-            
+
             if (!empty($validated['invoiceNumber'])) {
                 $order->invoice_number = $validated['invoiceNumber'];
             }
-            
-            if (!empty($validated['dispatchDate'])) {
-                // Clean date format (remove timezone info if present)
-                $cleanDate = preg_replace('/\s*\([^)]*\)/', '', $validated['dispatchDate']);
-                $order->dispatch_date = \Carbon\Carbon::parse($cleanDate)->format('Y-m-d');
+
+            // Mejorar el manejo de fecha de despacho
+            if (isset($validated['dispatchDate']) && !empty($validated['dispatchDate']) && $validated['dispatchDate'] !== 'null') {
+                try {
+                    // Clean date format (remove timezone info if present)
+                    $cleanDate = preg_replace('/\s*\([^)]*\)/', '', $validated['dispatchDate']);
+                    $parsedDate = \Carbon\Carbon::parse($cleanDate);
+                    $order->dispatch_date = $parsedDate->format('Y-m-d');
+                } catch (\Exception $e) {
+                    throw new \Exception('La fecha de despacho no tiene un formato válido. Por favor selecciona una fecha válida.');
+                }
             }
-            
+
             if (!empty($validated['trackingNumber'])) {
                 $order->tracking_number = $validated['trackingNumber'];
             }
-            
+
             if (!empty($validated['trm'])) {
                 $order->trm = $this->normalizeTrm($validated['trm']);
             }
@@ -685,13 +719,21 @@ class PurchaseOrderController extends Controller
             $order->partials()->where('type', 'real')->delete();
 
             if (!empty($validated['parcials'])) {
-                $parcials = json_decode($validated['parcials'], true);
-                
-                if (is_array($parcials)) {
+                try {
+                    $parcials = json_decode($validated['parcials'], true);
+
+                    if (!is_array($parcials)) {
+                        throw new \Exception('Los datos de parciales no tienen un formato válido');
+                    }
+
                     foreach ($parcials as $productData) {
                         $productId = $productData['pivot']['product_id'] ?? null;
                         $productOrderId = $productData['pivot']['id'] ?? null;
                         $realPartials = $productData['realPartials'] ?? [];
+
+                        if (!$productId) {
+                            throw new \Exception('Falta el ID del producto en los parciales');
+                        }
 
                         foreach ($realPartials as $partialEntry) {
                             $quantity = $partialEntry['quantity'] ?? 0;
@@ -699,12 +741,22 @@ class PurchaseOrderController extends Controller
                                 continue;
                             }
 
+                            // Validar fecha del parcial
+                            $partialDate = $partialEntry['date'] ?? null;
+                            if ($partialDate) {
+                                try {
+                                    $partialDate = \Carbon\Carbon::parse($partialDate)->format('Y-m-d');
+                                } catch (\Exception $e) {
+                                    throw new \Exception('La fecha del parcial no tiene un formato válido: ' . ($partialEntry['date'] ?? 'sin fecha'));
+                                }
+                            }
+
                             Partial::create([
                                 'order_id'         => $order->id,
                                 'product_id'       => $productId,
                                 'quantity'         => $quantity,
                                 'type'             => 'real',
-                                'dispatch_date'    => $partialEntry['date'] ?? $validated['dispatchDate'] ?? null,
+                                'dispatch_date'    => $partialDate,
                                 'trm'              => $partialEntry['trm'] ?? $validated['trm'] ?? null,
                                 'invoice_number'   => $validated['invoiceNumber'] ?? null,
                                 'tracking_number'  => $partialEntry['tracking_number'] ?? $validated['trackingNumber'] ?? null,
@@ -713,6 +765,8 @@ class PurchaseOrderController extends Controller
                             ]);
                         }
                     }
+                } catch (\JsonException $e) {
+                    throw new \Exception('Error al procesar los parciales: formato JSON inválido');
                 }
             }
 
@@ -726,6 +780,9 @@ class PurchaseOrderController extends Controller
             }
 
             \DB::commit();
+
+            // Invalidar caché de análisis ya que se actualizaron parciales o estado
+            $this->clearAnalyzeCache();
 
             // Send email if there are observations
             $cleanObservations = trim(strip_tags($validated['observations'] ?? ''));
@@ -744,6 +801,15 @@ class PurchaseOrderController extends Controller
                 'data'    => $order->fresh(['client', 'products', 'partials', 'comments']),
             ]);
 
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            \DB::rollBack();
+            \Log::error('Purchase order not found: ' . $orderId);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'No se encontró la orden de compra con ID: ' . $orderId,
+            ], 404);
+
         } catch (\Exception $e) {
             \DB::rollBack();
             \Log::error('Error updating purchase order status: ' . $e->getMessage(), [
@@ -751,9 +817,23 @@ class PurchaseOrderController extends Controller
                 'trace'    => $e->getTraceAsString(),
             ]);
 
+            // Mensajes de error más amigables
+            $userMessage = $e->getMessage();
+
+            // Si el mensaje de error es muy técnico, proporcionar uno más amigable
+            if (str_contains($userMessage, 'Failed to parse time string') ||
+                str_contains($userMessage, 'timezone could not be found')) {
+                $userMessage = 'La fecha proporcionada no es válida. Por favor selecciona una fecha correcta.';
+            } elseif (str_contains($userMessage, 'Integrity constraint violation')) {
+                $userMessage = 'Error de integridad en la base de datos. Verifica que todos los datos sean correctos.';
+            } elseif (str_contains($userMessage, 'SQLSTATE')) {
+                $userMessage = 'Error en la base de datos. Por favor contacta al administrador.';
+            }
+
             return response()->json([
                 'success' => false,
-                'message' => 'Error al actualizar la orden: ' . $e->getMessage(),
+                'message' => $userMessage,
+                'error_details' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -955,6 +1035,9 @@ class PurchaseOrderController extends Controller
             }
 
             \DB::commit();
+
+            // Invalidar caché de análisis ya que se actualizaron parciales temporales
+            $this->clearAnalyzeCache();
         } catch (\Throwable $e) {
             \DB::rollBack();
             \Log::error('Error al guardar observaciones', [
@@ -1448,143 +1531,32 @@ class PurchaseOrderController extends Controller
 
     /**
      * Get TRM (Tasa Representativa del Mercado) for a specific date
+     * Usa el TrmService centralizado con sistema de fallback completo
      */
     public function getTrm(Request $request): JsonResponse
     {
         $customDate = $request->query('custom_date');
-        $date = $customDate ?? date('Y-m-d');
 
         try {
-            $trmFromService = $this->fetchTrmFromSoapService($date);
-            $trmValue = $trmFromService['value'] ?? 0;
+            $trmValue = $this->trmService->getTrm($customDate);
 
             return response()->json([
                 'success' => true,
                 'trm' => $trmValue,
-                'date' => $date,
+                'date' => $customDate ?? date('Y-m-d'),
             ]);
         } catch (\Exception $e) {
-            // Fallback to exchange rates API
-            $trmValue = $this->getExchangeRates($date) ?? 0;
+            Log::error("Error en getTrm endpoint: " . $e->getMessage());
 
             return response()->json([
-                'success' => true,
-                'trm' => $trmValue,
-                'date' => $date,
-            ]);
+                'success' => false,
+                'trm' => 4000.0, // Valor por defecto en caso de error crítico
+                'date' => $customDate ?? date('Y-m-d'),
+                'error' => 'Error obteniendo TRM',
+            ], 500);
         }
     }
 
-    /**
-     * Fetch TRM from Superfinanciera SOAP service
-     */
-    private function fetchTrmFromSoapService(string $date): ?array
-    {
-        $soapUrl = "https://www.superfinanciera.gov.co/SuperfinancieraWebServiceTRM/TCRMServicesWebService/TCRMServicesWebService";
-
-        $xmlPostString = <<<XML
-        <Envelope xmlns="http://schemas.xmlsoap.org/soap/envelope/">
-            <Body>
-                <queryTCRM xmlns="http://action.trm.services.generic.action.superfinanciera.nexura.sc.com.co/">
-                    <tcrmQueryAssociatedDate xmlns="">{$date}</tcrmQueryAssociatedDate>
-                </queryTCRM>
-            </Body>
-        </Envelope>
-        XML;
-
-        $headers = [
-            "Content-type: text/xml; charset=\"utf-8\"",
-            "Accept: text/xml",
-            "Cache-Control: no-cache",
-            "Pragma: no-cache",
-            "SOAPAction: \"\"",
-            "Content-length: " . strlen($xmlPostString),
-        ];
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_URL, $soapUrl);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $xmlPostString);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-
-        $response = curl_exec($ch);
-
-        if (curl_errno($ch) || $response === false) {
-            $errorMsg = curl_error($ch);
-            Log::error("TRM cURL Error: " . $errorMsg);
-            curl_close($ch);
-            return null;
-        }
-
-        curl_close($ch);
-
-        try {
-            $response = str_replace(['soap:', 'ns2:'], '', $response);
-            $xml = new \SimpleXMLElement($response);
-            $returnNode = $xml->Body->queryTCRMResponse->return;
-
-            if (!$returnNode || !isset($returnNode->success) || $returnNode->success == 'false') {
-                Log::warning("TRM SOAP Service did not return a successful response for date: {$date}");
-                return null;
-            }
-
-            return [
-                'value'      => (float) $returnNode->value,
-                'unit'       => (string) $returnNode->unit,
-                'valid_from' => (string) $returnNode->validityFrom,
-                'valid_to'   => (string) $returnNode->validityTo,
-                'success'    => filter_var((string) $returnNode->success, FILTER_VALIDATE_BOOLEAN),
-            ];
-        } catch (\Exception $e) {
-            Log::error("TRM XML Parse Error: " . $e->getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Fallback to OpenExchangeRates API if SOAP service fails
-     */
-    private function getExchangeRates(?string $date = null): ?float
-    {
-        $targetDate = $date ?? Carbon::now()->format('Y-m-d');
-        $currentDate = Carbon::now()->format('Y-m-d');
-        $cacheFile = "exchange_rate_{$currentDate}.json";
-
-        // Check if value exists in storage
-        if (Storage::disk('local')->exists($cacheFile)) {
-            $cachedData = json_decode(Storage::disk('local')->get($cacheFile), true);
-            if ($cachedData['date'] === $currentDate) {
-                return $cachedData['exchangeRate'];
-            }
-        }
-
-        // Make API request if not cached
-        $url = "https://openexchangerates.org/api/time-series.json?app_id=f2884227901c482194f0fbfe7fa77c63&start={$targetDate}&end={$targetDate}&symbols=USD&base=COP";
-
-        try {
-            $client = new \GuzzleHttp\Client();
-            $response = $client->request('GET', $url);
-            $data = json_decode($response->getBody()->getContents(), true);
-            $exchangeRate = $data['rates'][$currentDate]['USD'] ?? null;
-
-            if ($exchangeRate) {
-                // Save to cache
-                Storage::disk('local')->put($cacheFile, json_encode([
-                    'exchangeRate' => $exchangeRate,
-                    'date' => $currentDate
-                ]));
-            }
-
-            return $exchangeRate;
-        } catch (\Exception $e) {
-            Log::error("Exchange rates API error: " . $e->getMessage());
-            return null;
-        }
-    }
 
     /**
      * Send purchase order emails (pedido and despacho)
@@ -1808,5 +1780,14 @@ class PurchaseOrderController extends Controller
         $mimeType = 'image/png';
 
         return 'data:' . $mimeType . ';base64,' . $imageData;
+    }
+
+    /**
+     * Invalidar caché de análisis de clientes
+     * Este método debe ser llamado cuando se actualizan datos que afectan el análisis
+     */
+    private function clearAnalyzeCache(): void
+    {
+        Cache::forever('analyze.clients.force_reload_after', now()->timestamp);
     }
 }

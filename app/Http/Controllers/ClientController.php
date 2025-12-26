@@ -23,14 +23,17 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Models\User;
 use App\Models\Role;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Cache;
 use App\Mail\ClientAutoCreationMail;
 use App\Mail\ClientAutofillMail;
 use App\Mail\ClientWelcomeMail;
+use App\Queries\Cartera\CarteraQuery;
 
 class ClientController extends Controller
 {
-    public function __construct()
-    {
+    public function __construct(
+        private readonly ?CarteraQuery $carteraQuery = null
+    ) {
         $this->middleware('can:client list')->only(['index', 'exportClients', 'exportOffices', 'branchOffices', 'executives']);
         $this->middleware('can:client create')->only(['store', 'importClients', 'importOffices', 'autocreation']);
         $this->middleware('can:client edit')->only(['update', 'saveBranchOffice', 'saveExecutive', 'bulkAutofill']);
@@ -39,70 +42,115 @@ class ClientController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Client::query();
+        // Generar clave de caché única basada en los parámetros de la consulta
+        $cacheKey = $this->generateClientsCacheKey($request);
+        $cacheTimestampKey = $cacheKey . '.timestamp';
 
-        if ($search = $request->query('search')) {
-            $query->where(function ($q) use ($search) {
-                $q->where('client_name', 'like', "%{$search}%")
-                    ->orWhere('nit', 'like', "%{$search}%")
-                    ->orWhere('email', 'like', "%{$search}%");
-            });
+        // Verificar si el caché es válido comparando timestamps
+        $cachedTimestamp = Cache::get($cacheTimestampKey);
+        $lastModified = Cache::get('clients.last_modified', 0);
+
+        if ($cachedTimestamp && $cachedTimestamp < $lastModified) {
+            // El caché está desactualizado, eliminarlo
+            Cache::forget($cacheKey);
+            Cache::forget($cacheTimestampKey);
         }
 
-        if ($exec = $request->query('executive_email')) {
-            $query->where('executive_email', $exec);
-        }
+        // Caché permanente (solo se invalida manualmente en CRUD)
+        $data = Cache::rememberForever($cacheKey, function () use ($request) {
+            $query = Client::query();
 
-        $allowedSorts = ['id', 'client_name', 'nit', 'email', 'executive_email'];
-        $sortBy = $request->query('sort_by', 'id');
-        $sortDir = strtolower($request->query('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
-        if (! in_array($sortBy, $allowedSorts, true)) {
-            $sortBy = 'id';
-        }
-        $query->orderBy($sortBy, $sortDir);
+            if ($search = $request->query('search')) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('client_name', 'like', "%{$search}%")
+                        ->orWhere('nit', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
+                });
+            }
 
-        $perPage = max(1, min(200, (int) $request->query('per_page', 15)));
-        $paginate = filter_var($request->query('paginate', true), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($exec = $request->query('executive_email')) {
+                $query->where('executive_email', $exec);
+            }
 
-        if ($paginate === false) {
-            $items = $query->limit($perPage)->get();
-            $items->transform(function ($client) {
+            $allowedSorts = ['id', 'client_name', 'nit', 'email', 'executive_email'];
+            $sortBy = $request->query('sort_by', 'id');
+            $sortDir = strtolower($request->query('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
+            if (! in_array($sortBy, $allowedSorts, true)) {
+                $sortBy = 'id';
+            }
+            $query->orderBy($sortBy, $sortDir);
+
+            $perPage = max(1, min(200, (int) $request->query('per_page', 15)));
+            $paginate = filter_var($request->query('paginate', true), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+            if ($paginate === false) {
+                $items = $query->limit($perPage)->get();
+                $items->transform(function ($client) {
+                    $client->autofill_link = $this->buildAutofillLink($client->id);
+                    return $client;
+                });
+                return [
+                    'success' => true,
+                    'data' => $items,
+                    'meta' => [
+                        'total' => $items->count(),
+                        'paginate' => false,
+                    ],
+                ];
+            }
+
+            $clients = $query->paginate($perPage);
+
+            $items = collect($clients->items())->map(function ($client) {
                 $client->autofill_link = $this->buildAutofillLink($client->id);
                 return $client;
             });
-            return response()->json([
+
+            return [
                 'success' => true,
                 'data' => $items,
                 'meta' => [
-                    'total' => $items->count(),
-                    'paginate' => false,
+                    'current_page' => $clients->currentPage(),
+                    'last_page' => $clients->lastPage(),
+                    'per_page' => $clients->perPage(),
+                    'total' => $clients->total(),
+                    'paginate' => true,
                 ],
-            ]);
-        }
-
-        $clients = $query->paginate($perPage);
-
-        $items = collect($clients->items())->map(function ($client) {
-            $client->autofill_link = $this->buildAutofillLink($client->id);
-            return $client;
+            ];
         });
 
-        return response()->json([
-            'success' => true,
-            'data' => $items,
-            'meta' => [
-                'current_page' => $clients->currentPage(),
-                'last_page' => $clients->lastPage(),
-                'per_page' => $clients->perPage(),
-                'total' => $clients->total(),
-                'paginate' => true,
-            ],
-        ]);
+        // Guardar timestamp del caché si es la primera vez (permanente)
+        if (!Cache::has($cacheTimestampKey)) {
+            Cache::forever($cacheTimestampKey, now()->timestamp);
+        }
+
+        return response()->json($data);
     }
 
     public function show(int $clientId): JsonResponse
     {
-        $client = Client::query()->findOrFail($clientId);
+        $cacheKey = "clients.show.{$clientId}";
+        $cacheTimestampKey = "{$cacheKey}.timestamp";
+
+        // Verificar si el caché es válido comparando timestamps
+        $cachedTimestamp = Cache::get($cacheTimestampKey);
+        $lastModified = Cache::get('clients.last_modified', 0);
+
+        if ($cachedTimestamp && $cachedTimestamp < $lastModified) {
+            // El caché está desactualizado, eliminarlo
+            Cache::forget($cacheKey);
+            Cache::forget($cacheTimestampKey);
+        }
+
+        // Caché permanente (solo se invalida manualmente en CRUD)
+        $client = Cache::rememberForever($cacheKey, function () use ($clientId) {
+            return Client::query()->findOrFail($clientId);
+        });
+
+        // Guardar timestamp del caché si es la primera vez (permanente)
+        if (!Cache::has($cacheTimestampKey)) {
+            Cache::forever($cacheTimestampKey, now()->timestamp);
+        }
 
         return response()->json([
             'success' => true,
@@ -138,6 +186,9 @@ class ClientController extends Controller
         $data['user_id'] = $user->id;
         $client = Client::create($data);
 
+        // Invalidar caché de clientes
+        $this->clearClientsCache();
+
         return response()->json([
             'success' => true,
             'message' => 'Cliente creado exitosamente con usuario vinculado',
@@ -151,6 +202,9 @@ class ClientController extends Controller
         $data = $this->prepareClientPayload($request->validated(), $request);
         $client->update($data);
 
+        // Invalidar caché de clientes
+        $this->clearClientsCache();
+
         return response()->json([
             'success' => true,
             'message' => 'Cliente actualizado',
@@ -163,6 +217,9 @@ class ClientController extends Controller
         $client = Client::query()->findOrFail($clientId);
         $client->delete();
 
+        // Invalidar caché de clientes
+        $this->clearClientsCache();
+
         return response()->json([
             'success' => true,
             'message' => 'Cliente eliminado',
@@ -171,11 +228,32 @@ class ClientController extends Controller
 
     public function branchOffices(int $clientId): JsonResponse
     {
-        $client = Client::query()->findOrFail($clientId);
-        $offices = BranchOffice::query()
-            ->where('client_id', $client->id)
-            ->orderBy('id')
-            ->get();
+        $cacheKey = "branch_offices.client.{$clientId}";
+        $cacheTimestampKey = "{$cacheKey}.timestamp";
+
+        // Verificar si el caché es válido comparando timestamps
+        $cachedTimestamp = Cache::get($cacheTimestampKey);
+        $lastModified = Cache::get('branch_offices.last_modified', 0);
+
+        if ($cachedTimestamp && $cachedTimestamp < $lastModified) {
+            // El caché está desactualizado, eliminarlo
+            Cache::forget($cacheKey);
+            Cache::forget($cacheTimestampKey);
+        }
+
+        // Caché permanente (solo se invalida manualmente en CRUD)
+        $offices = Cache::rememberForever($cacheKey, function () use ($clientId) {
+            $client = Client::query()->findOrFail($clientId);
+            return BranchOffice::query()
+                ->where('client_id', $client->id)
+                ->orderBy('id')
+                ->get();
+        });
+
+        // Guardar timestamp del caché si es la primera vez (permanente)
+        if (!Cache::has($cacheTimestampKey)) {
+            Cache::forever($cacheTimestampKey, now()->timestamp);
+        }
 
         return response()->json([
             'success' => true,
@@ -188,6 +266,9 @@ class ClientController extends Controller
         $payload = $request->validated();
         $payload['client_id'] = $clientId;
         $office = BranchOffice::query()->create($payload);
+
+        // Invalidar caché de sucursales
+        $this->clearBranchOfficesCache();
 
         return response()->json([
             'success' => true,
@@ -204,6 +285,9 @@ class ClientController extends Controller
 
         $office->update($request->validated());
 
+        // Invalidar caché de sucursales
+        $this->clearBranchOfficesCache();
+
         return response()->json([
             'success' => true,
             'message' => 'Sucursal actualizada',
@@ -218,6 +302,9 @@ class ClientController extends Controller
             ->findOrFail($officeId);
 
         $office->delete();
+
+        // Invalidar caché de sucursales
+        $this->clearBranchOfficesCache();
 
         return response()->json([
             'success' => true,
@@ -340,6 +427,11 @@ class ClientController extends Controller
                 }
             }
             DB::commit();
+
+            // Invalidar caché de clientes si hubo cambios
+            if ($created > 0 || $updated > 0) {
+                $this->clearClientsCache();
+            }
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
@@ -431,6 +523,11 @@ class ClientController extends Controller
             }
 
             DB::commit();
+
+            // Invalidar caché de sucursales si hubo cambios
+            if ($created > 0 || $updated > 0) {
+                $this->clearBranchOfficesCache();
+            }
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
@@ -605,6 +702,9 @@ class ClientController extends Controller
             Mail::to($recipients)->send(new ClientAutoCreationMail($client, $link));
         }
 
+        // Invalidar caché de clientes
+        $this->clearClientsCache();
+
         return response()->json([
             'success' => true,
             'message' => 'Cliente creado y correo de autocreación enviado',
@@ -750,6 +850,9 @@ class ClientController extends Controller
                 \Log::error('Error enviando correo de bienvenida: ' . $e->getMessage());
             }
 
+            // Invalidar caché de clientes
+            $this->clearClientsCache();
+
             return response()->json([
                 'success' => true,
                 'message' => 'Datos actualizados correctamente',
@@ -868,6 +971,45 @@ class ClientController extends Controller
         }
 
         return array_values(array_unique($emails));
+    }
+
+    /**
+     * Generar clave de caché única basada en los parámetros de la consulta
+     */
+    private function generateClientsCacheKey(Request $request): string
+    {
+        $params = [
+            'search' => $request->query('search', ''),
+            'executive_email' => $request->query('executive_email', ''),
+            'sort_by' => $request->query('sort_by', 'id'),
+            'sort_direction' => $request->query('sort_direction', 'desc'),
+            'per_page' => $request->query('per_page', 15),
+            'paginate' => $request->query('paginate', true),
+            'page' => $request->query('page', 1),
+        ];
+
+        return 'clients.index.' . md5(json_encode($params));
+    }
+
+    /**
+     * Invalidar todas las claves de caché relacionadas con clientes
+     */
+    private function clearClientsCache(): void
+    {
+        // Guardar un timestamp de invalidación para verificar la frescura del caché
+        Cache::forever('clients.last_modified', now()->timestamp);
+
+        // Limpiar caché de cartera customers ya que depende de la tabla clients
+        $this->carteraQuery?->clearCustomersCache();
+    }
+
+    /**
+     * Invalidar todas las claves de caché relacionadas con sucursales
+     */
+    private function clearBranchOfficesCache(): void
+    {
+        // Guardar un timestamp de invalidación para verificar la frescura del caché
+        Cache::forever('branch_offices.last_modified', now()->timestamp);
     }
 
 }

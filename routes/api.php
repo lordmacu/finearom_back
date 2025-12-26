@@ -98,6 +98,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Analyze (clientes / parciales)
     Route::get('/analyze/clients', [AnalyzeController::class, 'clients']);
+    Route::post('/analyze/clients/clear-cache', [AnalyzeController::class, 'clearAnalyzeCache']);
     Route::get('/analyze/clients/{clientId}/partials', [AnalyzeController::class, 'clientPartials']);
     Route::put('/analyze/partials/{partialId}', [AnalyzeController::class, 'updatePartial']);
     Route::delete('/analyze/partials/{partialId}', [AnalyzeController::class, 'deletePartial']);
@@ -148,12 +149,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Clientes y sucursales
     Route::get('/clients', [ClientController::class, 'index']);
+    Route::post('/clients/import', [ClientController::class, 'importClients']);
+    Route::get('/clients/export', [ClientController::class, 'exportClients']);
     Route::get('/clients/{clientId}', [ClientController::class, 'show']);
     Route::post('/clients', [ClientController::class, 'store']);
     Route::put('/clients/{clientId}', [ClientController::class, 'update']);
     Route::delete('/clients/{clientId}', [ClientController::class, 'destroy']);
-    Route::post('/clients/import', [ClientController::class, 'importClients']);
-    Route::get('/clients/export', [ClientController::class, 'exportClients']);
     Route::get('/clients/{clientId}/autofill-link', [ClientController::class, 'generateAutofillLink']);
     Route::post('/clients/{clientId}/autofill/send', [ClientController::class, 'sendAutofillEmail']);
     Route::post('/clients/autofill', [ClientController::class, 'bulkAutofill']);
