@@ -1122,11 +1122,8 @@ class PurchaseOrderController extends Controller
 
             $primaryTo = array_shift($ccEmails) ?: null;
 
-            // Agregar ejecutivo si aplica
-            $subject = ($order->is_new_win ? 'Re: NEW WIN - ' : 'Re: ') .
-                'Pedido - ' . $order->client->client_name . ' - ' .
-                $order->client->nit . ' - ' .
-                $order->order_consecutive;
+            // Usar el mismo subject del correo original de la orden
+            $subject = 'Re: ' . $order->subject_client;
 
             $threadId = $order->message_despacho_id ?: $order->message_id;
 
@@ -1179,7 +1176,7 @@ class PurchaseOrderController extends Controller
                     $clientMail = (new Email())
                         ->from($userEmail)
                         ->to($cEmail)
-                        ->subject('Re: ' . ($order->subject_client ?: $subject))
+                        ->subject($subject)
                         ->html($clientBody);
 
                     if ($threadId) {
