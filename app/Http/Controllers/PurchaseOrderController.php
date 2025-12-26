@@ -1016,7 +1016,15 @@ class PurchaseOrderController extends Controller
             // Observaciones visibles para cliente
             if (! empty($validated['new_observation'])) {
                 $currentObservations = $order->observations_extra ?? '';
-                $order->observations_extra = $validated['new_observation'] . $currentObservations;
+                $timestamp = now()->format('Y-m-d H:i:s');
+                $separator = '<hr style="margin: 20px 0; border: 1px solid #ccc;"><p style="color: #666; font-size: 12px; margin: 10px 0;"><strong>Fecha:</strong> ' . $timestamp . '</p>';
+
+                // Si hay contenido previo, agregar separador
+                if (!empty($currentObservations)) {
+                    $order->observations_extra = $validated['new_observation'] . $separator . $currentObservations;
+                } else {
+                    $order->observations_extra = $validated['new_observation'];
+                }
             }
 
             $cleanInternal = trim(strip_tags($validated['internal_observation'] ?? ''));
@@ -1033,7 +1041,15 @@ class PurchaseOrderController extends Controller
             // Observaciones internas (solo planta)
             if ($shouldStoreInternal) {
                 $currentInternal = $order->internal_observations ?? '';
-                $order->internal_observations = $validated['internal_observation'] . $currentInternal;
+                $timestamp = now()->format('Y-m-d H:i:s');
+                $separator = '<hr style="margin: 20px 0; border: 1px solid #ccc;"><p style="color: #666; font-size: 12px; margin: 10px 0;"><strong>Fecha:</strong> ' . $timestamp . '</p>';
+
+                // Si hay contenido previo, agregar separador
+                if (!empty($currentInternal)) {
+                    $order->internal_observations = $validated['internal_observation'] . $separator . $currentInternal;
+                } else {
+                    $order->internal_observations = $validated['internal_observation'];
+                }
             }
 
             $order->save();
