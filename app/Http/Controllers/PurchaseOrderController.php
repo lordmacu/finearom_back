@@ -1183,44 +1183,10 @@ class PurchaseOrderController extends Controller
                 'order_id' => $order->id,
                 'observationHtml_full' => $observationHtml,
                 'tablesOnly_full' => $tablesOnly,
+                'hasInternalObservation' => !empty($internalObservation),
             ]);
 
-            // 1. ENVIAR EMAIL INTERNO (texto + tabla + observaciones internas)
-            // A: Emails internos del request + emails de procesos
-            if (!empty($allInternalEmails)) {
-                $internalBody = view('emails.purchase_order_observation', [
-                    'order'           => $order,
-                    'observationHtml' => $observationHtml, // Contenido completo
-                    'internalHtml'    => $internalObservation,
-                    'forClient'       => false,
-                ])->render();
-
-                $internalTo = array_shift($allInternalEmails);
-                $internalCcAddresses = array_map(fn ($email) => new Address($email), $allInternalEmails);
-
-                $internalEmail = (new Email())
-                    ->from($userEmail)
-                    ->to($internalTo)
-                    ->cc(...$internalCcAddresses)
-                    ->subject($subject)
-                    ->html($internalBody);
-
-                if ($threadId) {
-                    $internalEmail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
-                    $internalEmail->getHeaders()->addTextHeader('References', '<' . $threadId . '>');
-                }
-
-                \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email interno', [
-                    'order_id' => $order->id,
-                    'to' => $internalTo,
-                    'cc' => $allInternalEmails,
-                    'subject' => $subject,
-                ]);
-
-                $mailer->send($internalEmail);
-            }
-
-            // 2. ENVIAR EMAIL AL CLIENTE (solo tabla)
+            // 1. ENVIAR EMAIL AL CLIENTE (solo tabla)
             // A: Emails del cliente que están en el request
             if (!empty($clientEmailsFromRequest) && !empty($tablesOnly)) {
                 $clientBody = view('emails.purchase_order_observation', [
@@ -1252,6 +1218,42 @@ class PurchaseOrderController extends Controller
                 ]);
 
                 $mailer->send($clientMail);
+            }
+
+            // 2. ENVIAR EMAIL INTERNO (tabla + texto + observaciones internas)
+            // A: Emails internos del request + emails de procesos
+            // Se envía si hay contenido en observationHtml O si hay observaciones internas
+            if (!empty($allInternalEmails) && (!empty($observationHtml) || !empty($internalObservation))) {
+                $internalBody = view('emails.purchase_order_observation', [
+                    'order'           => $order,
+                    'observationHtml' => $observationHtml, // Contenido completo (tabla + texto)
+                    'internalHtml'    => $internalObservation,
+                    'forClient'       => false,
+                ])->render();
+
+                $internalTo = array_shift($allInternalEmails);
+                $internalCcAddresses = array_map(fn ($email) => new Address($email), $allInternalEmails);
+
+                $internalEmail = (new Email())
+                    ->from($userEmail)
+                    ->to($internalTo)
+                    ->cc(...$internalCcAddresses)
+                    ->subject($subject)
+                    ->html($internalBody);
+
+                if ($threadId) {
+                    $internalEmail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
+                    $internalEmail->getHeaders()->addTextHeader('References', '<' . $threadId . '>');
+                }
+
+                \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email interno', [
+                    'order_id' => $order->id,
+                    'to' => $internalTo,
+                    'cc' => $allInternalEmails,
+                    'subject' => $subject,
+                ]);
+
+                $mailer->send($internalEmail);
             }
         } catch (\Throwable $e) {
             \Log::error('Error enviando correo de observaciones', [
