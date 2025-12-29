@@ -52,28 +52,67 @@ class DashboardController extends Controller
         $startDate = $request->start_date ?? Carbon::now()->startOfMonth()->toDateString();
         $endDate = $request->end_date ?? Carbon::now()->endOfMonth()->toDateString();
 
-        try {
+        try { 
             // Planned: productos de órdenes creadas en el mes
             $plannedProducts = DB::table('purchase_order_product as pop')
                 ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
                 ->join('products as p', 'pop.product_id', '=', 'p.id')
+                ->leftJoin('partials as pt', function($join) use ($startDate, $endDate) {
+                    $join->on('pt.product_order_id', '=', 'pop.id')
+                        ->where('pt.type', '=', 'real')
+                        ->whereNotNull('pt.dispatch_date')
+                        ->whereBetween('pt.dispatch_date', [$startDate, $endDate]);
+                })
+                ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
                 ->where('po.client_id', $client->id)
                 ->whereBetween('po.order_creation_date', [$startDate, $endDate])
-                ->select('pop.quantity',
+                ->select('pop.id as pop_id',
+                    'pop.quantity',
                     DB::raw('CASE
                         WHEN pop.muestra = 1 THEN 0
                         WHEN pop.price > 0 THEN pop.price
                         ELSE p.price
                     END as price'),
-                    'po.trm')
+                    'po.trm as order_trm',
+                    'pt.trm as partial_real_trm',
+                    'td.value as daily_trm')
                 ->get();
 
             $plannedUsd = $plannedProducts->sum(function ($row) {
                 return (float) $row->price * (float) $row->quantity;
             });
+
             $plannedCop = $plannedProducts->sum(function ($row) {
-                $trm = $row->trm ?? 4000;
-                return (float) $row->price * (float) $row->quantity * $trm;
+                // Same priority order as dispatched:
+                // 1. TRM from real partial (if exists and valid)
+                // 2. TRM from order (if exists and valid)
+                // 3. Daily TRM (if exists)
+                // 4. Default 4000
+                $trm = 4000;
+
+                if (!empty($row->partial_real_trm) && (float)$row->partial_real_trm > 0) {
+                    $trm = (float)$row->partial_real_trm;
+                } elseif (!empty($row->order_trm) && (float)$row->order_trm > 0) {
+                    $trm = (float)$row->order_trm;
+                } elseif (!empty($row->daily_trm)) {
+                    $trm = (float)$row->daily_trm;
+                }
+
+                $valueCop = (float) $row->price * (float) $row->quantity * $trm;
+
+                Log::info('ClientQuickStats - Planned TRM', [
+                    'pop_id' => $row->pop_id,
+                    'partial_real_trm' => $row->partial_real_trm,
+                    'partial_real_trm_float' => (float)$row->partial_real_trm,
+                    'order_trm' => $row->order_trm,
+                    'daily_trm' => $row->daily_trm,
+                    'selected_trm' => $trm,
+                    'price' => $row->price,
+                    'quantity' => $row->quantity,
+                    'value_cop' => $valueCop
+                ]);
+
+                return $valueCop;
             });
 
             // Dispatched: partials del mes
@@ -92,27 +131,45 @@ class DashboardController extends Controller
                         WHEN pop.price > 0 THEN pop.price
                         ELSE p.price
                     END as price'),
-                    'partials.trm as partial_trm',
+                    'partials.trm as partial_real_trm',
+                    'po.trm as order_trm',
                     'trm_daily.value as daily_trm')
                 ->get();
 
             $dispatchedUsd = $partials->sum(function ($row) {
                 return (float) $row->price * (float) $row->quantity;
             });
-            
+
             $dispatchedCop = $partials->sum(function ($row) {
-                // Logic aligned with AnalyzeQuery:
-                // 1. Manual TRM (if > 3800)
-                // 2. Daily TRM (if exists)
-                // 3. Default 4000
+                // Priority order for TRM:
+                // 1. TRM from real partial (if exists and valid)
+                // 2. TRM from order (if exists and valid)
+                // 3. Daily TRM (if exists)
+                // 4. Default 4000
                 $trm = 4000;
-                if (!empty($row->partial_trm) && $row->partial_trm > 3800) {
-                     $trm = $row->partial_trm;
+
+                if (!empty($row->partial_real_trm) && (float)$row->partial_real_trm > 0) {
+                    $trm = (float)$row->partial_real_trm;
+                } elseif (!empty($row->order_trm) && (float)$row->order_trm > 0) {
+                    $trm = (float)$row->order_trm;
                 } elseif (!empty($row->daily_trm)) {
-                     $trm = $row->daily_trm;
+                    $trm = (float)$row->daily_trm;
                 }
 
-                return (float) $row->price * (float) $row->quantity * $trm;
+                $valueCop = (float) $row->price * (float) $row->quantity * $trm;
+
+                Log::info('ClientQuickStats - Dispatched TRM', [
+                    'partial_real_trm' => $row->partial_real_trm,
+                    'partial_real_trm_float' => (float)$row->partial_real_trm,
+                    'order_trm' => $row->order_trm,
+                    'daily_trm' => $row->daily_trm,
+                    'selected_trm' => $trm,
+                    'price' => $row->price,
+                    'quantity' => $row->quantity,
+                    'value_cop' => $valueCop
+                ]);
+
+                return $valueCop;
             });
 
             // Weighted average TRM: Total COP / Total USD

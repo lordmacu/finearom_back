@@ -263,20 +263,26 @@ class GenerateOrderStatistics extends Command
      */
     private function calculateDispatchStats(Carbon $from, Carbon $to): array
     {
-        // Exact same query as analyzeClientsByStatus
-        $orders = PurchaseOrder::with([
-            'client',
-            'partials' => function ($q) use ($from, $to) {
-                $q->where('type', 'real')
-                  ->whereBetween('dispatch_date', [$from, $to])
-                  ->with('product')
-                  ->join('purchase_order_product', 'partials.product_order_id', '=', 'purchase_order_product.id')
-                  ->select('partials.*', 'purchase_order_product.muestra as muestra', 'purchase_order_product.price as pivot_price')
-                  ->distinct();
-            },
-        ])->whereHas('partials', function ($q) use ($from, $to) {
-            $q->where('type', 'real')->whereBetween('dispatch_date', [$from, $to]);
-        })->get();
+        // Use query builder directly (like DashboardController) instead of Eloquent relationships
+        // to avoid issues with the PurchaseOrder partials() relationship
+        $partials = DB::table('partials')
+            ->join('purchase_order_product as pop', 'partials.product_order_id', '=', 'pop.id')
+            ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->where('partials.type', 'real')
+            ->whereNotNull('partials.dispatch_date')
+            ->whereBetween('partials.dispatch_date', [$from->format('Y-m-d'), $to->format('Y-m-d')])
+            ->select(
+                'partials.id',
+                'partials.quantity',
+                'partials.dispatch_date',
+                'partials.trm as partial_trm',
+                'pop.muestra',
+                'pop.price as pivot_price',
+                'p.price as product_price',
+                'po.id as order_id'
+            )
+            ->get();
 
         $dispatched_orders_set = [];
         $total_value_usd = 0.0;
@@ -284,62 +290,49 @@ class GenerateOrderStatistics extends Command
         $commercial_products_dispatched = 0;
         $sample_products_dispatched = 0;
 
-        foreach ($orders as $order) {
-            $dispatched_any_for_order = false;
-
-            foreach ($order->partials as $partial) {
-                // Extra guard (same as controller)
-                if (
-                    !Carbon::parse($partial->dispatch_date)->between($from, $to) ||
-                    $partial->type !== 'real'
-                ) {
-                    continue;
-                }
-
-                // Price USD: 0 if sample (muestra == 1), else effective price
-                $isSample = isset($partial->muestra) && (int) $partial->muestra === 1;
-                if ($isSample) {
-                    $price_usd = 0.0;
-                } else {
-                    // Usar precio efectivo: si pivot_price > 0, usar ese, sino usar product->price
-                    $effectivePrice = ($partial->pivot_price > 0) ? $partial->pivot_price : ($partial->product->price ?? 0);
-                    $price_usd = (float) $effectivePrice;
-                }
-
-                // Effective TRM identical call to the controller
-                $trm_data = $this->trm_service->getEffectiveTrm($partial->trm, $partial->dispatch_date);
-                $trm = (float) $trm_data['trm'];
-                // Alinear con analyze: si la TRM es muy baja o viene nula, usar TRM del día y último fallback
-                if ($trm < 3800) {
-                    $fallbackTrm = $this->trm_service->getTrm($partial->dispatch_date);
-                    $trm = $fallbackTrm > 0 ? (float) $fallbackTrm : 4000;
-                    if ($trm < 3800) {
-                        $trm = 4000;
-                    }
-                }
-
-                // Amount in COP
-                $amount_cop = ($price_usd * (float) $partial->quantity) * $trm;
-
-                // Accumulate totals
-                $total_value_usd += $price_usd * (float) $partial->quantity;
-                $total_value_cop += $amount_cop;
-
-                // Count products by type
-                $isSample = isset($partial->muestra) && (int) $partial->muestra === 1;
-
-                if ($isSample) {
-                    $sample_products_dispatched += (int) $partial->quantity;
-                } else {
-                    $commercial_products_dispatched += (int) $partial->quantity;
-                }
-
-                $dispatched_any_for_order = true;
+        foreach ($partials as $partial) {
+            // Price USD: 0 if sample (muestra == 1), else effective price
+            $isSample = (int) $partial->muestra === 1;
+            if ($isSample) {
+                $price_usd = 0.0;
+            } else {
+                // Usar precio efectivo: si pivot_price > 0, usar ese, sino usar product_price
+                $effectivePrice = ($partial->pivot_price > 0) ? $partial->pivot_price : ($partial->product_price ?? 0);
+                $price_usd = (float) $effectivePrice;
             }
 
-            if ($dispatched_any_for_order) {
-                $dispatched_orders_set[$order->id] = true;
+            // Priority order for TRM (aligned with DashboardController):
+            // 1. TRM from real partial (if exists and valid)
+            // 2. TRM from order (if exists and valid)
+            // 3. Daily TRM (if exists)
+            // 4. Default 4000
+            $trm = 4000;
+
+            if (!empty($partial->partial_trm) && (float)$partial->partial_trm > 0) {
+                $trm = (float)$partial->partial_trm;
+            } else {
+                $fallbackTrm = $this->trm_service->getTrm($partial->dispatch_date);
+                if ($fallbackTrm > 0) {
+                    $trm = (float)$fallbackTrm;
+                }
             }
+
+            // Amount in COP
+            $amount_cop = ($price_usd * (float) $partial->quantity) * $trm;
+
+            // Accumulate totals
+            $total_value_usd += $price_usd * (float) $partial->quantity;
+            $total_value_cop += $amount_cop;
+
+            // Count products by type
+            if ($isSample) {
+                $sample_products_dispatched += (int) $partial->quantity;
+            } else {
+                $commercial_products_dispatched += (int) $partial->quantity;
+            }
+
+            // Track unique orders
+            $dispatched_orders_set[$partial->order_id] = true;
         }
 
         return [
@@ -418,7 +411,7 @@ class GenerateOrderStatistics extends Command
                 $trmToUse = (float) $trmData[$deliveryDate];
             }
             // 2. Fallback: TRM from order if valid
-            elseif (!empty($orderProduct->order_trm) && $orderProduct->order_trm > 3800) {
+            elseif (!empty($orderProduct->order_trm) && (float)$orderProduct->order_trm > 0) {
                 $trmToUse = (float) $orderProduct->order_trm;
             }
             // 3. Default TRM
@@ -589,44 +582,37 @@ class GenerateOrderStatistics extends Command
      */
     private function calculateFinancialStats(Carbon $from, Carbon $to): array
     {
-        // Use same query pattern as analyzeClientsByStatus for TRM calculations
-        $orders = PurchaseOrder::with([
-            'partials' => function ($q) use ($from, $to) {
-                $q->where('type', 'real')
-                  ->whereBetween('dispatch_date', [$from, $to])
-                  ->with('product')
-                  ->join('purchase_order_product', 'partials.product_order_id', '=', 'purchase_order_product.id')
-                  ->select('partials.*', 'purchase_order_product.muestra as muestra', 'purchase_order_product.price as pivot_price');
-            }
-        ])->whereHas('partials', function ($q) use ($from, $to) {
-            $q->where('type', 'real')->whereBetween('dispatch_date', [$from, $to]);
-        })->get()->fresh();
+        // Use query builder directly to avoid Eloquent relationship issues
+        $partials = DB::table('partials')
+            ->join('purchase_order_product as pop', 'partials.product_order_id', '=', 'pop.id')
+            ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+            ->where('partials.type', 'real')
+            ->whereNotNull('partials.dispatch_date')
+            ->whereBetween('partials.dispatch_date', [$from->format('Y-m-d'), $to->format('Y-m-d')])
+            ->select('partials.trm', 'partials.dispatch_date')
+            ->get();
 
         $trmSum = 0;
         $totalPartials = 0;
 
-        foreach ($orders as $order) {
-            foreach ($order->partials as $partial) {
-                if (
-                    !Carbon::parse($partial->dispatch_date)->between($from, $to) ||
-                    $partial->type !== 'real'
-                ) {
-                    continue;
-                }
+        foreach ($partials as $partial) {
+            // Priority order for TRM (aligned with DashboardController):
+            // 1. TRM from real partial (if exists and valid)
+            // 2. Daily TRM (if exists)
+            // 3. Default 4000
+            $trm = 4000;
 
-                $trm_data = $this->trm_service->getEffectiveTrm($partial->trm, $partial->dispatch_date);
-                $trm = (float) $trm_data['trm'];
-                if ($trm < 3800) {
-                    $fallbackTrm = $this->trm_service->getTrm($partial->dispatch_date);
-                    $trm = $fallbackTrm > 0 ? (float) $fallbackTrm : 4000;
-                    if ($trm < 3800) {
-                        $trm = 4000;
-                    }
+            if (!empty($partial->trm) && (float)$partial->trm > 0) {
+                $trm = (float)$partial->trm;
+            } else {
+                $fallbackTrm = $this->trm_service->getTrm($partial->dispatch_date);
+                if ($fallbackTrm > 0) {
+                    $trm = (float)$fallbackTrm;
                 }
-
-                $trmSum += $trm;
-                $totalPartials++;
             }
+
+            $trmSum += $trm;
+            $totalPartials++;
         }
 
         $averageTrm = $totalPartials > 0 ? round($trmSum / $totalPartials, 2) : $this->trm_service->getTrm();
@@ -955,37 +941,34 @@ class GenerateOrderStatistics extends Command
      */
     private function getDayAverageTrm(Carbon $from, Carbon $to): float
     {
-        // First try to get TRM from real dispatches on this day
-        $orders = PurchaseOrder::with([
-            'partials' => function ($q) use ($from, $to) {
-                $q->where('type', 'real')
-                  ->whereBetween('dispatch_date', [$from, $to])
-                  ->with('product')
-                  ->join('purchase_order_product', 'partials.product_order_id', '=', 'purchase_order_product.id')
-                  ->select('partials.*', 'purchase_order_product.muestra as muestra');
-            }
-        ])->whereHas('partials', function ($q) use ($from, $to) {
-            $q->where('type', 'real')->whereBetween('dispatch_date', [$from, $to]);
-        })->get()->fresh();
+        // First try to get TRM from real dispatches on this day (using query builder)
+        $partials = DB::table('partials')
+            ->join('purchase_order_product as pop', 'partials.product_order_id', '=', 'pop.id')
+            ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+            ->where('partials.type', 'real')
+            ->whereNotNull('partials.dispatch_date')
+            ->whereBetween('partials.dispatch_date', [$from->format('Y-m-d'), $to->format('Y-m-d')])
+            ->select('partials.trm', 'partials.dispatch_date')
+            ->get();
 
         $trmSum = 0;
         $validTrmCount = 0;
 
-        foreach ($orders as $order) {
-            foreach ($order->partials as $partial) {
-                if (
-                    !Carbon::parse($partial->dispatch_date)->between($from, $to) ||
-                    $partial->type !== 'real'
-                ) {
-                    continue;
-                }
+        foreach ($partials as $partial) {
+            // Priority order for TRM (same as other methods)
+            $trm = 4000;
 
-                $trm_data = $this->trm_service->getEffectiveTrm($partial->trm, $partial->dispatch_date);
-                $trm = (float) $trm_data['trm'];
-                
-                $trmSum += $trm;
-                $validTrmCount++;
+            if (!empty($partial->trm) && (float)$partial->trm > 0) {
+                $trm = (float)$partial->trm;
+            } else {
+                $fallbackTrm = $this->trm_service->getTrm($partial->dispatch_date);
+                if ($fallbackTrm > 0) {
+                    $trm = (float)$fallbackTrm;
+                }
             }
+
+            $trmSum += $trm;
+            $validTrmCount++;
         }
 
         // If we have real dispatches, use their average TRM
