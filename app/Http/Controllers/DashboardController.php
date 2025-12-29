@@ -81,7 +81,9 @@ class DashboardController extends Controller
                 ->join('purchase_order_product as pop', 'partials.product_order_id', '=', 'pop.id')
                 ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
                 ->join('products as p', 'pop.product_id', '=', 'p.id')
+                ->leftJoin('trm_daily', 'partials.dispatch_date', '=', 'trm_daily.date')
                 ->where('po.client_id', $client->id)
+                ->where('partials.type', 'real')
                 ->whereNotNull('partials.dispatch_date')
                 ->whereBetween('partials.dispatch_date', [$startDate, $endDate])
                 ->select('partials.quantity',
@@ -90,21 +92,33 @@ class DashboardController extends Controller
                         WHEN pop.price > 0 THEN pop.price
                         ELSE p.price
                     END as price'),
-                    'partials.trm as partial_trm', 'po.trm as order_trm')
+                    'partials.trm as partial_trm',
+                    'trm_daily.value as daily_trm')
                 ->get();
 
             $dispatchedUsd = $partials->sum(function ($row) {
                 return (float) $row->price * (float) $row->quantity;
             });
+            
             $dispatchedCop = $partials->sum(function ($row) {
-                $trm = $row->partial_trm ?? $row->order_trm ?? 4000;
+                // Logic aligned with AnalyzeQuery:
+                // 1. Manual TRM (if > 3800)
+                // 2. Daily TRM (if exists)
+                // 3. Default 4000
+                $trm = 4000;
+                if (!empty($row->partial_trm) && $row->partial_trm > 3800) {
+                     $trm = $row->partial_trm;
+                } elseif (!empty($row->daily_trm)) {
+                     $trm = $row->daily_trm;
+                }
+
                 return (float) $row->price * (float) $row->quantity * $trm;
             });
 
-            $averageTrm = $partials->count() > 0
-                ? round($partials->avg(function ($row) {
-                    return $row->partial_trm ?? $row->order_trm ?? 4000;
-                }), 2)
+            // Weighted average TRM: Total COP / Total USD
+            // This ensures mathematical consistency: USD * AvgTRM = COP
+            $averageTrm = $dispatchedUsd > 0
+                ? round($dispatchedCop / $dispatchedUsd, 2)
                 : 0;
 
             $pendingUsd = max(0, $plannedUsd - $dispatchedUsd);
