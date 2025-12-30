@@ -32,25 +32,32 @@ class EmailTemplateSeeder extends Seeder
 <table style="width:100%; border-collapse:collapse; margin-top:12px; text-align:center; margin:auto; border:0;">
     <tr>
         <td style="padding:10px; border:0;">
-            <img src="|base_url|/images/gestioncartera.jpg" alt="Gestión de Cartera" style="width:90px; height:auto; display:block; margin:0 auto 8px;">
-            <p style="margin:0; text-align:center;">
-                 <a href="mailto:facturacion@finearom.com">facturacion@finearom.com</a>
+            <img src="|base_url|/images/gestioncartera.jpg" alt="Gestión de Cartera" width="170" height="90" style="display:block; margin:0 auto;">
+        </td>
+        <td style="padding:10px; border:0;">
+            <img src="|base_url|/images/comercial.jpg" alt="Ejecutiva Comercial" width="170" height="90" style="display:block; margin:0 auto;">
+        </td>
+        <td style="padding:10px; border:0;">
+            <img src="|base_url|/images/logistica.jpg" alt="Logística y Despachos" width="170" height="90" style="display:block; margin:0 auto;">
+        </td>
+    </tr>
+    <tr>
+        <td style="padding:10px; border:0; vertical-align:top;">
+            <p style="margin:8px 0 0 0; text-align:center;">
+                <a href="mailto:facturacion@finearom.com">facturacion@finearom.com</a>
             </p>
         </td>
-
-         <td style="padding:10px; border:0;">
-            <img src="|base_url|/images/comercial.jpg" alt="Ejecutiva Comercial" style="width:90px; height:auto; display:block; margin:0 auto 8px;">
-            <p style="margin:0; text-align:center;">
+        <td style="padding:10px; border:0; vertical-align:top;">
+            <p style="margin:8px 0 0 0; text-align:center;">
                 <strong>Ejecutiva Comercial</strong><br>
                 |executive_name|<br>
                 |executive_phone|<br>
                 |executive_email|
             </p>
         </td>
-        <td style="padding:10px; border:0;">
-            <img src="|base_url|/images/logistica.jpg" alt="Logística y Despachos" style="width:90px; height:auto; display:block; margin:0 auto 8px;">
-            <p style="margin:0; text-align:center;">
-                  <a href="mailto:analista.operaciones@finearom.com">analista.operaciones@finearom.com</a>
+        <td style="padding:10px; border:0; vertical-align:top;">
+            <p style="margin:8px 0 0 0; text-align:center;">
+                <a href="mailto:analista.operaciones@finearom.com">analista.operaciones@finearom.com</a>
             </p>
         </td>
     </tr>
