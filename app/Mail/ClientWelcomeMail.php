@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Client;
+use App\Services\EmailTemplateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -36,8 +37,12 @@ class ClientWelcomeMail extends Mailable implements ShouldQueue
      */
     public function envelope(): Envelope
     {
+        $service = new EmailTemplateService();
+        $variables = $this->prepareVariables();
+        $subject = $service->getRenderedSubject('client_welcome', $variables);
+
         return new Envelope(
-            subject: '¡Bienvenido a FINEAROM! - ' . $this->client->client_name,
+            subject: $subject,
             from: config('mail.from.address', 'monica.castano@finearom.com'),
         );
     }
@@ -47,17 +52,32 @@ class ClientWelcomeMail extends Mailable implements ShouldQueue
      */
     public function content(): Content
     {
+        $service = new EmailTemplateService();
+        $variables = $this->prepareVariables();
+        $rendered = $service->renderTemplate('client_welcome', $variables);
+
         return new Content(
-            view: 'emails.client_welcome',
-            with: [
-                'client' => $this->client,
-                'executiveName' => $this->emailData['executive_name'] ?? null,
-                'executiveEmail' => $this->emailData['executive_email'] ?? null,
-                'executivePhone' => $this->emailData['executive_phone'] ?? null,
-                'welcomeDate' => $this->emailData['welcome_date'] ?? now()->format('d/m/Y'),
-                'includeAttachments' => $this->includeAttachments,
-            ]
+            view: 'emails.template_centered',
+            with: $rendered
         );
+    }
+
+    /**
+     * Prepara las variables para el template
+     */
+    protected function prepareVariables(): array
+    {
+        // Preparar links con mailto y tel
+        $executiveEmail = $this->emailData['executive_email'] ?? null;
+        $executivePhone = $this->emailData['executive_phone'] ?? null;
+
+        return [
+            'client_name' => $this->client->client_name,
+            'executive_name' => $this->emailData['executive_name'] ?? 'Equipo Comercial',
+            'executive_phone' => $executivePhone ? '<a href="tel:' . $executivePhone . '">' . $executivePhone . '</a>' : '',
+            'executive_email' => $executiveEmail ? '<a href="mailto:' . $executiveEmail . '">' . $executiveEmail . '</a>' : '',
+            // base_url ya no es necesario, se inyecta automáticamente
+        ];
     }
 
     /**

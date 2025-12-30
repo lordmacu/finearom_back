@@ -6,6 +6,7 @@ use App\Http\Controllers\AnalyzeController;
 use App\Http\Controllers\CarteraController;
 use App\Http\Controllers\CarteraEstadoController;
 use App\Http\Controllers\EmailCampaignController;
+use App\Http\Controllers\EmailTemplateController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProductController;
@@ -76,6 +77,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Uploads (para CKEditor y otros editores)
     Route::post('/uploads/ckeditor', [CkeditorUploadController::class, 'store']);
+
+    // Email Templates
+    Route::get('/email-templates/by-key/{key}', [EmailTemplateController::class, 'getByKey']);
+    Route::get('/email-templates/{id}/preview', [EmailTemplateController::class, 'getPreview']);
+    Route::post('/email-templates/{id}/preview', [EmailTemplateController::class, 'sendPreview']);
+    Route::apiResource('email-templates', EmailTemplateController::class);
 
     // Email Campaigns
     Route::get('/email-campaigns/email-fields', [EmailCampaignController::class, 'emailFields']);

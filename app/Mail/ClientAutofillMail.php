@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Client;
+use App\Services\EmailTemplateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
@@ -22,8 +23,16 @@ class ClientAutofillMail extends Mailable
 
     public function build(): self
     {
-        return $this->subject('Completa tu información - ' . $this->client->client_name)
-            ->view('emails.client_autofill');
+        $service = new EmailTemplateService();
+        $variables = [
+            'client_name' => $this->client->client_name,
+            'link' => $this->link,
+        ];
+
+        $rendered = $service->renderTemplate('client_autofill', $variables);
+        $subject = $service->getRenderedSubject('client_autofill', $variables);
+
+        return $this->subject($subject)
+            ->view('emails.template', $rendered);
     }
 }
-

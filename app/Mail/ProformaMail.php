@@ -8,7 +8,7 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Queue\SerializesModels;
-use App\Models\ConfigSystem;
+use App\Services\EmailTemplateService;
 
 class ProformaMail extends Mailable
 {
@@ -16,7 +16,6 @@ class ProformaMail extends Mailable
 
     public $purchaseOrder;
     public $pdf;
-    public $templateContent;
 
     /**
      * Create a new message instance.
@@ -28,9 +27,6 @@ class ProformaMail extends Mailable
     {
         $this->purchaseOrder = $purchaseOrder;
         $this->pdf = $pdf;
-
-        $config = ConfigSystem::where('key', 'templateProforma')->first();
-        $this->templateContent = $config->value ?? '<p>Estimado cliente,</p><p>Espero que se encuentren muy bien.</p><p>Adjuntamos la proforma correspondiente a su solicitud de pedido para su revisión y aprobación.</p><p>Cualquier inquietud adicional, estaremos atentos para brindarle el mejor servicio.</p><p>Que tengan un excelente día.</p><p>Cordialmente,</p>';
     }
 
     /**
@@ -38,8 +34,14 @@ class ProformaMail extends Mailable
      */
     public function envelope(): Envelope
     {
+        $service = new EmailTemplateService();
+        $variables = [
+            'order_consecutive' => $this->purchaseOrder->order_consecutive,
+        ];
+        $subject = $service->getRenderedSubject('proforma', $variables);
+
         return new Envelope(
-            subject: 'Proforma - Orden de Compra: ' . $this->purchaseOrder->order_consecutive,
+            subject: $subject,
         );
     }
 
@@ -48,9 +50,15 @@ class ProformaMail extends Mailable
      */
     public function content(): Content
     {
+        $service = new EmailTemplateService();
+        $variables = [
+            'order_consecutive' => $this->purchaseOrder->order_consecutive,
+        ];
+        $rendered = $service->renderTemplate('proforma', $variables);
+
         return new Content(
-            view: 'emails.purchase_order', // Reusing the same layout as purchase order for consistency
-            with: ['templateContent' => $this->templateContent]
+            view: 'emails.template',
+            with: $rendered
         );
     }
 

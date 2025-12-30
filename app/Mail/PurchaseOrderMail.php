@@ -9,13 +9,17 @@ use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Queue\SerializesModels;
 use App\Models\ConfigSystem;
+use App\Services\EmailTemplateService;
 
 class PurchaseOrderMail extends Mailable
 {
     use Queueable, SerializesModels;
 
+    public $purchaseOrder;
+    public $pdf;
     public $processType;
     public $metadata;
+    public $templateContent;
 
     /**
      * Create a new message instance.
@@ -32,6 +36,7 @@ class PurchaseOrderMail extends Mailable
         $this->processType = $processType;
         $this->metadata = $metadata;
 
+        // Obtener el contenido del template desde ConfigSystem (backward compatibility)
         $config = ConfigSystem::where('key', 'templatePedido')->first();
         $this->templateContent = $config->value ?? '<p>Estimado cliente,</p><p>Espero que se encuentren muy bien.</p><p>Confirmo el recibido de su orden de compra, estamos trabajando en su pedido para cumplir en el menor tiempo posible.</p><p>Cualquier novedad con la disponibilidad y el despacho estaremos informando, brindándole el mejor servicio.</p><p>Que tengan un excelente día.</p><p>Cordialmente,</p> <br> <p><b>Nota: Queremos reiterar nuestro compromiso en brindar siempre el mejor servicio. En línea con nuestra política de envíos, le informamos que los pedidos cuyo valor antes de IVA no alcanza el monto mínimo establecido están sujetos al cobro de flete</b></p>';
     }
@@ -41,8 +46,15 @@ class PurchaseOrderMail extends Mailable
      */
     public function envelope(): Envelope
     {
+        $service = new EmailTemplateService();
+        $variables = [
+            'subject_client' => $this->purchaseOrder->subject_client,
+            'template_content' => $this->templateContent,
+        ];
+        $subject = $service->getRenderedSubject('purchase_order', $variables);
+
         return new Envelope(
-            subject: 'Re: ' . $this->purchaseOrder->subject_client,
+            subject: $subject,
         );
     }
 
@@ -64,9 +76,16 @@ class PurchaseOrderMail extends Mailable
      */
     public function content(): Content
     {
+        $service = new EmailTemplateService();
+        $variables = [
+            'subject_client' => $this->purchaseOrder->subject_client,
+            'template_content' => $this->templateContent,
+        ];
+        $rendered = $service->renderTemplate('purchase_order', $variables);
+
         return new Content(
-            view: 'emails.purchase_order',
-            with: ['templateContent' => $this->templateContent]
+            view: 'emails.template',
+            with: $rendered
         );
     }
 
@@ -78,7 +97,7 @@ class PurchaseOrderMail extends Mailable
     public function attachments(): array
     {
         return [
-            Attachment::fromData(fn () => $this->pdf, 'order.pdf')
+            Attachment::fromData(fn () => $this->pdf, 'orden-' . $this->purchaseOrder->order_consecutive . '.pdf')
                 ->withMime('application/pdf'),
         ];
     }

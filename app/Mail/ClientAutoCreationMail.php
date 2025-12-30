@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Client;
+use App\Services\EmailTemplateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
@@ -22,8 +23,15 @@ class ClientAutoCreationMail extends Mailable
 
     public function build(): self
     {
-        return $this->subject('Solicitud de autocreación - ' . ($this->client->client_name ?? 'Cliente'))
-            ->view('emails.client_autocreation');
+        $service = new EmailTemplateService();
+        $variables = [
+            'client_name' => $this->client->client_name ?? 'Cliente',
+        ];
+
+        $rendered = $service->renderTemplate('client_autocreation', $variables);
+        $subject = $service->getRenderedSubject('client_autocreation', $variables);
+
+        return $this->subject($subject)
+            ->view('emails.template', $rendered);
     }
 }
-

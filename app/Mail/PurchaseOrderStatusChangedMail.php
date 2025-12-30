@@ -10,24 +10,20 @@ use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 use App\Services\EmailTemplateService;
 
-class PurchaseOrderObservationMail extends Mailable
+class PurchaseOrderStatusChangedMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     public PurchaseOrder $purchaseOrder;
-    public string $observationText;
-    public ?string $internalObservation;
     public $processType;
     public $metadata;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(PurchaseOrder $purchaseOrder, string $observationText, ?string $internalObservation = null, $processType = 'purchase_order_observation', $metadata = [])
+    public function __construct(PurchaseOrder $purchaseOrder, $processType = 'status_change', $metadata = [])
     {
         $this->purchaseOrder = $purchaseOrder;
-        $this->observationText = $observationText;
-        $this->internalObservation = $internalObservation;
         $this->processType = $processType;
         $this->metadata = $metadata;
     }
@@ -39,9 +35,9 @@ class PurchaseOrderObservationMail extends Mailable
     {
         $service = new EmailTemplateService();
         $variables = $this->prepareVariables();
-        $subject = $service->getRenderedSubject('purchase_order_observation', $variables);
+        $subject = $service->getRenderedSubject('purchase_order_status_changed', $variables);
 
-        // Add email threading headers if message_despacho_id exists (fallback message_id)
+        //Threading headers
         $headers = [];
         $threadId = $this->purchaseOrder->message_despacho_id ?: $this->purchaseOrder->message_id;
         if ($threadId) {
@@ -81,7 +77,7 @@ class PurchaseOrderObservationMail extends Mailable
     {
         $service = new EmailTemplateService();
         $variables = $this->prepareVariables();
-        $rendered = $service->renderTemplate('purchase_order_observation', $variables);
+        $rendered = $service->renderTemplate('purchase_order_status_changed', $variables);
 
         return new Content(
             view: 'emails.template',
@@ -94,20 +90,22 @@ class PurchaseOrderObservationMail extends Mailable
      */
     protected function prepareVariables(): array
     {
-        // Combinar observación del cliente con observación interna si existe
-        $observations = $this->observationText;
-        if ($this->internalObservation) {
-            $observations .= '<div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #6c757d;">
-                <p><strong>Nota Interna:</strong></p>
-                <div>' . $this->internalObservation . '</div>
-            </div>';
-        }
+        $statusTranslations = [
+            'pending' => 'Pendiente',
+            'processing' => 'En Proceso',
+            'completed' => 'Completada',
+            'cancelled' => 'Cancelada',
+            'parcial_status' => 'Parcial',
+        ];
 
         return [
             'order_consecutive' => $this->purchaseOrder->order_consecutive,
             'client_name' => $this->purchaseOrder->client->client_name,
             'client_nit' => $this->purchaseOrder->client->nit,
-            'observations' => $observations,
+            'status_label' => $statusTranslations[$this->purchaseOrder->status] ?? 'Estado Desconocido',
+            'order_creation_date' => $this->purchaseOrder->order_creation_date,
+            'required_delivery_date' => $this->purchaseOrder->required_delivery_date,
+            'delivery_address' => $this->purchaseOrder->delivery_address ?? 'No especificada',
         ];
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Mail;
 
+use App\Services\EmailTemplateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
@@ -20,11 +21,23 @@ class CampaignMail extends Mailable
 
     public function build()
     {
+        $service = new EmailTemplateService();
+
+        // Preparar tracking pixel si hay logId
+        $trackingPixel = '';
+        if ($this->logId) {
+            $trackingPixel = '<img src="' . url('/api/email-campaigns/track-open/' . $this->logId) . '" width="1" height="1" style="display:none;" alt="" />';
+        }
+
+        $variables = [
+            'body' => $this->body,
+            'tracking_pixel' => $trackingPixel,
+        ];
+
+        $rendered = $service->renderTemplate('campaign', $variables);
+
         $email = $this->subject($this->mailSubject)
-            ->view('emails.campaign', [
-                'body' => $this->body,
-                'logId' => $this->logId,
-            ]);
+            ->view('emails.template', $rendered);
 
         if (! empty($this->attachmentPaths)) {
             foreach ($this->attachmentPaths as $filePath) {
@@ -46,4 +59,3 @@ class CampaignMail extends Mailable
         return $email;
     }
 }
-

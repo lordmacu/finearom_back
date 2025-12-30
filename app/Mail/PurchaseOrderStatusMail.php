@@ -3,9 +3,9 @@
 namespace App\Mail;
 
 use App\Models\PurchaseOrder;
+use App\Services\EmailTemplateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
-use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Mail\Mailables\Attachment;
@@ -34,9 +34,9 @@ class PurchaseOrderStatusMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $subject = 'CONFIRMACIÓN DE DESPACHO ' . 
-                   strtoupper($this->purchaseOrder->client->client_name) . ' ' . 
-                   $this->purchaseOrder->client->nit . ' OC ' . 
+        $subject = 'CONFIRMACIÓN DE DESPACHO ' .
+                   strtoupper($this->purchaseOrder->client->client_name) . ' ' .
+                   $this->purchaseOrder->client->nit . ' OC ' .
                    $this->purchaseOrder->order_consecutive;
 
         // Add email threading headers if message_id exists
@@ -63,12 +63,16 @@ class PurchaseOrderStatusMail extends Mailable
      */
     public function content(): Content
     {
+        $service = new EmailTemplateService();
+        $variables = [
+            'status_comment' => $this->statusCommentHtml ?? '',
+            'sender_name' => $this->purchaseOrder->sender_name ?? 'EQUIPO FINEAROM',
+        ];
+        $rendered = $service->renderTemplate('purchase_order_status_update', $variables);
+
         return new Content(
-            view: 'emails.purchase_order_status_update',
-            with: [
-                'purchaseOrder' => $this->purchaseOrder,
-                'statusCommentHtml' => $this->statusCommentHtml,
-            ]
+            view: 'emails.template',
+            with: $rendered
         );
     }
 

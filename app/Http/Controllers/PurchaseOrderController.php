@@ -977,75 +977,40 @@ class PurchaseOrderController extends Controller
                 return;
             }
 
-            $dsn = $this->resolveMailerDsn($userEmail);
-            $mailer = new \Symfony\Component\Mailer\Mailer(\Symfony\Component\Mailer\Transport::fromDsn($dsn));
-
-            // Preparar destinatarios: ejecutivo + procesos en CC (igual que legacy)
+            // Preparar destinatarios: ejecutivo + procesos en CC
             $ccEmails = $processEmails;
             if (filter_var($executiveEmail, FILTER_VALIDATE_EMAIL)) {
-                array_unshift($ccEmails, $executiveEmail); // Añadir ejecutivo al inicio (duplicado en TO y CC)
-            }
-            $ccAddresses = array_map(fn ($email) => new \Symfony\Component\Mime\Address($email), $ccEmails);
-
-            // Asunto: usar subject_client guardado, o generar uno si está vacío
-            if (empty($order->subject_client)) {
-                $subject = 'Re: ' .
-                    ($order->is_new_win == 1 ? 'NEW WIN - ' : '') .
-                    'Pedido - ' .
-                    $order->client->client_name . ' - ' .
-                    $order->client->nit . ' - ' .
-                    $order->order_consecutive;
-            } else {
-                $subject = 'Re: ' . $order->subject_client;
+                array_unshift($ccEmails, $executiveEmail);
             }
 
-            // Cuerpo del email
-            $body = view('emails.purchase_order_status_changed', [
-                'order' => $order,
-            ])->render();
-
-            // Crear log de email y agregar pixel de tracking
-            $emailLog = $this->emailTrackingService->createLog([
-                'sender_email' => $userEmail,
-                'recipient_email' => $executiveEmail,
-                'subject' => $subject,
-                'content' => $body,
-                'process_type' => 'status_change',
-                'metadata' => json_encode([
+            // Usar el Mailable con EmailTemplateService
+            $mailable = new \App\Mail\PurchaseOrderStatusChangedMail(
+                $order,
+                'status_change',
+                [
                     'order_id' => $order->id,
                     'order_consecutive' => $order->order_consecutive,
                     'old_status' => null,
                     'new_status' => $order->status,
-                    'cc_emails' => $ccEmails, // Incluye ejecutivo + procesos
-                ]),
+                    'cc_emails' => $ccEmails,
+                ]
+            );
+
+            // Usar el DSN configurado para este usuario
+            $dsn = $this->resolveMailerDsn($userEmail);
+            \Config::set('mail.mailers.custom', [
+                'transport' => 'smtp',
+                'dsn' => $dsn,
             ]);
 
-            // Inyectar pixel de tracking
-            $bodyWithPixel = $this->emailTrackingService->injectPixel($body, $emailLog->uuid);
-
-            // Crear email
-            $email = (new \Symfony\Component\Mime\Email())
-                ->from($userEmail)
+            $mail = \Mail::mailer('custom')
                 ->to($executiveEmail)
-                ->subject($subject)
-                ->html($bodyWithPixel);
+                ->cc($ccEmails);
 
-            // Agregar CC si hay emails de procesos
-            if (!empty($ccAddresses)) {
-                $email->cc(...$ccAddresses);
-            }
+            // Enviar y capturar el email HTML para tracking
+            $mail->send($mailable);
 
-            // Threading (usar message_despacho_id o message_id)
-            $threadId = $order->message_despacho_id ?: $order->message_id;
-            if ($threadId) {
-                $email->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
-                $email->getHeaders()->addTextHeader('References', '<' . $threadId . '>');
-            }
-
-            $mailer->send($email);
-
-            // Actualizar estado del email a enviado
-            $this->emailTrackingService->updateStatus($emailLog, 'sent');
+            // TODO: Agregar tracking si es necesario
 
             Log::info('Simple status change email sent successfully', [
                 'order_id' => $order->id,
