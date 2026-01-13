@@ -946,15 +946,7 @@ class ClientController extends Controller
 
     private function collectClientEmails(Client $client): array
     {
-        $raw = [
-            $client->email,
-            $client->executive_email,
-            $client->dispatch_confirmation_email,
-            $client->accounting_contact_email,
-            $client->portfolio_contact_email,
-            $client->compras_email,
-            $client->logistics_email,
-        ];
+        $raw = [$client->email];
 
         $emails = [];
         foreach ($raw as $value) {

@@ -67,7 +67,7 @@ class ProcessEmailDispatch implements ShouldQueue
                 }
             }
 
-            Mail::to($recipients)->send(new EstadoCarteraMail($dataEmail, $this->emailDispatch->email_type));
+            Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $this->emailDispatch->email_type));
 
             $this->emailDispatch->update([
                 'send_status' => 'sent',

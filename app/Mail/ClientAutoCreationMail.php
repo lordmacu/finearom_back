@@ -26,6 +26,7 @@ class ClientAutoCreationMail extends Mailable
         $service = new EmailTemplateService();
         $variables = [
             'client_name' => $this->client->client_name ?? 'Cliente',
+            'link' => $this->link,
         ];
 
         $rendered = $service->renderTemplate('client_autocreation', $variables);

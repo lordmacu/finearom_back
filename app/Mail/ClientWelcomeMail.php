@@ -95,9 +95,12 @@ class ClientWelcomeMail extends Mailable implements ShouldQueue
             'rut_file' => 'RUT',
             'camara_comercio_file' => 'Camara_Comercio',
             'cedula_representante_file' => 'Cedula_Representante',
-            'declaracion_renta_file' => 'Declaracion_Renta',
-            'estados_financieros_file' => 'Estados_Financieros',
         ];
+
+        if ($this->client->requires_study) {
+            $filesToAttach['declaracion_renta_file'] = 'Declaracion_Renta';
+            $filesToAttach['estados_financieros_file'] = 'Estados_Financieros';
+        }
 
         foreach ($filesToAttach as $fileField => $fileName) {
             $filePath = $this->client->{$fileField};

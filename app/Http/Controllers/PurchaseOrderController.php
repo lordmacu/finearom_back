@@ -796,18 +796,14 @@ class PurchaseOrderController extends Controller
             $this->clearAnalyzeCache();
 
             // Send email based on order status
-            $cleanObservations = trim(strip_tags($validated['observations'] ?? ''));
-
             if (in_array($validated['status'], ['completed', 'parcial_status'])) {
-                // Para completed o parcial: enviar email con observaciones/parciales
-                if (!empty($cleanObservations)) {
-                    $this->sendStatusUpdateEmail(
-                        $order,
-                        $validated['emails'] ?? null,
-                        $invoicePdfPath,
-                        $validated['observations'] ?? null
-                    );
-                }
+                // Para completed o parcial: enviar email aunque no haya observaciones
+                $this->sendStatusUpdateEmail(
+                    $order,
+                    $validated['emails'] ?? null,
+                    $invoicePdfPath,
+                    $validated['observations'] ?? null
+                );
             } else {
                
                 // Para pending, processing, cancelled: enviar email de cambio de estado simple
@@ -1245,6 +1241,13 @@ class PurchaseOrderController extends Controller
             // Los emails de procesos NUNCA deben recibir el email de "solo tabla"
             $clientEmailsFromRequest = array_values(array_diff($clientEmailsFromRequest, $processEmails));
 
+            // En legacy el cliente siempre recibe el correo (si hay email)
+            $clientRecipients = $this->normalizeEmails([$order->client->email]);
+            if (empty($clientRecipients)) {
+                $clientRecipients = $clientEmailsFromRequest;
+            }
+            $clientRecipients = array_values(array_diff($clientRecipients, $processEmails));
+
             $internalEmailsFromRequest = array_values(array_diff($tagEmails, $clientEmails));
 
             // Emails internos = procesos + internos del request
@@ -1287,15 +1290,15 @@ class PurchaseOrderController extends Controller
 
             // 1. ENVIAR EMAIL AL CLIENTE (solo tabla)
             // A: Emails del cliente que están en el request
-            if (!empty($clientEmailsFromRequest) && !empty($tablesOnly)) {
+            if (!empty($clientRecipients) && !empty($tablesOnly)) {
                 $clientBody = view('emails.purchase_order_observation', [
                     'order'           => $order,
                     'observationHtml' => $tablesOnly, // Solo tablas
                     'forClient'       => true,
                 ])->render();
 
-                $clientTo = array_shift($clientEmailsFromRequest);
-                $clientCcAddresses = array_map(fn ($email) => new Address($email), $clientEmailsFromRequest);
+                $clientTo = array_shift($clientRecipients);
+                $clientCcAddresses = array_map(fn ($email) => new Address($email), $clientRecipients);
 
                 $clientMail = (new Email())
                     ->from($userEmail)
@@ -1312,7 +1315,7 @@ class PurchaseOrderController extends Controller
                 \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email cliente', [
                     'order_id' => $order->id,
                     'to' => $clientTo,
-                    'cc' => $clientEmailsFromRequest,
+                    'cc' => $clientRecipients,
                     'subject' => $subject,
                 ]);
 
@@ -1719,6 +1722,14 @@ class PurchaseOrderController extends Controller
     {
         $customDate = $request->query('custom_date');
 
+        Log::info('TRM endpoint request', [
+            'custom_date' => $customDate,
+            'query' => $request->query(),
+            'ip' => $request->ip(),
+            'user_id' => optional($request->user())->id,
+            'url' => $request->fullUrl(),
+        ]);
+
         try {
             $trmValue = $this->trmService->getTrm($customDate);
 
@@ -1728,7 +1739,11 @@ class PurchaseOrderController extends Controller
                 'date' => $customDate ?? date('Y-m-d'),
             ]);
         } catch (\Exception $e) {
-            Log::error("Error en getTrm endpoint: " . $e->getMessage());
+            Log::error('TRM endpoint error', [
+                'custom_date' => $customDate,
+                'message' => $e->getMessage(),
+                'exception' => get_class($e),
+            ]);
 
             return response()->json([
                 'success' => false,

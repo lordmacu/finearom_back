@@ -45,6 +45,17 @@ return [
             'timeout' => null,
             'local_domain' => env('MAIL_EHLO_DOMAIN'),
         ],
+        'google_alt' => [
+            'transport' => 'smtp',
+            'url' => env('MAIL_GOOGLE_ALT_URL') ?: null,
+            'host' => env('MAIL_GOOGLE_ALT_HOST') ?: env('MAIL_HOST', 'smtp.gmail.com'),
+            'port' => env('MAIL_GOOGLE_ALT_PORT') ?: env('MAIL_PORT', 587),
+            'encryption' => env('MAIL_GOOGLE_ALT_ENCRYPTION') ?: env('MAIL_ENCRYPTION', 'tls'),
+            'username' => env('MAIL_GOOGLE_ALT_USERNAME') ?: env('MAIL_USERNAME'),
+            'password' => env('MAIL_GOOGLE_ALT_PASSWORD') ?: env('MAIL_PASSWORD'),
+            'timeout' => null,
+            'local_domain' => env('MAIL_GOOGLE_ALT_EHLO_DOMAIN') ?: env('MAIL_EHLO_DOMAIN'),
+        ],
 
         'ses' => [
             'transport' => 'ses',

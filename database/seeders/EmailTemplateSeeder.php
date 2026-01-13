@@ -124,30 +124,6 @@ class EmailTemplateSeeder extends Seeder
                 'is_active' => true,
             ],
             [
-                'key' => 'purchase_order_observation',
-                'name' => 'Observaciones de Orden de Compra',
-                'subject' => 'Observaciones Orden de Compra - Finearom',
-                'title' => 'Observaciones de Orden de Compra',
-                'header_content' => '<p><strong>Orden:</strong> |order_consecutive|</p>
-<p><strong>Cliente:</strong> |client_name| (|client_nit|)</p>',
-                'footer_content' => '|observations|
-
-|internal_observations|',
-                'signature' => '<div>
-    <p><strong>Equipo Operaciones FINEAROM</strong></p>
-    <p>Gestión de Órdenes</p>
-    <p>Tel: +57 317 433 5096 | <a href="mailto:servicio.cliente@finearom.com">servicio.cliente@finearom.com</a> | <a href="https://finearom.com">www.finearom.com</a></p>
-</div>',
-                'available_variables' => [
-                    'order_consecutive' => 'Consecutivo de la orden',
-                    'client_name' => 'Nombre del cliente',
-                    'client_nit' => 'NIT del cliente',
-                    'observations' => 'HTML con las observaciones (incluye título si hay contenido)',
-                    'internal_observations' => 'HTML con observaciones internas solo para planta (incluye título si hay contenido)',
-                ],
-                'is_active' => true,
-            ],
-            [
                 'key' => 'campaign',
                 'name' => 'Campaña de Email Marketing',
                 'subject' => 'Campaña - Finearom',
@@ -173,33 +149,17 @@ class EmailTemplateSeeder extends Seeder
                 'header_content' => '<p>Hola |client_name|,</p>
 <p>Tu cuenta en FINEAROM ha sido creada exitosamente.</p>',
                 'footer_content' => '<p>Pronto nos pondremos en contacto contigo para completar el proceso de bienvenida.</p>
-<p>Gracias por tu interés en nuestros servicios.</p>',
+<p>Para finalizar tu autocreacion, completa el formulario en el siguiente enlace:</p>
+<p><a href="|link|">Completar formulario de autocreacion</a></p>
+<p>Si el boton no funciona, copia y pega este enlace:</p>
+<p>|link|</p>
+<p>Gracias por tu interes en nuestros servicios.</p>',
                 'signature' => '<div>
     <p><strong>EQUIPO FINEAROM</strong></p>
 </div>',
                 'available_variables' => [
                     'client_name' => 'Nombre del cliente',
-                ],
-                'is_active' => true,
-            ],
-            [
-                'key' => 'purchase_order_status_changed',
-                'name' => 'Cambio de Estado de Orden',
-                'subject' => 'Estado de Orden Actualizado - Finearom',
-                'title' => 'Estado de Orden Actualizado',
-                'header_content' => '<p>Estimado cliente,</p>
-<p>Le informamos que el estado de su orden de compra ha sido actualizado.</p>',
-                'footer_content' => '|order_details|
-
-<p>Si tiene alguna consulta, no dude en contactarnos.</p>
-<p>Cordialmente,</p>',
-                'signature' => '<div>
-    <p><strong>EQUIPO FINEAROM</strong></p>
-    <p>Gestión de Órdenes</p>
-    <p>Tel: +57 317 433 5096 | <a href="mailto:ordenes@finearom.com">ordenes@finearom.com</a> | <a href="https://finearom.com">www.finearom.com</a></p>
-</div>',
-                'available_variables' => [
-                    'order_details' => 'Detalles HTML de la orden y el nuevo estado',
+                    'link' => 'URL del formulario de autocreacion',
                 ],
                 'is_active' => true,
             ],
@@ -351,6 +311,88 @@ class EmailTemplateSeeder extends Seeder
                     'order_creation_date' => 'Fecha de creación de la orden',
                     'required_delivery_date' => 'Fecha de entrega requerida',
                     'delivery_address' => 'Dirección de entrega',
+                ],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'portfolio_block_alert',
+                'name' => 'Alerta de Bloqueo de Despacho',
+                'subject' => 'Finearom - Alerta de bloqueo: |client_name|',
+                'title' => 'Alerta de Bloqueo de Despacho',
+                'header_content' => '<p>Estimada |ejecutiva|,</p>
+<p>El cliente <strong>|client_name|</strong> tiene una alerta de bloqueo de despachos, ya que una o más facturas llevan <strong>5 (cinco) o más días vencidas</strong>, a saber:</p>',
+                'footer_content' => '|invoices_table|
+
+<p style="font-size: 12px; margin-top: 10px;"><em>Leyenda: F = Factura | R = Recaudo | Días por vencer en <strong>negro</strong> y vencidos en <span style="color: red;">rojo</span></em></p>
+
+|balance_info|
+
+<p>Por lo anterior, se requiere su colaboración en la gestión del pago de las facturas en referencia para la consecuente liberación de las órdenes de compra relacionadas a continuación:</p>
+
+|blocked_orders_table|
+
+<p>Para cancelar los saldos pendientes puede hacer consignación/transferencia electrónica a nuestra cuenta bancaria:</p>
+<p><strong>Banco Bancolombia - Cuenta corriente 122-792013-00</strong></p>
+
+<p><strong>Nota:</strong> Si ya se realizó el pago correspondiente, por favor compartir el comprobante de pago y el movimiento contable en MS Excel para su registro.</p>
+
+<p>En caso de dudas o inconsistencias, por favor comuníquese con nuestra colega <strong style="color: #0070c0;">Jazmín Rincón</strong> de nuestro departamento de cartera al correo electrónico <a href="mailto:cartera@finearom.com">cartera@finearom.com</a> o a su número celular/WhatsApp <a href="https://wa.me/573195700729">+57 318 302 5170</a>.</p>
+
+<p>Sin otro asunto en particular, agradecemos su gentil atención y quedamos atentos a cualquier duda o inquietud.</p>
+<p><strong>Atentamente,</strong></p>',
+                'signature' => '<div>
+    <p><strong>Finearom S.A.S.</strong></p>
+    <p><strong>Sede Administrativa:</strong> <a href="https://www.google.com/maps?q=Carrera+50+N%C2%B0+134D+%E2%80%93+31+%7C+Bogot%C3%A1,+Colombia&entry=gmail&source=g">Carrera 50 # 134D - 31 | Prado Veraniego, Bogotá, Colombia</a></p>
+    <p><strong>Planta:</strong> <a href="https://maps.app.goo.gl/XbCw3qQi3A8ZXJMP8">Calle 131 # 50 – 35 | Prado Veraniego, Bogotá, Colombia.</a></p>
+    <p><a href="mailto:cartera@finearom.com">servicio.cliente@finearom.com</a> - <strong>Teléfono</strong>: +57 316 401 2217</p>
+</div>',
+                'available_variables' => [
+                    'client_name' => 'Nombre del cliente',
+                    'ejecutiva' => 'Nombre de la ejecutiva comercial',
+                    'invoices_table' => 'Tabla HTML con facturas vencidas',
+                    'balance_info' => 'HTML con información de saldos (por vencer y vencidos)',
+                    'blocked_orders_table' => 'Tabla HTML con órdenes bloqueadas',
+                ],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'portfolio_status',
+                'name' => 'Estado de Cartera',
+                'subject' => 'Finearom - Estado de cartera: |client_name|',
+                'title' => 'Estado de cartera',
+                'header_content' => '<p style="text-align: right; margin-bottom: 30px;"><strong>Señores:</strong> |client_name|</p>
+<p>Estimado cliente,</p>
+<p>Esperamos se encuentren muy bien.</p>
+<p>Compartimos a continuación el estado de cartera a la fecha respecto de las facturas vencidas y/o próximas a vencer. Esto con el objetivo de confirmar, solicitar o acordar su fecha de pago.</p>',
+                'footer_content' => '|balance_info|
+
+<p>Encuentre a continuación el detalle de las facturas y sus saldos correspondientes:</p>
+
+|invoices_table|
+
+<p style="font-size: 12px; margin-top: 10px;"><em>Leyenda: F = Factura | R = Recaudo | Días por vencer en <strong>negro</strong> y vencidos en <span style="color: red;">rojo</span></em></p>
+
+<p>Para cancelar los saldos pendientes puede hacer consignación/transferencia electrónica a nuestra cuenta bancaria:</p>
+<p><strong>Banco Bancolombia - Cuenta corriente 122-792013-00</strong></p>
+
+<p>Si algún saldo no coincide; por favor enviar los movimientos contables del año |previous_year| y |current_year|, en Excel, donde se especifiquen Factura, valor cancelado y fecha de pago.</p>
+
+<p>En caso de dudas o inconsistencias, por favor comuníquese con nuestra colega <strong style="color: #0070c0;">Jazmín Rincón</strong> de nuestro departamento de cartera al correo electrónico <a href="mailto:cartera@finearom.com">cartera@finearom.com</a> o a su número celular/WhatsApp <a href="https://wa.me/573195700729">+57 318 302 5170</a>.</p>
+
+<p>Sin otro asunto en particular, agradecemos su gentil atención y quedamos atentos a cualquier duda o inquietud.</p>
+<p><strong>Atentamente,</strong></p>',
+                'signature' => '<div>
+    <p><strong>Finearom S.A.S.</strong></p>
+    <p><strong>Sede Administrativa:</strong> <a href="https://www.google.com/maps?q=Carrera+50+N%C2%B0+134D+%E2%80%93+31+%7C+Bogot%C3%A1,+Colombia&entry=gmail&source=g">Carrera 50 # 134D - 31 | Prado Veraniego, Bogotá, Colombia</a></p>
+    <p><strong>Planta:</strong> <a href="https://maps.app.goo.gl/XbCw3qQi3A8ZXJMP8">Calle 131 # 50 – 35 | Prado Veraniego, Bogotá, Colombia.</a></p>
+    <p><a href="mailto:cartera@finearom.com">servicio.cliente@finearom.com</a> - <strong>Teléfono</strong>: +57 316 401 2217</p>
+</div>',
+                'available_variables' => [
+                    'client_name' => 'Nombre del cliente',
+                    'balance_info' => 'HTML con información de saldos (por vencer y vencidos)',
+                    'invoices_table' => 'Tabla HTML con facturas y saldos',
+                    'previous_year' => 'Año anterior',
+                    'current_year' => 'Año actual',
                 ],
                 'is_active' => true,
             ],

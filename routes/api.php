@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\PurchaseOrderAuthController;
+use App\Http\Controllers\Api\PurchaseOrderPortalController;
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\AnalyzeController;
 use App\Http\Controllers\CarteraController;
@@ -42,6 +44,8 @@ Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 Route::get('/email-campaigns/track-open/{logId}', [EmailCampaignController::class, 'trackOpen']);
 Route::get('/clients/public/{token}', [ClientController::class, 'showByToken']);
 Route::post('/clients/public/{token}', [ClientController::class, 'updateByToken']);
+Route::post('/purchase-order-portal/send-code', [PurchaseOrderAuthController::class, 'sendCode']);
+Route::post('/purchase-order-portal/verify-code', [PurchaseOrderAuthController::class, 'verifyCode']);
 
 // Rutas protegidas (requieren autenticación)
 Route::middleware('auth:sanctum')->group(function () {
@@ -125,6 +129,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Proforma
     Route::post('/proforma/upload', [ProformaController::class, 'upload']);
+
+    // Portal de Ordenes de Compra (cliente)
+    Route::get('/purchase-order-portal/metadata', [PurchaseOrderPortalController::class, 'metadata']);
+    Route::post('/purchase-order-portal/orders', [PurchaseOrderPortalController::class, 'store']);
 
     // Productos
     Route::get('/products', [ProductController::class, 'index']);

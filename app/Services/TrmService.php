@@ -55,6 +55,11 @@ class TrmService
     {
         $date = $custom_date ?? date('Y-m-d');
 
+        Log::info('TRM lookup start', [
+            'requested_date' => $custom_date,
+            'effective_date' => $date,
+        ]);
+
         // Nivel 1: Caché en memoria (runtime)
         if (isset($this->runtimeCache[$date])) {
             Log::debug("TRM obtenido de caché en memoria para {$date}: {$this->runtimeCache[$date]}");
@@ -62,6 +67,10 @@ class TrmService
         }
 
         // Nivel 2: Caché de Laravel
+        Log::debug('TRM runtime cache miss', [
+            'date' => $date,
+        ]);
+
         $cacheKey = "trm_{$date}";
         $cachedValue = Cache::get($cacheKey);
 
@@ -71,22 +80,77 @@ class TrmService
             return $cachedValue;
         }
 
+        if ($cachedValue === null) {
+            Log::debug('TRM laravel cache miss', [
+                'date' => $date,
+                'cache_key' => $cacheKey,
+            ]);
+        } elseif ($cachedValue <= TrmNormalizer::MIN_VALID_TRM) {
+            Log::warning('TRM laravel cache value below minimum', [
+                'date' => $date,
+                'cache_key' => $cacheKey,
+                'cached_value' => $cachedValue,
+                'min_valid' => TrmNormalizer::MIN_VALID_TRM,
+            ]);
+        }
+
         // Nivel 3: Intentar obtener de SOAP
+        Log::info('TRM SOAP lookup start', [
+            'date' => $date,
+        ]);
+
         try {
             $trm_from_service = $this->fetchTrmFromSoapService($date);
             $trmValue = (float) ($trm_from_service["value"] ?? 0);
+
+            Log::info('TRM SOAP response', [
+                'date' => $date,
+                'value' => $trmValue,
+                'min_valid' => TrmNormalizer::MIN_VALID_TRM,
+                'valid_from' => $trm_from_service['valid_from'] ?? null,
+                'valid_to' => $trm_from_service['valid_to'] ?? null,
+                'success' => $trm_from_service['success'] ?? null,
+            ]);
 
             if ($trmValue > TrmNormalizer::MIN_VALID_TRM) {
                 $this->cacheTrmValue($date, $trmValue, 'soap');
                 return $trmValue;
             }
+
+            Log::warning('TRM SOAP value below minimum', [
+                'date' => $date,
+                'value' => $trmValue,
+                'min_valid' => TrmNormalizer::MIN_VALID_TRM,
+            ]);
         } catch (Exception $e) {
             Log::warning("Error obteniendo TRM del servicio SOAP para fecha {$date}: " . $e->getMessage());
         }
 
         // Nivel 4: Fallback a API alternativa
+        Log::info('TRM exchange API lookup start', [
+            'date' => $date,
+        ]);
+
         try {
             $exchangeRate = $this->getExchangeRates($date);
+
+            Log::info('TRM exchange API response', [
+                'date' => $date,
+                'value' => $exchangeRate,
+                'min_valid' => TrmNormalizer::MIN_VALID_TRM,
+            ]);
+
+            if (!$exchangeRate) {
+                Log::warning('TRM exchange API returned empty value', [
+                    'date' => $date,
+                ]);
+            } elseif ($exchangeRate <= TrmNormalizer::MIN_VALID_TRM) {
+                Log::warning('TRM exchange API value below minimum', [
+                    'date' => $date,
+                    'value' => $exchangeRate,
+                    'min_valid' => TrmNormalizer::MIN_VALID_TRM,
+                ]);
+            }
             if ($exchangeRate && $exchangeRate > TrmNormalizer::MIN_VALID_TRM) {
                 $this->cacheTrmValue($date, $exchangeRate, 'exchange_api');
                 return (float) $exchangeRate;
@@ -255,20 +319,45 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
         $currentDate = Carbon::now()->format('Y-m-d');
         $cacheFile = "exchange_rate_{$currentDate}.json";
 
+        Log::info('Exchange rate lookup start', [
+            'target_date' => $target_date,
+            'current_date' => $currentDate,
+            'cache_file' => $cacheFile,
+        ]);
+
         // Verifica si el valor ya está en el almacenamiento
         if (Storage::disk('local')->exists($cacheFile)) {
             $cachedData = json_decode(Storage::disk('local')->get($cacheFile), true);
             if ($cachedData && isset($cachedData['date']) && $cachedData['date'] === $currentDate) {
                 $cachedValue = (float) $cachedData['exchangeRate'];
+                Log::info('Exchange rate cache hit', [
+                    'target_date' => $target_date,
+                    'current_date' => $currentDate,
+                    'cache_file' => $cacheFile,
+                    'exchange_rate' => $cachedValue,
+                ]);
                 // Guardar como último exitoso si es válido
                 if ($cachedValue > TrmNormalizer::MIN_VALID_TRM) {
                     $this->saveLastSuccessfulTrm($cachedValue, $currentDate, 'exchange_api_cache');
                 }
                 return $cachedValue;
             }
+            Log::debug('Exchange rate cache miss or stale', [
+                'target_date' => $target_date,
+                'current_date' => $currentDate,
+                'cache_file' => $cacheFile,
+                'cache_date' => $cachedData['date'] ?? null,
+            ]);
         }
 
         // Si no existe en el almacenamiento, haz la solicitud a la API
+        Log::info('Exchange rate API request', [
+            'target_date' => $target_date,
+            'current_date' => $currentDate,
+            'base' => 'COP',
+            'symbols' => 'USD',
+        ]);
+
         $client = new HttpClient(['timeout' => 10]);
         $url = "https://openexchangerates.org/api/time-series.json?app_id=f2884227901c482194f0fbfe7fa77c63&start={$target_date}&end={$target_date}&symbols=USD&base=COP";
 
@@ -277,11 +366,22 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
             $data = json_decode($response->getBody()->getContents(), true);
 
             if (!isset($data['rates'][$currentDate]['USD'])) {
-                Log::warning("Exchange rate API did not return expected data for date: {$target_date}");
+                Log::warning('Exchange rate API missing expected data', [
+                    'target_date' => $target_date,
+                    'current_date' => $currentDate,
+                    'rates_keys' => isset($data['rates']) ? array_keys($data['rates']) : null,
+                    'has_usd' => isset($data['rates'][$currentDate]['USD']),
+                ]);
                 return null;
             }
 
             $exchangeRate = (float) $data['rates'][$currentDate]['USD'];
+
+            Log::info('Exchange rate API response parsed', [
+                'target_date' => $target_date,
+                'current_date' => $currentDate,
+                'exchange_rate' => $exchangeRate,
+            ]);
 
             // Guardar en caché diario
             Storage::disk('local')->put($cacheFile, json_encode([
@@ -311,6 +411,11 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
     private function fetchTrmFromSoapService(string $date): ?array
     {
         $soapUrl = "https://www.superfinanciera.gov.co/SuperfinancieraWebServiceTRM/TCRMServicesWebService/TCRMServicesWebService";
+
+        Log::info('TRM SOAP request', [
+            'date' => $date,
+            'url' => $soapUrl,
+        ]);
 
         $xmlPostString = <<<XML
         <Envelope xmlns="http://schemas.xmlsoap.org/soap/envelope/">
@@ -342,6 +447,11 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
 
         $response = curl_exec($ch);
 
+        Log::debug('TRM SOAP response received', [
+            'date' => $date,
+            'bytes' => strlen((string) $response),
+        ]);
+
         if (curl_errno($ch) || $response === false) {
             $error_msg = curl_error($ch);
             Log::error("TRM cURL Error: " . $error_msg);
@@ -357,16 +467,31 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
             $returnNode = $xml->Body->queryTCRMResponse->return;
 
             if (!$returnNode || !isset($returnNode->success) || $returnNode->success == 'false') {
-                Log::warning("TRM SOAP Service did not return a successful response for date: {$date}");
+                Log::warning('TRM SOAP response not successful', [
+                    'date' => $date,
+                    'has_return_node' => (bool) $returnNode,
+                    'raw_success' => $returnNode ? (string) $returnNode->success : null,
+                ]);
                 throw new Exception("Respuesta no exitosa del servicio SOAP para fecha: {$date}");
             }
+
+            $success = filter_var((string) $returnNode->success, FILTER_VALIDATE_BOOLEAN);
+
+            Log::info('TRM SOAP response parsed', [
+                'date' => $date,
+                'success' => $success,
+                'value' => (float) $returnNode->value,
+                'unit' => (string) $returnNode->unit,
+                'valid_from' => (string) $returnNode->validityFrom,
+                'valid_to' => (string) $returnNode->validityTo,
+            ]);
 
             return [
                 'value'      => (float) $returnNode->value,
                 'unit'       => (string) $returnNode->unit,
                 'valid_from' => (string) $returnNode->validityFrom,
                 'valid_to'   => (string) $returnNode->validityTo,
-                'success'    => filter_var((string) $returnNode->success, FILTER_VALIDATE_BOOLEAN),
+                'success'    => $success,
             ];
         } catch (Exception $e) {
             Log::error("TRM XML Parse Error: " . $e->getMessage());
