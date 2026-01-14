@@ -20,16 +20,13 @@ class ProcessEmailDispatch implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public EmailDispatchQueue $emailDispatch;
-
-    public function __construct(EmailDispatchQueue $emailDispatch)
-    {
-        $this->emailDispatch = $emailDispatch;
-    }
+    public function __construct(
+        public EmailDispatchQueue $emailDispatch
+    ) {}
 
     public function handle(): void
     {
-        if (! $this->emailDispatch) {
+        if (! isset($this->emailDispatch) || ! $this->emailDispatch) {
             Log::error('Email dispatch job missing model', [
                 'job' => static::class,
             ]);
@@ -47,60 +44,23 @@ class ProcessEmailDispatch implements ShouldQueue
             );
 
             $dataEmail = $this->cargarPorNit($this->emailDispatch->due_date, $this->emailDispatch->client_nit);
-            if ($dataEmail === null) {
-                $this->logFailure('No data found for NIT/date', [
-                    'due_date' => $this->emailDispatch->due_date,
-                    'client_nit' => $this->emailDispatch->client_nit,
-                ]);
-                $this->emailDispatch->update([
-                    'send_status' => 'failed',
-                    'error_message' => 'No data found for this NIT/date',
-                ]);
-                return;
-            }
-            if (! is_array($dataEmail)) {
-                $this->logFailure('Email data is not an array', [
-                    'data_email_type' => gettype($dataEmail),
-                ]);
-                $this->emailDispatch->update([
-                    'send_status' => 'failed',
-                    'error_message' => 'Email data is not an array',
-                ]);
-                return;
-            }
 
-            // Enviar solo si hay correo configurado
-            $hasRecipients = collect($recipients)->filter()->isNotEmpty();
-            if (! $hasRecipients) {
-                $this->logFailure('No recipients provided', [
-                    'recipients_raw' => $recipients,
-                ], 'warning');
-                $this->emailDispatch->update([
-                    'send_status' => 'failed',
-                    'error_message' => 'No recipients provided',
-                ]);
-                return;
-            }
-
-            // Reglas heredadas: si es bloqueo, solo envía cuando hay productos y total vencido > 0
-            if ($this->emailDispatch->email_type === 'order_block') {
-                $hasProducts = ! empty($dataEmail['products']);
-                $hasOverdue = ($dataEmail['total_vencidos'] ?? 0) > 0;
-                if (! $hasProducts || ! $hasOverdue) {
-                    $this->logFailure('Order block rules not met', [
-                        'has_products' => $hasProducts,
-                        'has_overdue' => $hasOverdue,
-                        'total_vencidos' => $dataEmail['total_vencidos'] ?? null,
-                    ], 'warning');
-                    $this->emailDispatch->update([
-                        'send_status' => 'failed',
-                        'error_message' => 'Sin productos o sin saldo vencido para bloqueo',
-                    ]);
-                    return;
+            // Enviar solo si el send_status no es 'sent' y hay datos válidos
+            if ($this->emailDispatch->send_status != 'sent') {
+                if ($this->emailDispatch->email_type == 'order_block') {
+                    // Para order_block: solo enviar si hay productos y total vencido > 0
+                    if (is_array($dataEmail) && count($dataEmail['products']) > 0) {
+                        if ($dataEmail['total_vencidos'] > 0) {
+                            Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $this->emailDispatch->email_type));
+                        }
+                    }
+                } else {
+                    // Para outstanding_balance: enviar si hay datos válidos
+                    if (is_array($dataEmail)) {
+                        Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $this->emailDispatch->email_type));
+                    }
                 }
             }
-
-            Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $this->emailDispatch->email_type));
 
             $this->emailDispatch->update([
                 'send_status' => 'sent',
@@ -122,7 +82,7 @@ class ProcessEmailDispatch implements ShouldQueue
         }
     }
 
-    private function cargarPorNit(string $fecha, string $nit): ?array
+    private function cargarPorNit(string $fecha, string $nit)
     {
         $cartera = Cartera::with(['client'])
             ->where('fecha_cartera', $fecha)
@@ -130,7 +90,7 @@ class ProcessEmailDispatch implements ShouldQueue
             ->get();
 
         if ($cartera->isEmpty()) {
-            return null;
+            return 0;
         }
 
         $cartera = $cartera->map(function (Cartera $item) {
