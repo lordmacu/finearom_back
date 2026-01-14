@@ -20,12 +20,22 @@ class ProcessEmailDispatch implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function __construct(private readonly EmailDispatchQueue $emailDispatch)
+    private ?EmailDispatchQueue $emailDispatch = null;
+
+    public function __construct(EmailDispatchQueue $emailDispatch)
     {
+        $this->emailDispatch = $emailDispatch;
     }
 
     public function handle(): void
     {
+        if (! $this->emailDispatch) {
+            Log::error('Email dispatch job missing model', [
+                'job' => static::class,
+            ]);
+            return;
+        }
+
         try {
             $this->emailDispatch->update(['send_status' => 'sending']);
 
@@ -45,6 +55,16 @@ class ProcessEmailDispatch implements ShouldQueue
                 $this->emailDispatch->update([
                     'send_status' => 'failed',
                     'error_message' => 'No data found for this NIT/date',
+                ]);
+                return;
+            }
+            if (! is_array($dataEmail)) {
+                $this->logFailure('Email data is not an array', [
+                    'data_email_type' => gettype($dataEmail),
+                ]);
+                $this->emailDispatch->update([
+                    'send_status' => 'failed',
+                    'error_message' => 'Email data is not an array',
                 ]);
                 return;
             }
