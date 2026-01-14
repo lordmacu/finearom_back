@@ -13,6 +13,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 class ProcessEmailDispatch implements ShouldQueue
@@ -37,6 +38,10 @@ class ProcessEmailDispatch implements ShouldQueue
 
             $dataEmail = $this->cargarPorNit($this->emailDispatch->due_date, $this->emailDispatch->client_nit);
             if ($dataEmail === null) {
+                $this->logFailure('No data found for NIT/date', [
+                    'due_date' => $this->emailDispatch->due_date,
+                    'client_nit' => $this->emailDispatch->client_nit,
+                ]);
                 $this->emailDispatch->update([
                     'send_status' => 'failed',
                     'error_message' => 'No data found for this NIT/date',
@@ -47,6 +52,9 @@ class ProcessEmailDispatch implements ShouldQueue
             // Enviar solo si hay correo configurado
             $hasRecipients = collect($recipients)->filter()->isNotEmpty();
             if (! $hasRecipients) {
+                $this->logFailure('No recipients provided', [
+                    'recipients_raw' => $recipients,
+                ], 'warning');
                 $this->emailDispatch->update([
                     'send_status' => 'failed',
                     'error_message' => 'No recipients provided',
@@ -59,6 +67,11 @@ class ProcessEmailDispatch implements ShouldQueue
                 $hasProducts = ! empty($dataEmail['products']);
                 $hasOverdue = ($dataEmail['total_vencidos'] ?? 0) > 0;
                 if (! $hasProducts || ! $hasOverdue) {
+                    $this->logFailure('Order block rules not met', [
+                        'has_products' => $hasProducts,
+                        'has_overdue' => $hasOverdue,
+                        'total_vencidos' => $dataEmail['total_vencidos'] ?? null,
+                    ], 'warning');
                     $this->emailDispatch->update([
                         'send_status' => 'failed',
                         'error_message' => 'Sin productos o sin saldo vencido para bloqueo',
@@ -75,9 +88,16 @@ class ProcessEmailDispatch implements ShouldQueue
                 'error_message' => null,
             ]);
         } catch (Exception $e) {
+            $this->logFailure($e->getMessage(), [
+                'exception' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ], 'error');
+
             $this->emailDispatch->update([
                 'send_status' => 'failed',
-                'error_message' => $e->getMessage(),
+                'error_message' => $this->formatExceptionForDb($e),
             ]);
         }
     }
@@ -239,5 +259,40 @@ class ProcessEmailDispatch implements ShouldQueue
             'highlight' => $matches[2],
             'suffix' => $matches[3],
         ];
+    }
+
+    /**
+     * Log with consistent context for debugging email dispatch failures.
+     *
+     * @param array<string,mixed> $extra
+     */
+    private function logFailure(string $message, array $extra = [], string $level = 'error'): void
+    {
+        $context = array_merge([
+            'email_dispatch_id' => $this->emailDispatch->id ?? null,
+            'email_type' => $this->emailDispatch->email_type ?? null,
+            'client_nit' => $this->emailDispatch->client_nit ?? null,
+            'due_date' => $this->emailDispatch->due_date ?? null,
+        ], $extra);
+
+        if ($level === 'warning') {
+            Log::warning($message, $context);
+            return;
+        }
+
+        Log::error($message, $context);
+    }
+
+    private function formatExceptionForDb(Exception $e): string
+    {
+        $summary = sprintf(
+            '[%s] %s (%s:%d)',
+            get_class($e),
+            $e->getMessage(),
+            $e->getFile(),
+            $e->getLine()
+        );
+
+        return mb_substr($summary, 0, 255);
     }
 }
