@@ -20,7 +20,7 @@ class ProcessEmailDispatch implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    private ?EmailDispatchQueue $emailDispatch = null;
+    public EmailDispatchQueue $emailDispatch;
 
     public function __construct(EmailDispatchQueue $emailDispatch)
     {
