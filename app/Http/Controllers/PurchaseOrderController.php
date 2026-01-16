@@ -1263,18 +1263,11 @@ class PurchaseOrderController extends Controller
                 'allInternalEmails' => $allInternalEmails,
             ]);
 
-            // Usar el subject_client que se guardó al enviar el correo de despacho
-            // Si por alguna razón está vacío, generar el formato estándar
-            if (empty($order->subject_client)) {
-                $subject = 'Re: ' .
-                    ($order->is_new_win == 1 ? 'NEW WIN - ' : '') .
-                    'Pedido - ' .
-                    $order->client->client_name . ' - ' .
-                    $order->client->nit . ' - ' .
-                    $order->order_consecutive;
-            } else {
-                $subject = 'Re: ' . $order->subject_client;
-            }
+            // Generar subject igual que legacy (sin usar subject_client)
+            $subject = ($order->is_new_win == 1 ? 'Re: NEW WIN - ' : 'Re: ') .
+                'Pedido - ' . $order->client->client_name . ' - ' .
+                $order->client->nit . ' - ' .
+                $order->order_consecutive;
 
             $threadId = $order->message_despacho_id ?: $order->message_id;
 
