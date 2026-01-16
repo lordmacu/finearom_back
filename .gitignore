@@ -20,3 +20,4 @@ yarn-error.log
 
 # Claude Code temporary files
 tmpclaude-*
+.git-credentials-temp

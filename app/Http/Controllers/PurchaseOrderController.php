@@ -1087,7 +1087,7 @@ class PurchaseOrderController extends Controller
                             $quantity = $partialEntry['quantity'] ?? 0;
                             $dispatchDate = $partialEntry['date'] ?? null;
 
-                            if ($quantity <= 0 || empty($dispatchDate)) {
+                            if ($quantity <= 0) {
                                 continue;
                             }
 
