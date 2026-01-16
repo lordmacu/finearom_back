@@ -46,12 +46,8 @@ class PurchaseOrderMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $service = new EmailTemplateService();
-        $variables = [
-            'subject_client' => $this->purchaseOrder->subject_client,
-            'template_content' => $this->templateContent,
-        ];
-        $subject = $service->getRenderedSubject('purchase_order', $variables);
+        // Usar mismo formato de asunto que legacy
+        $subject = 'Re: ' . $this->purchaseOrder->subject_client;
 
         return new Envelope(
             subject: $subject,
