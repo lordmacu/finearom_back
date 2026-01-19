@@ -969,19 +969,32 @@ class PurchaseOrderController extends Controller
             // Email del ejecutivo
             $executiveEmail = $order->client->executive_email;
 
-            if (empty($executiveEmail) || !filter_var($executiveEmail, FILTER_VALIDATE_EMAIL)) {
-                Log::warning('No valid executive email for simple status change', [
+            // Determinar destinatario principal (TO)
+            $toEmail = $executiveEmail;
+            $ccEmails = $processEmails;
+
+            // Si no hay ejecutivo, intentar usar el primer email de procesos como TO
+            if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+                if (!empty($processEmails)) {
+                    $toEmail = array_shift($ccEmails); // Mover el primero de CC a TO
+                } elseif (!empty($order->client->email)) {
+                    // Fallback al email general del cliente
+                    $toEmail = $order->client->email;
+                }
+            }
+
+            if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+                Log::warning('No valid recipient email for simple status change', [
                     'order_id' => $order->id,
                     'executive_email' => $executiveEmail,
+                    'process_emails_count' => count($processEmails),
                 ]);
                 return;
             }
 
-            // Preparar destinatarios: ejecutivo + procesos en CC
-            $ccEmails = $processEmails;
-            if (filter_var($executiveEmail, FILTER_VALIDATE_EMAIL)) {
-                array_unshift($ccEmails, $executiveEmail);
-            }
+            // Preparar CC: asegurarnos que no esté el TO repetido
+            $ccEmails = array_diff($ccEmails, [$toEmail]);
+            $ccEmails = array_unique($ccEmails);
 
             // Usar el Mailable con EmailTemplateService
             $mailable = new \App\Mail\PurchaseOrderStatusChangedMail(
@@ -1004,7 +1017,7 @@ class PurchaseOrderController extends Controller
             ]);
 
             $mail = \Mail::mailer('custom')
-                ->to($executiveEmail)
+                ->to($toEmail)
                 ->cc($ccEmails);
 
             // Enviar y capturar el email HTML para tracking
