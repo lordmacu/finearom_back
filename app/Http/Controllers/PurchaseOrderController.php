@@ -176,6 +176,7 @@ class PurchaseOrderController extends Controller
             'products.*.product_id'=> ['required', 'integer'],
             'products.*.quantity'  => ['required'],
             'products.*.price'     => ['nullable'],
+            'products.*.delivery_date' => ['nullable', 'date'],
             'products.*.branch_office_id' => ['required'],
             'attachment'           => ['nullable', 'file', 'mimes:pdf', 'max:4096'],
         ]);
@@ -187,7 +188,7 @@ class PurchaseOrderController extends Controller
                 'raw' => $request->all(),
             ]);
 
-            // Mezclar flags new_win / muestra desde el raw si el validador los omitió
+            // Mezclar flags new_win / muestra / delivery_date desde el raw si el validador los omitió
             $validatedProducts = $validated['products'];
             $rawProducts = $request->input('products', []);
             foreach ($validatedProducts as $idx => $prod) {
@@ -196,6 +197,9 @@ class PurchaseOrderController extends Controller
                 }
                 if (!array_key_exists('muestra', $prod) && isset($rawProducts[$idx]['muestra'])) {
                     $validatedProducts[$idx]['muestra'] = $rawProducts[$idx]['muestra'];
+                }
+                if (!array_key_exists('delivery_date', $prod) && isset($rawProducts[$idx]['delivery_date'])) {
+                    $validatedProducts[$idx]['delivery_date'] = $rawProducts[$idx]['delivery_date'];
                 }
             }
 
@@ -310,7 +314,7 @@ class PurchaseOrderController extends Controller
             'products.*.price'     => ['nullable'],
             'products.*.new_win'   => ['nullable'],
             'products.*.muestra'   => ['nullable'],
-            'products.*.delivery_date' => ['nullable'],
+            'products.*.delivery_date' => ['nullable', 'date'],
             'products.*.branch_office_id' => ['required'],
             'attachment'           => ['nullable', 'file', 'mimes:pdf', 'max:4096'],
         ]);
@@ -1482,7 +1486,7 @@ class PurchaseOrderController extends Controller
                 'new_win' => $newWinFlag ? 1 : 0,
                 'muestra' => $muestraFlag ? 1 : 0,
                 'branch_office_id' => $product['branch_office_id'],
-                'delivery_date' => $product['delivery_date'] ?? now()->format('Y-m-d'),
+                'delivery_date' => !empty($product['delivery_date']) ? $product['delivery_date'] : now()->format('Y-m-d'),
             ]);
         }
 
@@ -1533,9 +1537,11 @@ class PurchaseOrderController extends Controller
                     'muestra' => $muestraFlag ? 1 : 0,
                 ];
 
-                // Agregar delivery_date si existe
+                // Agregar delivery_date - siempre establecer un valor
                 if (!empty($productData['delivery_date'])) {
                     $updateData['delivery_date'] = $productData['delivery_date'];
+                } else {
+                    $updateData['delivery_date'] = now()->format('Y-m-d');
                 }
 
                 $processedRecord = null;
