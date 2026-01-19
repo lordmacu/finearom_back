@@ -1474,11 +1474,8 @@ class PurchaseOrderController extends Controller
                 $isMuestra = 1;
             }
 
-            // Solo guardar precio si fue editado manualmente
-            $priceToSave = 0;
-            if (!empty($product['price_manually_changed']) && $product['price_manually_changed']) {
-                $priceToSave = $product['price'] ?? 0;
-            }
+            // Usar directamente el precio enviado
+            $priceToSave = $product['price'] ?? 0;
 
             $purchaseOrder->products()->attach($product['product_id'], [
                 'quantity' => $product['quantity'],
@@ -1521,11 +1518,8 @@ class PurchaseOrderController extends Controller
                 if ($newWinFlag) $isNewWin = 1;
                 if ($muestraFlag) $isMuestra = 1;
 
-                // Solo guardar precio si fue editado manualmente
-                $priceToSave = 0;
-                if (!empty($productData['price_manually_changed']) && $productData['price_manually_changed']) {
-                    $priceToSave = (float) ($productData['price'] ?? 0);
-                }
+                // Usar directamente el precio enviado
+                $priceToSave = (float) ($productData['price'] ?? 0);
 
                 // Preparar datos
                 $updateData = [
@@ -1557,11 +1551,13 @@ class PurchaseOrderController extends Controller
                         ->first();
 
                     if ($existing) {
-                        // Actualizar registro existente
+                        // Actualizar existente
                         \DB::table('purchase_order_product')
                             ->where('id', $id)
                             ->update($updateData);
-                        $processedRecord = (object)['id' => $id];
+
+                        $processedRecord = ['id' => $id];
+                        $keptIds[] = $id;
                     } else {
                         // El ID no existe, crear nuevo
                         $newId = \DB::table('purchase_order_product')->insertGetId([
