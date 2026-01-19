@@ -1312,10 +1312,16 @@ class PurchaseOrderController extends Controller
             ]);
 
             // Generar subject igual que legacy (sin usar subject_client)
-            $subject = ($order->is_new_win == 1 ? 'Re: NEW WIN - ' : 'Re: ') .
-                'Pedido - ' . $order->client->client_name . ' - ' .
-                $order->client->nit . ' - ' .
-                $order->order_consecutive;
+            if (empty($order->subject_client)) {
+                $subject = 'Re: ' .
+                    ($order->is_new_win == 1 ? 'NEW WIN - ' : '') .
+                    'Pedido - ' .
+                    $order->client->client_name . ' - ' .
+                    $order->client->nit . ' - ' .
+                    $order->order_consecutive;
+            } else {
+                $subject = 'Re: ' . $order->subject_client;
+            }
 
             $threadId = $order->message_despacho_id ?: $order->message_id;
 
