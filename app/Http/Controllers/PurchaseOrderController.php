@@ -1016,6 +1016,13 @@ class PurchaseOrderController extends Controller
                 'dsn' => $dsn,
             ]);
 
+            Log::info('PREPARING STATUS EMAIL', [
+                'order_id' => $order->id,
+                'status' => $order->status,
+                'to' => $toEmail,
+                'cc' => $ccEmails
+            ]);
+
             $mail = \Mail::mailer('custom')
                 ->to($toEmail)
                 ->cc($ccEmails);
