@@ -1061,6 +1061,11 @@ class PurchaseOrderController extends Controller
      */
     public function updateObservations(Request $request, int $orderId): JsonResponse
     {
+        Log::info('--- DEBUG OBSERVATIONS ENDPOINT ---', [
+            'order_id' => $orderId,
+            'request_all' => $request->all()
+        ]);
+
         $validated = $request->validate([
             'new_observation'      => ['nullable', 'string'],
             'internal_observation' => ['nullable', 'string'],
@@ -1209,6 +1214,13 @@ class PurchaseOrderController extends Controller
 
         // Enviar correos solo si hay observación visible
         $cleanObservation = trim(strip_tags($validated['new_observation'] ?? ''));
+        
+        Log::info('--- DEBUG OBSERVATIONS SEND CONDITION ---', [
+            'cleanObservation' => $cleanObservation,
+            'len' => strlen($cleanObservation),
+            'isEmpty' => empty($cleanObservation) ? 'YES' : 'NO'
+        ]);
+
             if (! empty($cleanObservation)) {
                 $order->loadMissing('client');
                 $this->sendObservationEmails(
@@ -1230,6 +1242,10 @@ class PurchaseOrderController extends Controller
      */
     private function sendObservationEmails(PurchaseOrder $order, string $observationHtml, ?string $internalObservation, Request $request): void
     {
+        Log::info('--- DEBUG SEND OBSERVATION EMAILS START ---', [
+            'order_id' => $order->id,
+            'observationHtml_preview' => substr($observationHtml, 0, 100)
+        ]);
         try {
             // Remover el wrapper <figure class="table"> de CKEditor que puede causar problemas en clientes de correo
             $observationHtml = preg_replace('/<figure[^>]*class="table"[^>]*>(.*?)<\/figure>/s', '$1', $observationHtml);
@@ -1461,11 +1477,26 @@ class PurchaseOrderController extends Controller
      */
     private function resolveMailerDsn(string $userEmail): ?string
     {
-        $dsn = env('MAILER_DSN') ?: config('custom.dsn') ?: config('mail.mailers.smtp.url');
+        $envDsn = env('MAILER_DSN');
+        $configCustom = config('custom.dsn');
+        $configSmtp = config('mail.mailers.smtp.url');
+        $envMarlon = env('MAILER_DSN_MARLON');
 
-        if ($userEmail === 'analista.operaciones@finearom.com' && env('MAILER_DSN_MARLON')) {
-            $dsn = env('MAILER_DSN_MARLON');
+        $dsn = $envDsn ?: $configCustom ?: $configSmtp;
+
+        if ($userEmail === 'analista.operaciones@finearom.com' && $envMarlon) {
+            $dsn = $envMarlon;
         }
+
+        \Log::info('DEBUG RESOLVE MAILER DSN VALUES', [
+            'user_email' => $userEmail,
+            'env_MAILER_DSN_exists' => !empty($envDsn),
+            'config_custom_dsn_exists' => !empty($configCustom),
+            'config_smtp_url_exists' => !empty($configSmtp),
+            'env_marron_exists' => !empty($envMarlon),
+            'final_dsn_exists' => !empty($dsn),
+            'env_MAILER_DSN_preview' => $envDsn ? substr($envDsn, 0, 15) . '...' : null,
+        ]);
 
         return $dsn ?: null;
     }
