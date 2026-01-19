@@ -1011,24 +1011,31 @@ class PurchaseOrderController extends Controller
 
             // Usar el DSN configurado para este usuario
             $dsn = $this->resolveMailerDsn($userEmail);
-            \Config::set('mail.mailers.custom', [
-                'transport' => 'smtp',
-                'dsn' => $dsn,
-            ]);
-
-            Log::info('PREPARING STATUS EMAIL', [
+            
+            Log::info('--- PROD TEST --- MAIL DATA', [
                 'order_id' => $order->id,
                 'status' => $order->status,
                 'to' => $toEmail,
-                'cc' => $ccEmails
+                'cc' => $ccEmails,
+                'user_userEmail' => $userEmail,
+                'dsn_resolved' => $dsn ? 'YES (Length: '.strlen($dsn).')' : 'NO'
             ]);
 
-            $mail = \Mail::mailer('custom')
-                ->to($toEmail)
-                ->cc($ccEmails);
+            if ($dsn) {
+                // Configurar el mailer custom con el DSN
+                \Config::set('mail.mailers.custom', [
+                    'transport' => 'smtp',
+                    'url' => $dsn,
+                    'host' => 'localhost', // dummy to avoid host error if url parsing fails
+                ]);
+                $mailer = \Mail::mailer('custom');
+            } else {
+                $mailer = \Mail::mailer();
+            }
 
-            // Enviar y capturar el email HTML para tracking
-            $mail->send($mailable);
+            $mailer->to($toEmail)
+                ->cc($ccEmails)
+                ->send($mailable);
 
             // TODO: Agregar tracking si es necesario
 
