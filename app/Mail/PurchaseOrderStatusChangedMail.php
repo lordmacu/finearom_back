@@ -16,16 +16,16 @@ class PurchaseOrderStatusChangedMail extends Mailable
 
     public PurchaseOrder $purchaseOrder;
     public $processType;
-    public $metadata;
+    public $customMetadata;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(PurchaseOrder $purchaseOrder, $processType = 'status_change', $metadata = [])
+    public function __construct(PurchaseOrder $purchaseOrder, $processType = 'status_change', $customMetadata = [])
     {
         $this->purchaseOrder = $purchaseOrder;
         $this->processType = $processType;
-        $this->metadata = $metadata;
+        $this->customMetadata = $customMetadata;
     }
 
     /**
@@ -65,7 +65,7 @@ class PurchaseOrderStatusChangedMail extends Mailable
         return new \Illuminate\Mail\Mailables\Headers(
             text: [
                 'X-Process-Type' => $this->processType,
-                'X-Metadata' => json_encode($this->metadata),
+                'X-Metadata' => json_encode($this->customMetadata),
             ],
         );
     }

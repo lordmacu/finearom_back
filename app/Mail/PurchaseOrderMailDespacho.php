@@ -18,7 +18,7 @@ class PurchaseOrderMailDespacho extends Mailable
     public $purchaseOrder;
     public $pdfAttachment;
     public $processType;
-    public $metadata;
+    public $customMetadata;
 
     /**
      * Create a new message instance.
@@ -26,14 +26,14 @@ class PurchaseOrderMailDespacho extends Mailable
      * @param $purchaseOrder
      * @param $pdfAttachment
      * @param string $processType
-     * @param array $metadata
+     * @param array $customMetadata
      */
-    public function __construct($purchaseOrder, $pdfAttachment, $processType = 'purchase_order_despacho', $metadata = [])
+    public function __construct($purchaseOrder, $pdfAttachment, $processType = 'purchase_order_despacho', $customMetadata = [])
     {
         $this->purchaseOrder = $purchaseOrder;
         $this->pdfAttachment = $pdfAttachment;
         $this->processType = $processType;
-        $this->metadata = $metadata;
+        $this->customMetadata = $customMetadata;
     }
 
     /**
@@ -61,7 +61,7 @@ class PurchaseOrderMailDespacho extends Mailable
         return new \Illuminate\Mail\Mailables\Headers(
             text: [
                 'X-Process-Type' => $this->processType,
-                'X-Metadata' => json_encode($this->metadata),
+                'X-Metadata' => json_encode($this->customMetadata),
             ],
         );
     }

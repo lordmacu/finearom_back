@@ -18,7 +18,7 @@ class PurchaseOrderMail extends Mailable
     public $purchaseOrder;
     public $pdf;
     public $processType;
-    public $metadata;
+    public $customMetadata;
     public $templateContent;
 
     /**
@@ -27,14 +27,14 @@ class PurchaseOrderMail extends Mailable
      * @param $purchaseOrder
      * @param $pdf
      * @param string $processType
-     * @param array $metadata
+     * @param array $customMetadata
      */
-    public function __construct($purchaseOrder, $pdf, $processType = 'purchase_order', $metadata = [])
+    public function __construct($purchaseOrder, $pdf, $processType = 'purchase_order', $customMetadata = [])
     {
         $this->purchaseOrder = $purchaseOrder;
         $this->pdf = $pdf;
         $this->processType = $processType;
-        $this->metadata = $metadata;
+        $this->customMetadata = $customMetadata;
 
         // Obtener el contenido del template desde ConfigSystem (backward compatibility)
         $config = ConfigSystem::where('key', 'templatePedido')->first();
@@ -62,7 +62,7 @@ class PurchaseOrderMail extends Mailable
         return new \Illuminate\Mail\Mailables\Headers(
             text: [
                 'X-Process-Type' => $this->processType,
-                'X-Metadata' => json_encode($this->metadata),
+                'X-Metadata' => json_encode($this->customMetadata),
             ],
         );
     }

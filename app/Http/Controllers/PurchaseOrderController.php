@@ -1003,12 +1003,13 @@ class PurchaseOrderController extends Controller
                 [
                     'order_id' => $order->id,
                     'order_consecutive' => $order->order_consecutive,
-                    'old_status' => null,
+                    'old_status' => '',
                     'new_status' => $order->status,
                     'cc_emails' => $ccEmails,
                 ]
             );
 
+ 
             // Usar el DSN configurado para este usuario
             $dsn = $this->resolveMailerDsn($userEmail);
             

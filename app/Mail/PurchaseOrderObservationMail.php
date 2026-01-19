@@ -18,18 +18,18 @@ class PurchaseOrderObservationMail extends Mailable
     public string $observationText;
     public ?string $internalObservation;
     public $processType;
-    public $metadata;
+    public $customMetadata;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(PurchaseOrder $purchaseOrder, string $observationText, ?string $internalObservation = null, $processType = 'purchase_order_observation', $metadata = [])
+    public function __construct(PurchaseOrder $purchaseOrder, string $observationText, ?string $internalObservation = null, $processType = 'purchase_order_observation', $customMetadata = [])
     {
         $this->purchaseOrder = $purchaseOrder;
         $this->observationText = $observationText;
         $this->internalObservation = $internalObservation;
         $this->processType = $processType;
-        $this->metadata = $metadata;
+        $this->customMetadata = $customMetadata;
     }
 
     /**
@@ -69,7 +69,7 @@ class PurchaseOrderObservationMail extends Mailable
         return new \Illuminate\Mail\Mailables\Headers(
             text: [
                 'X-Process-Type' => $this->processType,
-                'X-Metadata' => json_encode($this->metadata),
+                'X-Metadata' => json_encode($this->customMetadata),
             ],
         );
     }
