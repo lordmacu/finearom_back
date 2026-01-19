@@ -35,7 +35,12 @@ class PurchaseOrderStatusChangedMail extends Mailable
     {
         $service = new EmailTemplateService();
         $variables = $this->prepareVariables();
-        $subject = $service->getRenderedSubject('purchase_order_status_changed', $variables);
+        // Use subject_client from purchase order, fallback to template if empty
+        $subject = $this->purchaseOrder->subject_client;
+        
+        if (empty($subject)) {
+            $subject = $service->getRenderedSubject('purchase_order_status_changed', $variables);
+        }
 
         //Threading headers
         $headers = [];
