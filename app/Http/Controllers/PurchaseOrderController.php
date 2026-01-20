@@ -655,7 +655,7 @@ class PurchaseOrderController extends Controller
             'emails'          => ['nullable', 'string'],
             'observations'    => ['nullable', 'string'],
             'parcials'        => ['nullable', 'string'],
-            'invoice_pdf'     => ['nullable', 'file', 'mimes:pdf', 'max:4096'],
+            'invoice_pdf'     => ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png,zip', 'max:10240'],
         ], [
             'status.required' => 'El estado es obligatorio',
             'status.in' => 'El estado seleccionado no es válido',
@@ -665,9 +665,9 @@ class PurchaseOrderController extends Controller
             'trm.min' => 'El TRM debe ser mayor o igual a 0',
             'trm.max' => 'El TRM no puede ser mayor a 99999. Verifica que el formato sea correcto (ejemplo: 3817.93)',
             'transporter.max' => 'El nombre de la transportadora no puede exceder 255 caracteres',
-            'invoice_pdf.file' => 'El archivo PDF no es válido',
-            'invoice_pdf.mimes' => 'El archivo debe ser un PDF',
-            'invoice_pdf.max' => 'El archivo PDF no puede superar 4MB',
+            'invoice_pdf.file' => 'El archivo adjunto no es válido',
+            'invoice_pdf.mimes' => 'El archivo debe ser PDF, DOC, DOCX, JPG, PNG o ZIP',
+            'invoice_pdf.max' => 'El archivo adjunto no puede superar 10MB',
         ]);
 
         if ($validator->fails()) {
