@@ -37,11 +37,9 @@ class PurchaseOrderObservationMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $service = new EmailTemplateService();
-        $variables = $this->prepareVariables();
-        $subject = $service->getRenderedSubject('purchase_order_observation', $variables);
+        $subject = 'Re: ' . $this->purchaseOrder->subject_client;
 
-        // Add email threading headers if message_despacho_id exists (fallback message_id)
+        // Headers para seguir el hilo del correo original
         $headers = [];
         $threadId = $this->purchaseOrder->message_despacho_id ?: $this->purchaseOrder->message_id;
         if ($threadId) {

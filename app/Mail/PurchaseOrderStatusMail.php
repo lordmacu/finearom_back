@@ -34,16 +34,14 @@ class PurchaseOrderStatusMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $subject = 'CONFIRMACIÓN DE DESPACHO ' .
-                   strtoupper($this->purchaseOrder->client->client_name) . ' ' .
-                   $this->purchaseOrder->client->nit . ' OC ' .
-                   $this->purchaseOrder->order_consecutive;
+        $subject = 'Re: ' . $this->purchaseOrder->subject_client;
 
-        // Add email threading headers if message_id exists
+        // Headers para seguir el hilo del correo original
         $headers = [];
-        if ($this->purchaseOrder->message_id) {
-            $headers['In-Reply-To'] = '<' . $this->purchaseOrder->message_id . '>';
-            $headers['References'] = '<' . $this->purchaseOrder->message_id . '>';
+        $threadId = $this->purchaseOrder->message_despacho_id ?: $this->purchaseOrder->message_id;
+        if ($threadId) {
+            $headers['In-Reply-To'] = '<' . $threadId . '>';
+            $headers['References'] = '<' . $threadId . '>';
         }
 
         return new Envelope(

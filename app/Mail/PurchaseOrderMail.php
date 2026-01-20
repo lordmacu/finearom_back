@@ -46,11 +46,25 @@ class PurchaseOrderMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        // Usar mismo formato de asunto que legacy
         $subject = 'Re: ' . $this->purchaseOrder->subject_client;
+
+        // Headers para seguir el hilo del correo original
+        $headers = [];
+        $threadId = $this->purchaseOrder->message_id;
+        if ($threadId) {
+            $headers['In-Reply-To'] = '<' . $threadId . '>';
+            $headers['References'] = '<' . $threadId . '>';
+        }
 
         return new Envelope(
             subject: $subject,
+            using: [
+                function ($message) use ($headers) {
+                    foreach ($headers as $key => $value) {
+                        $message->getHeaders()->addTextHeader($key, $value);
+                    }
+                }
+            ]
         );
     }
 

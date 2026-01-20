@@ -33,16 +33,9 @@ class PurchaseOrderStatusChangedMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $service = new EmailTemplateService();
-        $variables = $this->prepareVariables();
-        // Use subject_client from purchase order, fallback to template if empty
-        $subject = $this->purchaseOrder->subject_client;
-        
-        if (empty($subject)) {
-            $subject = $service->getRenderedSubject('purchase_order_status_changed', $variables);
-        }
+        $subject = 'Re: ' . $this->purchaseOrder->subject_client;
 
-        //Threading headers
+        // Headers para seguir el hilo del correo original
         $headers = [];
         $threadId = $this->purchaseOrder->message_despacho_id ?: $this->purchaseOrder->message_id;
         if ($threadId) {
