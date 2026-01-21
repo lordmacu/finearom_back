@@ -63,7 +63,6 @@ class ProcessEmailDispatch implements ShouldQueue
                 return;
             }
 
-        try {
             $emailDispatch->update(['send_status' => 'sending']);
 
             $recipients = explode(
