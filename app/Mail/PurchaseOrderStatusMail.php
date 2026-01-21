@@ -34,7 +34,10 @@ class PurchaseOrderStatusMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $subject = 'Re: ' . $this->purchaseOrder->subject_client;
+        $subject = 'CONFIRMACIÓN DE DESPACHO ' .
+                   strtoupper($this->purchaseOrder->client->client_name) . ' ' .
+                   $this->purchaseOrder->client->nit . ' OC ' .
+                   $this->purchaseOrder->order_consecutive;
 
         // Headers para seguir el hilo del correo original
         $headers = [];
