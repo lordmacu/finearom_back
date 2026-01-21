@@ -37,26 +37,31 @@ class ProcessEmailDispatch implements ShouldQueue
 
     public function handle(): void
     {
-        // Obtener el ID desde donde esté disponible (compatibilidad con jobs antiguos y nuevos)
-        $dispatchId = $this->emailDispatchId ?? $this->emailDispatch?->id;
-        
-        if (!$dispatchId) {
-            Log::warning('Email dispatch job missing ID', [
-                'job' => static::class,
-            ]);
-            return;
-        }
+        try {
+            // Obtener el ID desde donde esté disponible (compatibilidad con jobs antiguos y nuevos)
+            $dispatchId = $this->emailDispatchId ?? $this->emailDispatch?->id ?? null;
+            
+            if (!$dispatchId) {
+                Log::warning('Email dispatch job missing ID - deleting incompatible job', [
+                    'job' => static::class,
+                    'emailDispatchId' => $this->emailDispatchId,
+                    'emailDispatch_exists' => isset($this->emailDispatch),
+                ]);
+                // Eliminar este job de la cola ya que no tiene información válida
+                $this->delete();
+                return;
+            }
 
-        $emailDispatch = EmailDispatchQueue::find($dispatchId);
+            $emailDispatch = EmailDispatchQueue::find($dispatchId);
 
-        // Verificar si el modelo fue eliminado
-        if (! $emailDispatch) {
-            Log::warning('Email dispatch job missing model - possibly deleted', [
-                'job' => static::class,
-                'dispatch_id' => $dispatchId,
-            ]);
-            return;
-        }
+            // Verificar si el modelo fue eliminado
+            if (! $emailDispatch) {
+                Log::warning('Email dispatch job missing model - possibly deleted', [
+                    'job' => static::class,
+                    'dispatch_id' => $dispatchId,
+                ]);
+                return;
+            }
 
         try {
             $emailDispatch->update(['send_status' => 'sending']);
