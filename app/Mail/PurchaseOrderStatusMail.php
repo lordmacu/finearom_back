@@ -39,23 +39,8 @@ class PurchaseOrderStatusMail extends Mailable
                    $this->purchaseOrder->client->nit . ' OC ' .
                    $this->purchaseOrder->order_consecutive;
 
-        // Headers para seguir el hilo del correo original
-        $headers = [];
-        $threadId = $this->purchaseOrder->message_despacho_id ?: $this->purchaseOrder->message_id;
-        if ($threadId) {
-            $headers['In-Reply-To'] = '<' . $threadId . '>';
-            $headers['References'] = '<' . $threadId . '>';
-        }
-
         return new Envelope(
-            subject: $subject,
-            using: [
-                function ($message) use ($headers) {
-                    foreach ($headers as $key => $value) {
-                        $message->getHeaders()->addTextHeader($key, $value);
-                    }
-                }
-            ]
+            subject: $subject
         );
     }
 
