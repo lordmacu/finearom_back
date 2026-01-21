@@ -12,8 +12,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;use Illuminate\Support\Facades\Log;use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 class ProcessEmailDispatch implements ShouldQueue
@@ -74,18 +73,48 @@ class ProcessEmailDispatch implements ShouldQueue
 
             $dataEmail = $this->cargarPorNit($emailDispatch->due_date, $emailDispatch->client_nit);
 
+            // Log para debugging
+            Log::info('ProcessEmailDispatch - Datos cargados', [
+                'dispatch_id' => $emailDispatch->id,
+                'email_type' => $emailDispatch->email_type,
+                'client_nit' => $emailDispatch->client_nit,
+                'is_array' => is_array($dataEmail),
+                'products_count' => is_array($dataEmail) ? count($dataEmail['products'] ?? []) : 0,
+                'total_vencidos' => is_array($dataEmail) ? ($dataEmail['total_vencidos'] ?? 0) : 0,
+                'cuentas_count' => is_array($dataEmail) ? count($dataEmail['cuentas'] ?? []) : 0,
+            ]);
+
             // Enviar solo si el send_status no es 'sent' y hay datos válidos
             if ($emailDispatch->send_status != 'sent') {
                 if ($emailDispatch->email_type == 'order_block') {
                     // Para order_block: solo enviar si hay productos y total vencido > 0
                     if (is_array($dataEmail) && count($dataEmail['products']) > 0) {
                         if ($dataEmail['total_vencidos'] > 0) {
+                            Log::info('ProcessEmailDispatch - Enviando order_block', [
+                                'dispatch_id' => $emailDispatch->id,
+                                'recipients' => $recipients,
+                            ]);
                             Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
+                        } else {
+                            Log::warning('ProcessEmailDispatch - order_block NO enviado: total_vencidos = 0', [
+                                'dispatch_id' => $emailDispatch->id,
+                                'total_vencidos' => $dataEmail['total_vencidos'],
+                            ]);
                         }
+                    } else {
+                        Log::warning('ProcessEmailDispatch - order_block NO enviado: sin productos', [
+                            'dispatch_id' => $emailDispatch->id,
+                            'is_array' => is_array($dataEmail),
+                            'products_count' => is_array($dataEmail) ? count($dataEmail['products'] ?? []) : 0,
+                        ]);
                     }
                 } else {
                     // Para outstanding_balance: enviar si hay datos válidos
                     if (is_array($dataEmail)) {
+                        Log::info('ProcessEmailDispatch - Enviando balance_notification', [
+                            'dispatch_id' => $emailDispatch->id,
+                            'recipients' => $recipients,
+                        ]);
                         Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
                     }
                 }
