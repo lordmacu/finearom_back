@@ -7,20 +7,18 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            color: #121e45 !important;
+            color: #333;
             line-height: 1.6;
             margin: 0;
             padding: 20px;
             max-width: 960px;
             width: 100%;
             box-sizing: border-box;
+            font-size: 13px;
         }
         .content-wrapper {
             max-width: 900px;
             margin: 0 auto;
-        }
-        p, li, td, th, div, span, small, strong, h1, h2, h3, h4, h5, h6 {
-            color: #121e45 !important;
         }
         header {
             text-align: left;
@@ -30,22 +28,19 @@
             width: 100px;
             height: auto;
         }
-        p, li, td, th, div, span, small, strong{
-            font-size: 18px;
-        }
         .email-title-container {
-            margin-bottom: 60px;
+            margin-bottom: 20px;
             padding: 0;
             display: block;
         }
         .email-title {
             display: inline-block;
             font-weight: bold;
-            font-size: 36px;
+            font-size: 20px;
             margin: 0;
-            padding: 0 10px 0 0;
-            background: linear-gradient(to top, #ebebeb 40%, transparent 40%);
-            border-radius: 0 5px 5px 0;
+            padding: 0;
+            color: #1A4D80;
+            text-align: center;
             line-height: 1.2;
         }
         table {
@@ -53,17 +48,16 @@
             max-width: 900px;
             border-collapse: collapse;
             margin: 20px 0;
-            border: 1px solid #121e45;
+            border: 1px solid #ddd;
         }
         th, td {
-            border: 1px solid #121e45;
-            padding: 14px 16px;
-            text-align: left;
-            color: #121e45 !important;
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
         }
         th {
             font-weight: bold;
-            background-color: #f8f9fa;
+            background-color: #f4f4f4;
         }
         footer {
             margin-top: 40px;
@@ -72,8 +66,12 @@
             font-size: 14px;
         }
         a {
-            color: #121e45 !important;
+            color: #1155cc !important;
             text-decoration: underline;
+        }
+        /* Estilos específicos de cartera para colores */
+        strong {
+            color: #0070c0;
         }
     </style>
 </head>
