@@ -71,16 +71,14 @@ class EstadoCarteraMail extends Mailable
         return $variables;
     }
 
-    public function withSymfonyMessage(callable $callback): static
+    public function build()
     {
-        parent::withSymfonyMessage(function ($message) {
+        return $this->withSymfonyMessage(function ($message) {
             $message->getHeaders()->addTextHeader('X-Process-Type', $this->emailType);
             $message->getHeaders()->addTextHeader('X-Metadata', json_encode([
                 'client_nit' => $this->dataEmail['nit'] ?? null,
                 'client_name' => $this->dataEmail['client_name'] ?? null
             ]));
         });
-
-        return $this;
     }
 }
