@@ -18,26 +18,42 @@ use Illuminate\Support\Facades\Mail;
 
 class ProcessEmailDispatch implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable;
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $emailDispatchId;
+    public ?int $emailDispatchId = null;
+    public ?EmailDispatchQueue $emailDispatch = null;
 
     public function __construct(EmailDispatchQueue|int $emailDispatch)
     {
-        $this->emailDispatchId = $emailDispatch instanceof EmailDispatchQueue 
-            ? $emailDispatch->id 
-            : $emailDispatch;
+        if ($emailDispatch instanceof EmailDispatchQueue) {
+            // Nuevo formato: guardar ID para evitar problemas de serialización
+            $this->emailDispatchId = $emailDispatch->id;
+            // También guardar el modelo para compatibilidad con jobs antiguos
+            $this->emailDispatch = $emailDispatch;
+        } else {
+            $this->emailDispatchId = $emailDispatch;
+        }
     }
 
     public function handle(): void
     {
-        $emailDispatch = EmailDispatchQueue::find($this->emailDispatchId);
+        // Obtener el ID desde donde esté disponible (compatibilidad con jobs antiguos y nuevos)
+        $dispatchId = $this->emailDispatchId ?? $this->emailDispatch?->id;
+        
+        if (!$dispatchId) {
+            Log::warning('Email dispatch job missing ID', [
+                'job' => static::class,
+            ]);
+            return;
+        }
+
+        $emailDispatch = EmailDispatchQueue::find($dispatchId);
 
         // Verificar si el modelo fue eliminado
         if (! $emailDispatch) {
             Log::warning('Email dispatch job missing model - possibly deleted', [
                 'job' => static::class,
-                'dispatch_id' => $this->emailDispatchId,
+                'dispatch_id' => $dispatchId,
             ]);
             return;
         }
