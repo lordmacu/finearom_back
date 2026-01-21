@@ -18,64 +18,73 @@ use Illuminate\Support\Facades\Mail;
 
 class ProcessEmailDispatch implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable;
 
-    public function __construct(
-        public EmailDispatchQueue $emailDispatch
-    ) {}
+    public int $emailDispatchId;
+
+    public function __construct(EmailDispatchQueue|int $emailDispatch)
+    {
+        $this->emailDispatchId = $emailDispatch instanceof EmailDispatchQueue 
+            ? $emailDispatch->id 
+            : $emailDispatch;
+    }
 
     public function handle(): void
     {
-        if (! isset($this->emailDispatch) || ! $this->emailDispatch) {
-            Log::error('Email dispatch job missing model', [
+        $emailDispatch = EmailDispatchQueue::find($this->emailDispatchId);
+
+        // Verificar si el modelo fue eliminado
+        if (! $emailDispatch) {
+            Log::warning('Email dispatch job missing model - possibly deleted', [
                 'job' => static::class,
+                'dispatch_id' => $this->emailDispatchId,
             ]);
             return;
         }
 
         try {
-            $this->emailDispatch->update(['send_status' => 'sending']);
+            $emailDispatch->update(['send_status' => 'sending']);
 
             $recipients = explode(
                 ',',
-                $this->emailDispatch->email_type === 'order_block'
-                    ? $this->emailDispatch->order_block_notification_emails
-                    : $this->emailDispatch->outstanding_balance_notification_emails
+                $emailDispatch->email_type === 'order_block'
+                    ? $emailDispatch->order_block_notification_emails
+                    : $emailDispatch->outstanding_balance_notification_emails
             );
 
-            $dataEmail = $this->cargarPorNit($this->emailDispatch->due_date, $this->emailDispatch->client_nit);
+            $dataEmail = $this->cargarPorNit($emailDispatch->due_date, $emailDispatch->client_nit);
 
             // Enviar solo si el send_status no es 'sent' y hay datos válidos
-            if ($this->emailDispatch->send_status != 'sent') {
-                if ($this->emailDispatch->email_type == 'order_block') {
+            if ($emailDispatch->send_status != 'sent') {
+                if ($emailDispatch->email_type == 'order_block') {
                     // Para order_block: solo enviar si hay productos y total vencido > 0
                     if (is_array($dataEmail) && count($dataEmail['products']) > 0) {
                         if ($dataEmail['total_vencidos'] > 0) {
-                            Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $this->emailDispatch->email_type));
+                            Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
                         }
                     }
                 } else {
                     // Para outstanding_balance: enviar si hay datos válidos
                     if (is_array($dataEmail)) {
-                        Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $this->emailDispatch->email_type));
+                        Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
                     }
                 }
             }
 
-            $this->emailDispatch->update([
+            $emailDispatch->update([
                 'send_status' => 'sent',
                 'email_sent_date' => now(),
                 'error_message' => null,
             ]);
         } catch (Exception $e) {
-            $this->logFailure($e->getMessage(), [
+            $this->logFailure($e->getMessage(), $emailDispatch, [
                 'exception' => get_class($e),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
             ], 'error');
 
-            $this->emailDispatch->update([
+            $emailDispatch->update([
                 'send_status' => 'failed',
                 'error_message' => $this->formatExceptionForDb($e),
             ]);
@@ -246,13 +255,13 @@ class ProcessEmailDispatch implements ShouldQueue
      *
      * @param array<string,mixed> $extra
      */
-    private function logFailure(string $message, array $extra = [], string $level = 'error'): void
+    private function logFailure(string $message, EmailDispatchQueue $emailDispatch, array $extra = [], string $level = 'error'): void
     {
         $context = array_merge([
-            'email_dispatch_id' => $this->emailDispatch->id ?? null,
-            'email_type' => $this->emailDispatch->email_type ?? null,
-            'client_nit' => $this->emailDispatch->client_nit ?? null,
-            'due_date' => $this->emailDispatch->due_date ?? null,
+            'email_dispatch_id' => $emailDispatch->id ?? null,
+            'email_type' => $emailDispatch->email_type ?? null,
+            'client_nit' => $emailDispatch->client_nit ?? null,
+            'due_date' => $emailDispatch->due_date ?? null,
         ], $extra);
 
         if ($level === 'warning') {
@@ -274,5 +283,18 @@ class ProcessEmailDispatch implements ShouldQueue
         );
 
         return mb_substr($summary, 0, 255);
+    }
+
+    /**
+     * Manejar el fallo del job.
+     * Se ejecuta cuando Laravel no puede deserializar el modelo.
+     */
+    public function failed(\Throwable $exception): void
+    {
+        Log::warning('Email dispatch job failed - Model may have been deleted', [
+            'job' => static::class,
+            'exception' => get_class($exception),
+            'message' => $exception->getMessage(),
+        ]);
     }
 }
