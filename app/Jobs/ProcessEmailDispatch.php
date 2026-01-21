@@ -38,6 +38,11 @@ class ProcessEmailDispatch implements ShouldQueue
     public function handle(): void
     {
         try {
+            Log::info('===== ProcessEmailDispatch INICIADO =====', [
+                'emailDispatchId' => $this->emailDispatchId,
+                'emailDispatch_exists' => isset($this->emailDispatch),
+            ]);
+            
             // Obtener el ID desde donde esté disponible (compatibilidad con jobs antiguos y nuevos)
             $dispatchId = $this->emailDispatchId ?? $this->emailDispatch?->id ?? null;
             
@@ -54,6 +59,13 @@ class ProcessEmailDispatch implements ShouldQueue
 
             $emailDispatch = EmailDispatchQueue::find($dispatchId);
 
+            Log::info('ProcessEmailDispatch - Modelo cargado', [
+                'dispatch_id' => $dispatchId,
+                'found' => $emailDispatch ? 'SÍ' : 'NO',
+                'send_status' => $emailDispatch->send_status ?? null,
+                'email_type' => $emailDispatch->email_type ?? null,
+            ]);
+
             // Verificar si el modelo fue eliminado
             if (! $emailDispatch) {
                 Log::warning('Email dispatch job missing model - possibly deleted', [
@@ -65,12 +77,22 @@ class ProcessEmailDispatch implements ShouldQueue
 
             $emailDispatch->update(['send_status' => 'sending']);
 
+            Log::info('ProcessEmailDispatch - Estado actualizado a SENDING', [
+                'dispatch_id' => $emailDispatch->id,
+            ]);
+
             $recipients = explode(
                 ',',
                 $emailDispatch->email_type === 'order_block'
                     ? $emailDispatch->order_block_notification_emails
                     : $emailDispatch->outstanding_balance_notification_emails
             );
+
+            Log::info('ProcessEmailDispatch - Destinatarios extraídos', [
+                'dispatch_id' => $emailDispatch->id,
+                'recipients' => $recipients,
+                'recipients_count' => count($recipients),
+            ]);
 
             $dataEmail = $this->cargarPorNit($emailDispatch->due_date, $emailDispatch->client_nit);
 
@@ -86,45 +108,88 @@ class ProcessEmailDispatch implements ShouldQueue
             ]);
 
             // Enviar solo si el send_status no es 'sent' y hay datos válidos
+            Log::info('ProcessEmailDispatch - Evaluando envío', [
+                'dispatch_id' => $emailDispatch->id,
+                'send_status' => $emailDispatch->send_status,
+                'puede_enviar' => $emailDispatch->send_status != 'sent',
+                'email_type' => $emailDispatch->email_type,
+            ]);
+            
             if ($emailDispatch->send_status != 'sent') {
                 if ($emailDispatch->email_type == 'order_block') {
+                    Log::info('ProcessEmailDispatch - Evaluando order_block', [
+                        'dispatch_id' => $emailDispatch->id,
+                        'is_array' => is_array($dataEmail),
+                        'products_count' => is_array($dataEmail) ? count($dataEmail['products'] ?? []) : 0,
+                        'total_vencidos' => is_array($dataEmail) ? ($dataEmail['total_vencidos'] ?? 0) : 0,
+                    ]);
+                    
                     // Para order_block: solo enviar si hay productos y total vencido > 0
                     if (is_array($dataEmail) && count($dataEmail['products']) > 0) {
                         if ($dataEmail['total_vencidos'] > 0) {
-                            Log::info('ProcessEmailDispatch - Enviando order_block', [
+                            Log::info('ProcessEmailDispatch - ✅ ENVIANDO order_block', [
                                 'dispatch_id' => $emailDispatch->id,
                                 'recipients' => $recipients,
+                                'total_vencidos' => $dataEmail['total_vencidos'],
                             ]);
                             Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
+                            Log::info('ProcessEmailDispatch - ✅ Email order_block ENVIADO', [
+                                'dispatch_id' => $emailDispatch->id,
+                            ]);
                         } else {
-                            Log::warning('ProcessEmailDispatch - order_block NO enviado: total_vencidos = 0', [
+                            Log::warning('ProcessEmailDispatch - ❌ order_block NO enviado: total_vencidos = 0', [
                                 'dispatch_id' => $emailDispatch->id,
                                 'total_vencidos' => $dataEmail['total_vencidos'],
+                                'cuentas_count' => count($dataEmail['cuentas'] ?? []),
                             ]);
                         }
                     } else {
-                        Log::warning('ProcessEmailDispatch - order_block NO enviado: sin productos', [
+                        Log::warning('ProcessEmailDispatch - ❌ order_block NO enviado: sin productos', [
                             'dispatch_id' => $emailDispatch->id,
                             'is_array' => is_array($dataEmail),
                             'products_count' => is_array($dataEmail) ? count($dataEmail['products'] ?? []) : 0,
+                            'dataEmail_keys' => is_array($dataEmail) ? array_keys($dataEmail) : null,
                         ]);
                     }
                 } else {
+                    Log::info('ProcessEmailDispatch - Evaluando outstanding_balance', [
+                        'dispatch_id' => $emailDispatch->id,
+                        'is_array' => is_array($dataEmail),
+                    ]);
+                    
                     // Para outstanding_balance: enviar si hay datos válidos
                     if (is_array($dataEmail)) {
-                        Log::info('ProcessEmailDispatch - Enviando balance_notification', [
+                        Log::info('ProcessEmailDispatch - ✅ ENVIANDO outstanding_balance', [
                             'dispatch_id' => $emailDispatch->id,
                             'recipients' => $recipients,
                         ]);
                         Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
+                        Log::info('ProcessEmailDispatch - ✅ Email outstanding_balance ENVIADO', [
+                            'dispatch_id' => $emailDispatch->id,
+                        ]);
+                    } else {
+                        Log::warning('ProcessEmailDispatch - ❌ outstanding_balance NO enviado: datos inválidos', [
+                            'dispatch_id' => $emailDispatch->id,
+                            'dataEmail_type' => gettype($dataEmail),
+                        ]);
                     }
                 }
             }
 
+            Log::info('ProcessEmailDispatch - ⚠️ Marcando como SENT', [
+                'dispatch_id' => $emailDispatch->id,
+                'previous_status' => $emailDispatch->send_status,
+            ]);
+            
             $emailDispatch->update([
                 'send_status' => 'sent',
                 'email_sent_date' => now(),
                 'error_message' => null,
+            ]);
+            
+            Log::info('===== ProcessEmailDispatch FINALIZADO =====', [
+                'dispatch_id' => $emailDispatch->id,
+                'final_status' => 'sent',
             ]);
         } catch (Exception $e) {
             $this->logFailure($e->getMessage(), $emailDispatch, [
