@@ -47,6 +47,8 @@ class Kernel extends ConsoleKernel
 
         // Ejecutar dispatch de emails de cartera cada 30 minutos
    // $schedule->command('emails:dispatch')->everyMinute();
+
+   
     }
 
     /**
