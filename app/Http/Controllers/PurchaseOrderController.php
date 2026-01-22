@@ -1334,7 +1334,7 @@ class PurchaseOrderController extends Controller
                 $allInternalEmails = $processEmails;
             }
 
-            \Log::info('OBSERVACIONES - Emails identificados', [
+            \Log::info('OBSERVACIONES - Emails identificados ---', [
                 'order_id' => $order->id,
                 'tagEmails' => $tagEmails,
                 'processEmails' => $processEmails,
