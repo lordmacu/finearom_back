@@ -37,6 +37,15 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+// Health Check para Docker
+Route::get('/health', function () {
+    return response()->json([
+        'status' => 'ok',
+        'timestamp' => now()->toIso8601String(),
+        'database' => 'connected'
+    ]);
+});
+
 // Rutas públicas (sin autenticación)
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
