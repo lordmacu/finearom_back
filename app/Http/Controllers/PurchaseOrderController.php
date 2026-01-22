@@ -205,6 +205,20 @@ class PurchaseOrderController extends Controller
 
             Log::info('VALIDATED PRODUCTS (after merge)', ['products' => $validatedProducts]);
 
+            Log::info('🔍 DEBUG TRM - Antes de normalizar', [
+                'trm_raw_from_request' => $request->input('trm'),
+                'trm_validated' => $validated['trm'],
+                'trm_type' => gettype($validated['trm']),
+                'trm_initial' => $request->input('trm_initial'),
+            ]);
+
+            $normalizedTrm = $this->normalizeTrm($validated['trm']);
+
+            Log::info('🔍 DEBUG TRM - Después de normalizar', [
+                'trm_normalized' => $normalizedTrm,
+                'trm_normalized_type' => gettype($normalizedTrm),
+            ]);
+
             $data = [
                 'client_id'          => $validated['client_id'],
                 'order_consecutive'  => $validated['order_consecutive'],
@@ -216,7 +230,7 @@ class PurchaseOrderController extends Controller
                 'tag_email_despachos'=> $validated['tag_email_despachos'] ?? null,
                 'subject_client'     => $validated['subject_client'] ?? null,
                 'order_creation_date'=> $validated['createdOrderDate'] ?? now()->format('Y-m-d'),
-                'trm'                => $this->normalizeTrm($validated['trm']),
+                'trm'                => $normalizedTrm,
             ];
 
             // trm_updated_at si cambió frente a trm_initial
@@ -232,9 +246,14 @@ class PurchaseOrderController extends Controller
             $purchaseOrder = PurchaseOrder::create($data);
             // Append id al consecutivo (legacy)
             $purchaseOrder->order_consecutive = $purchaseOrder->id . '-' . $purchaseOrder->order_consecutive;
-            if (empty($purchaseOrder->subject_client)) {
-                $purchaseOrder->subject_client = 'Orden de Compra - ' . $purchaseOrder->order_consecutive;
-            }
+            // Asignar subject_client si no viene del request (igual que legacy)
+            $purchaseOrder->subject_client = $validated['subject_client'] ?? 'Orden de Compra - ' . $purchaseOrder->order_consecutive;
+            // Generar subject_despacho (formato para email de despachos)
+            $purchaseOrder->subject_despacho = ($purchaseOrder->is_new_win ? 'NEW WIN - ' : '') .
+                                               'Pedido - ' .
+                                               $purchaseOrder->client->client_name . ' - ' .
+                                               $purchaseOrder->client->nit . ' - ' .
+                                               $purchaseOrder->order_consecutive;
             $purchaseOrder->save();
 
             // Productos
@@ -969,6 +988,16 @@ class PurchaseOrderController extends Controller
             // Email del ejecutivo
             $executiveEmail = $order->client->executive_email;
 
+            Log::info('📧 CAMBIO DE ESTADO - Emails identificados', [
+                'order_id' => $order->id,
+                'order_consecutive' => $order->order_consecutive,
+                'status' => $order->status,
+                'client_name' => $order->client->client_name,
+                'executive_email' => $executiveEmail,
+                'process_emails' => $processEmails,
+                'process_emails_count' => count($processEmails),
+            ]);
+
             // Determinar destinatario principal (TO)
             $toEmail = $executiveEmail;
             $ccEmails = $processEmails;
@@ -995,6 +1024,13 @@ class PurchaseOrderController extends Controller
             // Preparar CC: asegurarnos que no esté el TO repetido
             $ccEmails = array_diff($ccEmails, [$toEmail]);
             $ccEmails = array_unique($ccEmails);
+
+            Log::info('📧 CAMBIO DE ESTADO - Destinatarios finales', [
+                'order_id' => $order->id,
+                'to' => $toEmail,
+                'cc' => array_values($ccEmails),
+                'total_recipients' => 1 + count($ccEmails),
+            ]);
 
             // Usar el Mailable con EmailTemplateService
             $mailable = new \App\Mail\PurchaseOrderStatusChangedMail(
@@ -1038,13 +1074,15 @@ class PurchaseOrderController extends Controller
                 ->cc($ccEmails)
                 ->send($mailable);
 
-            // TODO: Agregar tracking si es necesario
-
-            Log::info('Simple status change email sent successfully', [
+            Log::info('✅ CAMBIO DE ESTADO - Email enviado exitosamente', [
                 'order_id' => $order->id,
+                'order_consecutive' => $order->order_consecutive,
                 'status' => $order->status,
-                'to' => $executiveEmail,
-                'cc' => $processEmails,
+                'to' => $toEmail,
+                'cc' => array_values($ccEmails),
+                'total_recipients' => 1 + count($ccEmails),
+                'subject' => 'Re: ' . ($order->subject_despacho ?: $order->subject_client),
+                'thread_id' => $order->message_despacho_id ?: $order->message_id,
             ]);
 
         } catch (\Exception $e) {
@@ -1253,7 +1291,10 @@ class PurchaseOrderController extends Controller
             // TEMPORAL: Comentado para pruebas - enviar todo el contenido al cliente también
             // $tablesOnly = $this->extractHtmlTables($observationHtml);
             $tablesOnly = $observationHtml; // Enviar contenido completo temporalmente
-            $userEmail = auth()->user()?->email ?? config('mail.from.address');
+            
+            // Usar siempre analista.operaciones@finearom.com como remitente
+            $userEmail = 'analista.operaciones@finearom.com';
+            
             $internalSection = '';
             if (! empty($internalObservation)) {
                 $internalSection = '<br><br><strong>Observaciones internas (solo planta)</strong><br>' . $internalObservation;
@@ -1270,60 +1311,56 @@ class PurchaseOrderController extends Controller
             // Correos destino (tags o procesos)
             $emailsRaw = $request->input('emails-tags', []);
             $tagEmails = $this->normalizeEmails($emailsRaw);
-            $processEmails = $this->normalizeEmails(
-                Process::where('process_type', 'orden_de_compra')->pluck('email')->toArray()
-            );
-
-            // Correos que se consideran del cliente
-            $clientEmails = $this->normalizeEmails([
-                $order->client->email,
-                $order->client->dispatch_confirmation_email,
-                $order->tag_email_despachos,
-                $order->tag_email_pedidos,
-            ]);
-
-            // Separar emails del request entre cliente e internos
-            $clientEmailsFromRequest = array_values(array_intersect($tagEmails, $clientEmails));
-
-            // IMPORTANTE: Excluir emails de procesos de la lista de cliente
-            // Los emails de procesos NUNCA deben recibir el email de "solo tabla"
-            $clientEmailsFromRequest = array_values(array_diff($clientEmailsFromRequest, $processEmails));
-
-            // En legacy el cliente siempre recibe el correo (si hay email)
-            $clientRecipients = $this->normalizeEmails([$order->client->email]);
-            if (empty($clientRecipients)) {
-                $clientRecipients = $clientEmailsFromRequest;
+            
+            // Solo usar emails de procesos si NO hay emails seleccionados en el frontend
+            if (empty($tagEmails)) {
+                $processEmails = $this->normalizeEmails(
+                    Process::where('process_type', 'orden_de_compra')->pluck('email')->toArray()
+                );
+            } else {
+                $processEmails = []; // No agregar emails de procesos si el usuario seleccionó emails
             }
-            $clientRecipients = array_values(array_diff($clientRecipients, $processEmails));
 
-            $internalEmailsFromRequest = array_values(array_diff($tagEmails, $clientEmails));
+            // Email principal del cliente (solo este recibe el email de "solo tabla")
+            $mainClientEmail = $this->normalizeEmails([$order->client->email]);
+            $clientRecipients = $mainClientEmail;
 
-            // Emails internos = procesos + internos del request
-            $allInternalEmails = array_values(array_unique(array_merge($processEmails, $internalEmailsFromRequest)));
+            // TODOS los emails seleccionados en el frontend (excepto el email principal del cliente)
+            // reciben el email interno (tabla + texto)
+            $allInternalEmails = array_values(array_diff($tagEmails, $mainClientEmail));
+            
+            // Si no hay emails seleccionados, usar emails de procesos
+            if (empty($allInternalEmails)) {
+                $allInternalEmails = $processEmails;
+            }
 
             \Log::info('OBSERVACIONES - Emails identificados', [
                 'order_id' => $order->id,
                 'tagEmails' => $tagEmails,
                 'processEmails' => $processEmails,
-                'clientEmails' => $clientEmails,
-                'clientEmailsFromRequest' => $clientEmailsFromRequest,
-                'internalEmailsFromRequest' => $internalEmailsFromRequest,
+                'mainClientEmail' => $mainClientEmail,
+                'clientRecipients' => $clientRecipients,
                 'allInternalEmails' => $allInternalEmails,
             ]);
 
-            // Generar subject igual que legacy (sin usar subject_client)
-            if (empty($order->subject_client)) {
-                $subject = 'Re: ' .
-                    ($order->is_new_win == 1 ? 'NEW WIN - ' : '') .
-                    'Pedido - ' .
-                    $order->client->client_name . ' - ' .
-                    $order->client->nit . ' - ' .
-                    $order->order_consecutive;
-            } else {
-                $subject = 'Re: ' . $order->subject_client;
-            }
+            // DIFERENTES subjects para cliente vs interno
+            // Email cliente: usa subject_client + message_id
+            $subjectClient = 'Re: ' . ($order->subject_client ?: 'Orden de Compra - ' . $order->order_consecutive);
+            $threadIdClient = $order->message_id;
+            
+            // Email interno (despacho): usa subject_despacho + message_despacho_id
+            $subjectInternal = 'Re: ' . ($order->subject_despacho ?: 'Pedido - ' . $order->order_consecutive);
+            $threadIdInternal = $order->message_despacho_id;
 
-            $threadId = $order->message_despacho_id ?: $order->message_id;
+            \Log::info('OBSERVACIONES - Threading configuration', [
+                'order_id' => $order->id,
+                'subject_client' => $order->subject_client,
+                'subject_despacho' => $order->subject_despacho,
+                'message_id' => $order->message_id,
+                'message_despacho_id' => $order->message_despacho_id,
+                'final_subjectClient' => $subjectClient,
+                'final_subjectInternal' => $subjectInternal,
+            ]);
 
             // Restaurar extractHtmlTables para enviar solo tablas al cliente
             $tablesOnly = $this->extractHtmlTables($observationHtml);
@@ -1333,6 +1370,19 @@ class PurchaseOrderController extends Controller
                 'observationHtml_full' => $observationHtml,
                 'tablesOnly_full' => $tablesOnly,
                 'hasInternalObservation' => !empty($internalObservation),
+            ]);
+
+            \Log::info('OBSERVACIONES - Condiciones de envío', [
+                'order_id' => $order->id,
+                'clientRecipients_count' => count($clientRecipients),
+                'clientRecipients_empty' => empty($clientRecipients),
+                'tablesOnly_empty' => empty($tablesOnly),
+                'sendClientEmail' => !empty($clientRecipients) && !empty($tablesOnly),
+                'allInternalEmails_count' => count($allInternalEmails),
+                'allInternalEmails_empty' => empty($allInternalEmails),
+                'observationHtml_empty' => empty($observationHtml),
+                'internalObservation_empty' => empty($internalObservation),
+                'sendInternalEmail' => !empty($allInternalEmails) && (!empty($observationHtml) || !empty($internalObservation)),
             ]);
 
             // 1. ENVIAR EMAIL AL CLIENTE (solo tabla)
@@ -1351,22 +1401,31 @@ class PurchaseOrderController extends Controller
                     ->from($userEmail)
                     ->to($clientTo)
                     ->cc(...$clientCcAddresses)
-                    ->subject($subject)
+                    ->subject($subjectClient)
                     ->html($clientBody);
 
-                if ($threadId) {
-                    $clientMail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
-                    $clientMail->getHeaders()->addTextHeader('References', '<' . $threadId . '>');
+                if ($threadIdClient) {
+                    $clientMail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadIdClient . '>');
+                    $clientMail->getHeaders()->addTextHeader('References', '<' . $threadIdClient . '>');
                 }
 
                 \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email cliente', [
                     'order_id' => $order->id,
                     'to' => $clientTo,
                     'cc' => $clientRecipients,
-                    'subject' => $subject,
+                    'subject' => $subjectClient,
+                    'threadId' => $threadIdClient,
+                    'from' => $userEmail,
                 ]);
 
                 $mailer->send($clientMail);
+            } else {
+                \Log::info('OBSERVACIONES - Email al cliente NO enviado', [
+                    'order_id' => $order->id,
+                    'reason' => empty($clientRecipients) ? 'Sin destinatarios' : 'Sin contenido de tabla',
+                    'clientRecipients' => $clientRecipients,
+                    'tablesOnly_length' => strlen($tablesOnly ?? ''),
+                ]);
             }
 
             // 2. ENVIAR EMAIL INTERNO (tabla + texto + observaciones internas)
@@ -1387,22 +1446,32 @@ class PurchaseOrderController extends Controller
                     ->from($userEmail)
                     ->to($internalTo)
                     ->cc(...$internalCcAddresses)
-                    ->subject($subject)
+                    ->subject($subjectInternal)
                     ->html($internalBody);
 
-                if ($threadId) {
-                    $internalEmail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadId . '>');
-                    $internalEmail->getHeaders()->addTextHeader('References', '<' . $threadId . '>');
+                if ($threadIdInternal) {
+                    $internalEmail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadIdInternal . '>');
+                    $internalEmail->getHeaders()->addTextHeader('References', '<' . $threadIdInternal . '>');
                 }
 
                 \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email interno', [
                     'order_id' => $order->id,
+                    'from' => $userEmail,
                     'to' => $internalTo,
                     'cc' => $allInternalEmails,
-                    'subject' => $subject,
+                    'subject' => $subjectInternal,
+                    'threadId' => $threadIdInternal,
                 ]);
 
                 $mailer->send($internalEmail);
+            } else {
+                \Log::info('OBSERVACIONES - Email interno NO enviado', [
+                    'order_id' => $order->id,
+                    'reason' => empty($allInternalEmails) ? 'Sin destinatarios internos' : 'Sin contenido',
+                    'allInternalEmails' => $allInternalEmails,
+                    'observationHtml_length' => strlen($observationHtml ?? ''),
+                    'internalObservation_length' => strlen($internalObservation ?? ''),
+                ]);
             }
         } catch (\Throwable $e) {
             \Log::error('Error enviando correo de observaciones', [
@@ -1675,38 +1744,94 @@ class PurchaseOrderController extends Controller
      */
     private function normalizeTrm($value): float
     {
+        $originalValue = $value;
         $value = trim((string) $value);
+        
+        Log::info('🔍 NORMALIZE TRM - Step 1: Initial', [
+            'original' => $originalValue,
+            'after_trim' => $value,
+        ]);
+        
         if ($value === '' || in_array(strtoupper($value), ['N/A', 'NA', 'NULL'])) {
+            Log::info('🔍 NORMALIZE TRM - Returning 0 (empty or N/A)');
             return 0.0;
         }
 
         $value = str_ireplace(['$', 'ƒª', 'USD', 'COP', ' '], '', $value);
+        Log::info('🔍 NORMALIZE TRM - Step 2: After removing symbols', ['value' => $value]);
+        
         $value = preg_replace('/^[^\d\-]*([\d\.,\/]+)/', '$1', $value);
+        Log::info('🔍 NORMALIZE TRM - Step 3: After regex extract', ['value' => $value]);
 
         if (preg_match('/^[\d,\.\/]+$/', $value) && strpos($value, '/') !== false) {
+            Log::info('🔍 NORMALIZE TRM - Step 4: Division detected');
             $expr = str_replace(',', '', $value);
             $expr = preg_replace('/[^0-9.\/]/', '', $expr);
             if (!preg_match('/^[\d\.]+\/[\d\.]+$/', $expr)) {
+                Log::info('🔍 NORMALIZE TRM - Invalid division format, returning 0');
                 return 0.0;
             }
             [$numerador, $denominador] = explode('/', $expr);
             $denominador = (float) $denominador ?: 1;
-            return (float) $numerador / $denominador;
+            $result = (float) $numerador / $denominador;
+            Log::info('🔍 NORMALIZE TRM - Division result', ['result' => $result]);
+            return $result;
         }
 
-        $value = str_replace(['.', ','], ['', '.'], $value);
+        Log::info('🔍 NORMALIZE TRM - Step 5: No division, processing decimals', ['value_before' => $value]);
+        
+        // Detectar formato: si tiene TANTO punto como coma, determinar cuál es el decimal
+        $hasDot = strpos($value, '.') !== false;
+        $hasComma = strpos($value, ',') !== false;
+        
+        if ($hasDot && $hasComma) {
+            // Tiene ambos: determinar cuál es el decimal (el último)
+            $lastDot = strrpos($value, '.');
+            $lastComma = strrpos($value, ',');
+            
+            if ($lastComma > $lastDot) {
+                // Formato europeo: "3.669,15" -> punto es miles, coma es decimal
+                $value = str_replace(['.', ','], ['', '.'], $value);
+                Log::info('🔍 NORMALIZE TRM - Step 6a: European format detected', ['value' => $value]);
+            } else {
+                // Formato americano con separador de miles: "3,669.15" -> coma es miles, punto es decimal
+                $value = str_replace(',', '', $value);
+                Log::info('🔍 NORMALIZE TRM - Step 6b: American format with thousands separator', ['value' => $value]);
+            }
+        } elseif ($hasComma) {
+            // Solo coma: asumir formato europeo "3669,15"
+            $value = str_replace(',', '.', $value);
+            Log::info('🔍 NORMALIZE TRM - Step 6c: European format (comma only)', ['value' => $value]);
+        } else {
+            // Solo punto o ninguno: formato americano "3669.15" - dejar tal cual
+            Log::info('🔍 NORMALIZE TRM - Step 6d: American format (dot only or no separator)', ['value' => $value]);
+        }
+        
         if (is_numeric($value)) {
-            return (float) $value;
+            $result = (float) $value;
+            Log::info('🔍 NORMALIZE TRM - Step 7: Is numeric, returning', ['result' => $result]);
+            return $result;
         }
 
+        Log::info('🔍 NORMALIZE TRM - Step 8: Not numeric, extracting digits');
         $digits = preg_replace('/[^\d]/', '', $value);
+        Log::info('🔍 NORMALIZE TRM - Step 9: Digits only', ['digits' => $digits, 'length' => strlen($digits)]);
+        
         if (strlen($digits) <= 4) {
-            return (float) $digits;
+            $result = (float) $digits;
+            Log::info('🔍 NORMALIZE TRM - Step 10: Short number (<= 4 digits), returning', ['result' => $result]);
+            return $result;
         }
 
         $entero = substr($digits, 0, 4);
         $decimal = substr($digits, 4);
-        return (float) ($entero . '.' . $decimal);
+        $result = (float) ($entero . '.' . $decimal);
+        Log::info('🔍 NORMALIZE TRM - Step 11: Long number, splitting', [
+            'entero' => $entero,
+            'decimal' => $decimal,
+            'result' => $result
+        ]);
+        return $result;
     }
 
     /**
@@ -1904,9 +2029,29 @@ class PurchaseOrderController extends Controller
                 // Definir sub-tipo
                 $subProcess = $processTypeContext === 'purchase_order_resend' ? 'purchase_order_resend' : 'purchase_order_created';
 
+                // Capturar Message-ID usando listener de eventos
+                $capturedMessageId = null;
+                \Event::listen(\Illuminate\Mail\Events\MessageSent::class, function ($event) use (&$capturedMessageId) {
+                    $messageId = $event->sent->getMessageId();
+                    if ($messageId) {
+                        $capturedMessageId = $messageId;
+                    }
+                });
+
                 \Mail::to($primaryToEmail)
                     ->cc($ccEmails)
                     ->send(new \App\Mail\PurchaseOrderMail($purchaseOrder, $pdfContent, $subProcess, $metadata));
+
+                // Guardar el Message-ID capturado
+                if ($capturedMessageId) {
+                    $purchaseOrder->message_id = $capturedMessageId;
+                    $purchaseOrder->save();
+                    
+                    Log::info('Message-ID capturado para email de pedido', [
+                        'order_id' => $purchaseOrder->id,
+                        'message_id' => $capturedMessageId
+                    ]);
+                }
 
                 Log::info('Email de pedido enviado', [
                     'order_id' => $purchaseOrder->id,
@@ -1984,9 +2129,29 @@ class PurchaseOrderController extends Controller
                 // Definir sub-tipo
                  $subProcess = $processTypeContext === 'purchase_order_resend' ? 'purchase_order_despacho_resend' : 'purchase_order_despacho_created';
 
+                // Capturar Message-ID usando listener de eventos
+                $capturedMessageId = null;
+                \Event::listen(\Illuminate\Mail\Events\MessageSent::class, function ($event) use (&$capturedMessageId) {
+                    $messageId = $event->sent->getMessageId();
+                    if ($messageId) {
+                        $capturedMessageId = $messageId;
+                    }
+                });
+
                 \Mail::to($toEmail)
                     ->cc($ccEmails)
                     ->send(new \App\Mail\PurchaseOrderMailDespacho($purchaseOrder, $filePath, $subProcess, $metadata));
+
+                // Guardar el Message-ID capturado
+                if ($capturedMessageId) {
+                    $purchaseOrder->message_despacho_id = $capturedMessageId;
+                    $purchaseOrder->save();
+                    
+                    Log::info('Message-ID capturado para email de despacho', [
+                        'order_id' => $purchaseOrder->id,
+                        'message_despacho_id' => $capturedMessageId
+                    ]);
+                }
 
                 Log::info('Email de despacho enviado', [
                     'order_id' => $purchaseOrder->id,

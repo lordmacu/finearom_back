@@ -33,9 +33,10 @@ class PurchaseOrderStatusChangedMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $subject = 'Re: ' . $this->purchaseOrder->subject_client;
+        // Usar subject_despacho para emails de cambio de estado
+        $subject = 'Re: ' . ($this->purchaseOrder->subject_despacho ?: $this->purchaseOrder->subject_client);
 
-        // Headers para seguir el hilo del correo original
+        // Headers para seguir el hilo del correo original (despachos)
         $headers = [];
         $threadId = $this->purchaseOrder->message_despacho_id ?: $this->purchaseOrder->message_id;
         if ($threadId) {

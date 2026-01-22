@@ -29,18 +29,19 @@
             height: auto;
         }
         .email-title-container {
-            margin-bottom: 20px;
+            margin-bottom: 60px;
             padding: 0;
             display: block;
         }
         .email-title {
             display: inline-block;
             font-weight: bold;
-            font-size: 20px;
+            font-size: 36px;
             margin: 0;
-            padding: 0;
-            color: #1A4D80;
-            text-align: center;
+            padding: 0 10px 0 0;
+            background: linear-gradient(to top, #ebebeb 40%, transparent 40%);
+            border-radius: 0 5px 5px 0;
+            color: #1F2345;
             line-height: 1.2;
         }
         table {
@@ -66,12 +67,12 @@
             font-size: 14px;
         }
         a {
-            color: #1155cc !important;
+            color: #1F2345 !important;
             text-decoration: underline;
         }
         /* Estilos específicos de cartera para colores */
         strong {
-            color: #0070c0;
+            color: #1F2345;
         }
     </style>
 </head>

@@ -30,8 +30,8 @@
             width: 100px;
             height: auto;
         }
-           p, li, td, th, div, span, small, strong{
-              font-size: 18px;
+        p, li, td, th, div, span, small, strong{
+            font-size: 14px;
         }
         .email-title-container {
             margin-bottom: 60px;

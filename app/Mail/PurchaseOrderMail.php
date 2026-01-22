@@ -46,7 +46,8 @@ class PurchaseOrderMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $subject = 'Re: ' . $this->purchaseOrder->subject_client;
+        // Usar subject_client (puede ser personalizado o default "Orden de Compra - consecutivo")
+        $subject = $this->purchaseOrder->subject_client;
 
         // Headers para seguir el hilo del correo original
         $headers = [];
