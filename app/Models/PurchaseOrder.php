@@ -35,6 +35,7 @@ class PurchaseOrder extends Model
         'invoice_pdf',
         'subject_client',
         'subject_despacho',
+        'subject_dispatch',
         'proforma_generada',
     ];
 

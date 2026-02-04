@@ -882,6 +882,8 @@ class PurchaseOrderController extends Controller
     private function sendStatusUpdateEmail(PurchaseOrder $order, ?string $emailsJson, ?string $invoicePdfPath, ?string $statusCommentHtml = null): void
     {
         try {
+            $order->loadMissing('client');
+
             // Parse emails from request
             $requestEmails = !empty($emailsJson) ? json_decode($emailsJson, true) : [];
             $requestEmails = is_array($requestEmails) ? $requestEmails : [];
@@ -941,7 +943,26 @@ class PurchaseOrderController extends Controller
             $ccEmails = array_values(array_unique(array_filter($ccEmails)));
 
             // Send email
-            $mailable = new \App\Mail\PurchaseOrderStatusMail($order, $invoicePdfPath, $statusCommentHtml);
+            $baseSubject = $order->subject_dispatch;
+            $isReply = !empty($baseSubject);
+
+            if (empty($baseSubject)) {
+                $baseSubject = 'CONFIRMACIÓN DE DESPACHO ' .
+                    strtoupper($order->client->client_name) . ' ' .
+                    $order->client->nit . ' OC ' .
+                    $order->order_consecutive;
+
+                $order->subject_dispatch = $baseSubject;
+                $order->save();
+            }
+
+            $mailable = new \App\Mail\PurchaseOrderStatusMail(
+                $order,
+                $invoicePdfPath,
+                $statusCommentHtml,
+                $baseSubject,
+                $isReply
+            );
             
             $mail = \Mail::to($toEmail);
             

@@ -18,15 +18,25 @@ class PurchaseOrderStatusMail extends Mailable
     public PurchaseOrder $purchaseOrder;
     public ?string $invoicePdfPath;
     public ?string $statusCommentHtml;
+    public ?string $subjectBase;
+    public bool $isReply;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(PurchaseOrder $purchaseOrder, ?string $invoicePdfPath = null, ?string $statusCommentHtml = null)
+    public function __construct(
+        PurchaseOrder $purchaseOrder,
+        ?string $invoicePdfPath = null,
+        ?string $statusCommentHtml = null,
+        ?string $subjectBase = null,
+        bool $isReply = false
+    )
     {
         $this->purchaseOrder = $purchaseOrder;
         $this->invoicePdfPath = $invoicePdfPath;
         $this->statusCommentHtml = $statusCommentHtml;
+        $this->subjectBase = $subjectBase;
+        $this->isReply = $isReply;
     }
 
     /**
@@ -34,10 +44,14 @@ class PurchaseOrderStatusMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $subject = 'CONFIRMACIÓN DE DESPACHO ' .
-                   strtoupper($this->purchaseOrder->client->client_name) . ' ' .
-                   $this->purchaseOrder->client->nit . ' OC ' .
-                   $this->purchaseOrder->order_consecutive;
+        $baseSubject = $this->subjectBase ?? (
+            'CONFIRMACIÓN DE DESPACHO ' .
+            strtoupper($this->purchaseOrder->client->client_name) . ' ' .
+            $this->purchaseOrder->client->nit . ' OC ' .
+            $this->purchaseOrder->order_consecutive
+        );
+
+        $subject = $this->isReply ? 'Re: ' . $baseSubject : $baseSubject;
 
         return new Envelope(
             subject: $subject
