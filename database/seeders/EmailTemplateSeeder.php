@@ -178,6 +178,9 @@ class EmailTemplateSeeder extends Seeder
                 'available_variables' => [
                     'subject_client' => 'Subject del cliente (de la orden)',
                     'template_content' => 'Contenido HTML del template desde ConfigSystem',
+                    'branch_offices' => 'Listado de sucursales del cliente (nombre, NIT, direccion de entrega y ciudad)',
+                    'client_name' => 'Nombre del cliente',
+                    'client_nit' => 'NIT del cliente',
                 ],
                 'is_active' => true,
             ],

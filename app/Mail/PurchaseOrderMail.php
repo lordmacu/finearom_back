@@ -9,6 +9,7 @@ use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Queue\SerializesModels;
 use App\Models\ConfigSystem;
+use App\Models\BranchOffice;
 use App\Services\EmailTemplateService;
 
 class PurchaseOrderMail extends Mailable
@@ -88,16 +89,73 @@ class PurchaseOrderMail extends Mailable
     public function content(): Content
     {
         $service = new EmailTemplateService();
-        $variables = [
-            'subject_client' => $this->purchaseOrder->subject_client,
-            'template_content' => $this->templateContent,
-        ];
+        $variables = $this->prepareVariables();
+        $templateContent = $service->replaceVariables($this->templateContent, $variables);
+        $variables['template_content'] = $templateContent;
         $rendered = $service->renderTemplate('purchase_order', $variables);
 
         return new Content(
             view: 'emails.template',
             with: $rendered
         );
+    }
+
+    /**
+     * Prepare variables for template rendering
+     */
+    protected function prepareVariables(): array
+    {
+        $this->purchaseOrder->loadMissing('client');
+
+        return [
+            'client_name' => $this->purchaseOrder->client?->client_name ?? '',
+            'client_nit' => $this->purchaseOrder->client?->nit ?? '',
+            'subject_client' => $this->purchaseOrder->subject_client,
+            'branch_offices' => $this->buildBranchOfficesTable(),
+        ];
+    }
+
+    /**
+     * Build branch offices table HTML for the client
+     */
+    protected function buildBranchOfficesTable(): string
+    {
+        $offices = BranchOffice::query()
+            ->where('client_id', $this->purchaseOrder->client_id)
+            ->orderBy('id')
+            ->get(['id', 'name', 'nit', 'delivery_address', 'delivery_city']);
+
+        if ($offices->isEmpty()) {
+            return '<p><em>No hay sucursales registradas.</em></p>';
+        }
+
+        $html = '<div>
+            <h4>Sucursales de entrega</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>NOMBRE</th>
+                        <th>NIT</th>
+                        <th>DIRECCIÓN DE ENTREGA</th>
+                        <th>CIUDAD</th>
+                    </tr>
+                </thead>
+                <tbody>';
+
+        foreach ($offices as $office) {
+            $html .= '<tr>
+                <td><strong>' . e($office->name) . '</strong></td>
+                <td>' . e($office->nit ?: '-') . '</td>
+                <td>' . e($office->delivery_address) . '</td>
+                <td>' . e($office->delivery_city) . '</td>
+            </tr>';
+        }
+
+        $html .= '</tbody>
+            </table>
+        </div>';
+
+        return $html;
     }
 
     /**
