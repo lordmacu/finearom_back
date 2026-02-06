@@ -1321,7 +1321,23 @@ class PurchaseOrderController extends Controller
                 $internalSection = '<br><br><strong>Observaciones internas (solo planta)</strong><br>' . $internalObservation;
             }
 
-            $dsn = $this->resolveMailerDsn($userEmail);
+            // SIEMPRE usar DSN de Marlón para observaciones
+            $dsn = env('MAILER_DSN_MARLON');
+            if (empty($dsn)) {
+                \Log::warning('DSN de Marlón no configurado, usando DSN por defecto');
+                $dsn = $this->resolveMailerDsn($userEmail);
+            }
+            
+            // Log para debugging
+            \Log::info('OBSERVACIONES - DSN Configuration', [
+                'order_id' => $order->id,
+                'userEmail' => $userEmail,
+                'dsn_marlon_exists' => !empty(env('MAILER_DSN_MARLON')),
+                'dsn_final_preview' => $dsn ? substr($dsn, 0, 30) . '...' : 'NULL',
+                'dsn_contains_marlon' => $dsn ? str_contains($dsn, 'analista.operaciones') : false,
+                'dsn_contains_facturacion' => $dsn ? str_contains($dsn, 'facturacion') : false,
+            ]);
+            
             if (empty($dsn)) {
                 \Log::warning('No se pudo enviar correo de observaciones: DSN no configurado');
                 return;
