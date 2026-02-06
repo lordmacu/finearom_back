@@ -1329,7 +1329,7 @@ class PurchaseOrderController extends Controller
             }
             
             // Log para debugging
-            \Log::info('OBSERVACIONES - DSN Configuration', [
+            \Log::info('OBSERVACIONES - DSN Configurationsdfsfa', [
                 'order_id' => $order->id,
                 'userEmail' => $userEmail,
                 'dsn_marlon_exists' => !empty(env('MAILER_DSN_MARLON')),
