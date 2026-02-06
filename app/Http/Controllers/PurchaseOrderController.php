@@ -1580,8 +1580,10 @@ class PurchaseOrderController extends Controller
 
         $dsn = $envDsn ?: $configCustom ?: $configSmtp;
 
-        if ($userEmail === 'analista.operaciones@finearom.com' && $envMarlon) {
-            $dsn = $envMarlon;
+        // SIEMPRE usar DSN de Marlón para analista.operaciones@finearom.com
+        if ($userEmail === 'analista.operaciones@finearom.com') {
+            // Priorizar DSN de Marlón, si no existe usar el DSN por defecto
+            $dsn = $envMarlon ?: $dsn;
         }
 
         \Log::info('DEBUG RESOLVE MAILER DSN VALUES', [
