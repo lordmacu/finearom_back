@@ -1,7 +1,7 @@
 @extends('emails.layout')
 
-@section('title', 'Actualización de Orden - Finearom')
-@section('email_title', 'Actualización de Orden')
+@section('title', 'Confirmación de despacho - Finearom')
+@section('email_title', 'Confirmación de despacho')
 
 @section('content')
     <p>Estimado cliente,</p>
@@ -26,6 +26,6 @@
     <div>
         <p><strong>{{ $purchaseOrder->sender_name ?? 'EQUIPO FINEAROM' }}</strong></p>
         <p>Gestión de Órdenes</p>
-        <p>Tel: +57 317 433 5096 | <a href="mailto:ordenes@finearom.com">ordenes@finearom.com</a> | <a href="https://finearom.com">www.finearom.com</a></p>
+        <p>Tel: +57 318 3025170 | <a href="mailto:coordinadora.comercial@finearom.com">coordinadora.comercial@finearom.com</a> | <a href="https://finearom.com">www.finearom.com</a></p>
     </div>
 @endsection

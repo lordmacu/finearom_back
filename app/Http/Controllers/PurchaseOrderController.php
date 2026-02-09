@@ -160,6 +160,23 @@ class PurchaseOrderController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        // Log uploaded files for debugging
+        if ($request->hasFile('attachments')) {
+            $files = $request->file('attachments');
+            $validFiles = array_filter($files, fn($f) => $f && $f->isValid());
+            if (!empty($validFiles)) {
+                Log::info('Archivos recibidos para upload', [
+                    'count' => count($validFiles),
+                    'files' => array_map(fn($f) => [
+                        'name' => $f->getClientOriginalName(),
+                        'size' => $f->getSize(),
+                        'mime' => $f->getMimeType(),
+                        'error' => $f->getError(),
+                    ], $validFiles)
+                ]);
+            }
+        }
+
         $validated = $request->validate([
             'client_id'            => ['required', 'exists:clients,id'],
             'order_consecutive'    => ['required', 'string'],
@@ -178,7 +195,8 @@ class PurchaseOrderController extends Controller
             'products.*.price'     => ['nullable'],
             'products.*.delivery_date' => ['nullable', 'date'],
             'products.*.branch_office_id' => ['required'],
-            'attachment'           => ['nullable', 'file', 'mimes:pdf', 'max:4096'],
+            'attachments'          => ['nullable', 'array'],
+            'attachments.*'        => ['file', 'mimes:pdf'],
         ]);
 
         try {
@@ -238,10 +256,14 @@ class PurchaseOrderController extends Controller
                 $data['trm_updated_at'] = $data['order_creation_date'];
             }
 
-            // adjunto
-            if ($request->hasFile('attachment')) {
-                $data['attachment'] = $request->file('attachment')->store('attachments', 'public');
+            // adjuntos múltiples
+            $attachmentPaths = [];
+            if ($request->hasFile('attachments')) {
+                foreach ($request->file('attachments') as $file) {
+                    $attachmentPaths[] = $file->store('attachments', 'public');
+                }
             }
+            $data['attachment'] = $attachmentPaths;
 
             $purchaseOrder = PurchaseOrder::create($data);
             // Append id al consecutivo (legacy)
@@ -314,6 +336,23 @@ class PurchaseOrderController extends Controller
     {
         $purchaseOrder = PurchaseOrder::findOrFail($orderId);
 
+        // Log uploaded files for debugging
+        if ($request->hasFile('attachments')) {
+            $files = $request->file('attachments');
+            $validFiles = array_filter($files, fn($f) => $f && $f->isValid());
+            if (!empty($validFiles)) {
+                Log::info('Archivos recibidos para update', [
+                    'count' => count($validFiles),
+                    'files' => array_map(fn($f) => [
+                        'name' => $f->getClientOriginalName(),
+                        'size' => $f->getSize(),
+                        'mime' => $f->getMimeType(),
+                        'error' => $f->getError(),
+                    ], $validFiles)
+                ]);
+            }
+        }
+
         $validated = $request->validate([
             'order_consecutive'    => ['required', 'string', new UniqueOrderConsecutiveForClient($request->client_id, $purchaseOrder->id)],
             'client_id'            => ['required', 'exists:clients,id'],
@@ -335,7 +374,8 @@ class PurchaseOrderController extends Controller
             'products.*.muestra'   => ['nullable'],
             'products.*.delivery_date' => ['nullable', 'date'],
             'products.*.branch_office_id' => ['required'],
-            'attachment'           => ['nullable', 'file', 'mimes:pdf', 'max:4096'],
+            'attachments'          => ['nullable', 'array'],
+            'attachments.*'        => ['file', 'mimes:pdf'],
         ]);
 
         try {
@@ -353,11 +393,17 @@ class PurchaseOrderController extends Controller
             $purchaseOrder->order_creation_date = $validated['createdOrderDate'] ?? $purchaseOrder->order_creation_date;
             $purchaseOrder->trm = $this->normalizeTrm($validated['trm']);
 
-            if ($request->hasFile('attachment')) {
-                if ($purchaseOrder->attachment) {
-                    Storage::disk('public')->delete($purchaseOrder->attachment);
+            // Adjuntos múltiples - agregar nuevos sin borrar existentes
+            if ($request->hasFile('attachments')) {
+                $existingAttachments = $purchaseOrder->attachment ?? [];
+                $newAttachmentPaths = [];
+
+                foreach ($request->file('attachments') as $file) {
+                    $newAttachmentPaths[] = $file->store('attachments', 'public');
                 }
-                $purchaseOrder->attachment = $request->file('attachment')->store('attachments', 'public');
+
+                // Combinar existentes con nuevos
+                $purchaseOrder->attachment = array_merge($existingAttachments, $newAttachmentPaths);
             }
 
             $purchaseOrder->save();
@@ -412,16 +458,34 @@ class PurchaseOrderController extends Controller
     }
 
     /**
-     * Elimina adjunto de la orden.
+     * Elimina adjunto de la orden (soporta array de adjuntos).
      */
-    public function deleteAttachment(int $orderId): JsonResponse
+    public function deleteAttachment(Request $request, int $id): JsonResponse
     {
-        $purchaseOrder = PurchaseOrder::findOrFail($orderId);
+        $purchaseOrder = PurchaseOrder::findOrFail($id);
 
-        if ($purchaseOrder->attachment) {
-            Storage::disk('public')->delete($purchaseOrder->attachment);
-            $purchaseOrder->attachment = null;
-            $purchaseOrder->save();
+        // Si se especifica un filename, eliminar solo ese archivo del array
+        if ($request->has('filename')) {
+            $filename = $request->input('filename');
+            $attachments = $purchaseOrder->attachment ?? [];
+
+            // Buscar y eliminar el archivo del array
+            $key = array_search($filename, $attachments);
+            if ($key !== false) {
+                Storage::disk('public')->delete($attachments[$key]);
+                unset($attachments[$key]);
+                $purchaseOrder->attachment = array_values($attachments); // Reindexar array
+                $purchaseOrder->save();
+            }
+        } else {
+            // Si no se especifica filename, eliminar todos
+            if ($purchaseOrder->attachment) {
+                foreach ($purchaseOrder->attachment as $file) {
+                    Storage::disk('public')->delete($file);
+                }
+                $purchaseOrder->attachment = [];
+                $purchaseOrder->save();
+            }
         }
 
         return response()->json(['success' => true]);
@@ -2023,12 +2087,8 @@ class PurchaseOrderController extends Controller
         $clientEmail = $purchaseOrder->client->email;
         $executiveEmail = $purchaseOrder->client->executive_email ?? $purchaseOrder->client->executive;
         $coordinator = 'monica.castano@finearom.com';
-        // Usar el adjunto ya almacenado en la orden; evitar pasar rutas temporales
-        $filePath = $purchaseOrder->attachment ?? null;
-        $validatedAttachment = $validated['attachment'] ?? null;
-        if (empty($filePath) && is_string($validatedAttachment)) {
-            $filePath = $validatedAttachment;
-        }
+        // Usar los adjuntos ya almacenados en la orden (array)
+        $attachmentPaths = $purchaseOrder->attachment ?? [];
 
         // ============ EMAIL PEDIDOS ============
         if (empty($validated['tag_email_pedidos'])) {
@@ -2082,7 +2142,7 @@ class PurchaseOrderController extends Controller
 
                 \Mail::to($primaryToEmail)
                     ->cc($ccEmails)
-                    ->send(new \App\Mail\PurchaseOrderMail($purchaseOrder, $pdfContent, $subProcess, $metadata));
+                    ->send(new \App\Mail\PurchaseOrderMail($purchaseOrder, $pdfContent, $subProcess, $metadata, $attachmentPaths));
 
                 // Guardar el Message-ID capturado
                 if ($capturedMessageId) {
@@ -2162,7 +2222,8 @@ class PurchaseOrderController extends Controller
             'to' => $toEmail,
             'cc' => $ccEmails,
             'cc_count' => count($ccEmails),
-            'has_attachment' => !empty($filePath)
+            'has_attachments' => !empty($attachmentPaths),
+            'attachments_count' => count($attachmentPaths)
         ]);
 
         // Enviar email de despacho
@@ -2182,7 +2243,7 @@ class PurchaseOrderController extends Controller
 
                 \Mail::to($toEmail)
                     ->cc($ccEmails)
-                    ->send(new \App\Mail\PurchaseOrderMailDespacho($purchaseOrder, $filePath, $subProcess, $metadata));
+                    ->send(new \App\Mail\PurchaseOrderMailDespacho($purchaseOrder, $attachmentPaths, $subProcess, $metadata));
 
                 // Guardar el Message-ID capturado
                 if ($capturedMessageId) {

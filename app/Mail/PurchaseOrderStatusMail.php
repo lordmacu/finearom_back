@@ -69,8 +69,16 @@ class PurchaseOrderStatusMail extends Mailable
     public function content(): Content
     {
         $service = new EmailTemplateService();
+
+        // Limpiar el HTML removiendo todos los <br> tags para evitar espacios excesivos
+        $cleanedStatusComment = $this->statusCommentHtml ?? '';
+        if ($cleanedStatusComment) {
+            // Remover todas las variaciones de <br> tags
+            $cleanedStatusComment = preg_replace('/<br\s*\/?>/i', '', $cleanedStatusComment);
+        }
+
         $variables = [
-            'status_comment' => $this->statusCommentHtml ?? '',
+            'status_comment' => $cleanedStatusComment,
             'sender_name' => $this->purchaseOrder->sender_name ?? 'EQUIPO FINEAROM',
         ];
         $rendered = $service->renderTemplate('purchase_order_status_update', $variables);

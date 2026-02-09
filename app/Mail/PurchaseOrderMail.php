@@ -21,6 +21,7 @@ class PurchaseOrderMail extends Mailable
     public $processType;
     public $customMetadata;
     public $templateContent;
+    public $userAttachments;
 
     /**
      * Create a new message instance.
@@ -29,13 +30,15 @@ class PurchaseOrderMail extends Mailable
      * @param $pdf
      * @param string $processType
      * @param array $customMetadata
+     * @param array $userAttachments
      */
-    public function __construct($purchaseOrder, $pdf, $processType = 'purchase_order', $customMetadata = [])
+    public function __construct($purchaseOrder, $pdf, $processType = 'purchase_order', $customMetadata = [], $userAttachments = [])
     {
         $this->purchaseOrder = $purchaseOrder;
         $this->pdf = $pdf;
         $this->processType = $processType;
         $this->customMetadata = $customMetadata;
+        $this->userAttachments = is_array($userAttachments) ? $userAttachments : [];
 
         // Obtener el contenido del template desde ConfigSystem (backward compatibility)
         $config = ConfigSystem::where('key', 'templatePedido')->first();
@@ -165,9 +168,57 @@ class PurchaseOrderMail extends Mailable
      */
     public function attachments(): array
     {
-        return [
+        $attachments = [
             Attachment::fromData(fn () => $this->pdf, 'orden-' . $this->purchaseOrder->order_consecutive . '.pdf')
                 ->withMime('application/pdf'),
         ];
+
+        \Log::info('📎 PurchaseOrderMail - Preparando adjuntos', [
+            'order_id' => $this->purchaseOrder->id,
+            'user_attachments_count' => count($this->userAttachments),
+            'user_attachments_paths' => $this->userAttachments,
+        ]);
+
+        // Adjuntar todos los PDFs del usuario si existen
+        if (!empty($this->userAttachments)) {
+            $attachedCount = 0;
+            $skippedCount = 0;
+
+            foreach ($this->userAttachments as $index => $attachmentPath) {
+                $fullPath = storage_path('app/public/' . $attachmentPath);
+
+                if (file_exists($fullPath)) {
+                    $filename = 'adjunto-' . ($index + 1) . '.pdf';
+                    $attachments[] = Attachment::fromStorageDisk('public', $attachmentPath)
+                        ->as($filename);
+                    $attachedCount++;
+
+                    \Log::info('✅ PDF adjuntado en email cliente', [
+                        'order_id' => $this->purchaseOrder->id,
+                        'index' => $index,
+                        'filename' => $filename,
+                        'path' => $attachmentPath,
+                        'full_path' => $fullPath,
+                    ]);
+                } else {
+                    $skippedCount++;
+                    \Log::warning('❌ PDF NO encontrado para email cliente', [
+                        'order_id' => $this->purchaseOrder->id,
+                        'index' => $index,
+                        'path' => $attachmentPath,
+                        'full_path' => $fullPath,
+                    ]);
+                }
+            }
+
+            \Log::info('📊 Resumen adjuntos email cliente', [
+                'order_id' => $this->purchaseOrder->id,
+                'total_attachments' => count($attachments),
+                'user_pdfs_attached' => $attachedCount,
+                'user_pdfs_skipped' => $skippedCount,
+            ]);
+        }
+
+        return $attachments;
     }
 }

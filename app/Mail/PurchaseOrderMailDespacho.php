@@ -16,7 +16,7 @@ class PurchaseOrderMailDespacho extends Mailable
     use Queueable, SerializesModels;
 
     public $purchaseOrder;
-    public $pdfAttachment;
+    public $pdfAttachments;
     public $processType;
     public $customMetadata;
 
@@ -24,14 +24,14 @@ class PurchaseOrderMailDespacho extends Mailable
      * Create a new message instance.
      *
      * @param $purchaseOrder
-     * @param $pdfAttachment
+     * @param array $pdfAttachments
      * @param string $processType
      * @param array $customMetadata
      */
-    public function __construct($purchaseOrder, $pdfAttachment, $processType = 'purchase_order_despacho', $customMetadata = [])
+    public function __construct($purchaseOrder, $pdfAttachments = [], $processType = 'purchase_order_despacho', $customMetadata = [])
     {
         $this->purchaseOrder = $purchaseOrder;
-        $this->pdfAttachment = $pdfAttachment;
+        $this->pdfAttachments = is_array($pdfAttachments) ? $pdfAttachments : [];
         $this->processType = $processType;
         $this->customMetadata = $customMetadata;
     }
@@ -202,16 +202,59 @@ class PurchaseOrderMailDespacho extends Mailable
      */
     public function attachments(): array
     {
-        if (!$this->pdfAttachment) {
-            return [];
+        $attachments = [];
+
+        \Log::info('📎 PurchaseOrderMailDespacho - Preparando adjuntos', [
+            'order_id' => $this->purchaseOrder->id,
+            'pdf_attachments_count' => count($this->pdfAttachments),
+            'pdf_attachments_paths' => $this->pdfAttachments,
+        ]);
+
+        // Adjuntar todos los PDFs del usuario si existen
+        if (!empty($this->pdfAttachments)) {
+            $attachedCount = 0;
+            $skippedCount = 0;
+
+            foreach ($this->pdfAttachments as $index => $attachmentPath) {
+                $fullPath = storage_path('app/public/' . $attachmentPath);
+
+                if (file_exists($fullPath)) {
+                    $filename = 'adjunto-' . ($index + 1) . '.pdf';
+                    $attachments[] = Attachment::fromPath($fullPath)
+                        ->as($filename)
+                        ->withMime('application/pdf');
+                    $attachedCount++;
+
+                    \Log::info('✅ PDF adjuntado en email despacho', [
+                        'order_id' => $this->purchaseOrder->id,
+                        'index' => $index,
+                        'filename' => $filename,
+                        'path' => $attachmentPath,
+                        'full_path' => $fullPath,
+                    ]);
+                } else {
+                    $skippedCount++;
+                    \Log::warning('❌ PDF NO encontrado para email despacho', [
+                        'order_id' => $this->purchaseOrder->id,
+                        'index' => $index,
+                        'path' => $attachmentPath,
+                        'full_path' => $fullPath,
+                    ]);
+                }
+            }
+
+            \Log::info('📊 Resumen adjuntos email despacho', [
+                'order_id' => $this->purchaseOrder->id,
+                'total_attachments' => count($attachments),
+                'user_pdfs_attached' => $attachedCount,
+                'user_pdfs_skipped' => $skippedCount,
+            ]);
+        } else {
+            \Log::info('ℹ️ Email despacho sin PDFs de usuario', [
+                'order_id' => $this->purchaseOrder->id,
+            ]);
         }
 
-        $fullPath = storage_path('app/public/' . $this->pdfAttachment);
-
-        return [
-            Attachment::fromPath($fullPath)
-                ->as('adjunto.pdf')
-                ->withMime('application/pdf'),
-        ];
+        return $attachments;
     }
 }

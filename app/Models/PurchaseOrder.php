@@ -47,6 +47,7 @@ class PurchaseOrder extends Model
         'is_new_win'               => 'boolean',
         'is_muestra'               => 'boolean',
         'proforma_generada'        => 'boolean',
+        'attachment'               => 'array',
     ];
 
     public function client()

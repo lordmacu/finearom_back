@@ -158,6 +158,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/purchase-orders/export', [PurchaseOrderExportController::class, 'export']);
     Route::get('/purchase-orders/products/export', [PurchaseOrderProductExportController::class, 'export']);
     Route::get('/purchase-orders/get-trm', [PurchaseOrderController::class, 'getTrm']);
+    Route::get('/purchase-orders/php-config', [PurchaseOrderController::class, 'getPhpConfig']);
     Route::post('/purchase-orders/import', [PurchaseOrderImportController::class, 'import']);
     Route::post('/purchase-orders', [PurchaseOrderController::class, 'store']);
     Route::post('/purchase-orders/{id}/resend', [PurchaseOrderController::class, 'resendOrder']);
