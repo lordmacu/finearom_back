@@ -54,6 +54,7 @@ class PurchaseOrderStatusMail extends Mailable
         $subject = $this->isReply ? 'Re: ' . $baseSubject : $baseSubject;
 
         return new Envelope(
+            from: 'facturacion@finearom.com',
             subject: $subject
         );
     }
