@@ -9,6 +9,7 @@ use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Mail\Mailables\Attachment;
+use Illuminate\Mail\Mailables\Address;
 use Illuminate\Queue\SerializesModels;
 
 class PurchaseOrderStatusMail extends Mailable
@@ -54,7 +55,7 @@ class PurchaseOrderStatusMail extends Mailable
         $subject = $this->isReply ? 'Re: ' . $baseSubject : $baseSubject;
 
         return new Envelope(
-            from: 'facturacion@finearom.com',
+            from: new Address('facturacion@finearom.com', 'Facturación Finearom'),
             subject: $subject
         );
     }
