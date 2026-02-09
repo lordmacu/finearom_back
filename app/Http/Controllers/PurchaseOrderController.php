@@ -963,13 +963,13 @@ class PurchaseOrderController extends Controller
                 $baseSubject,
                 $isReply
             );
-            
-            $mail = \Mail::to($toEmail);
-            
+
+            $mail = \Mail::mailer('google_alt')->to($toEmail);
+
             if (!empty($ccEmails)) {
                 $mail->cc($ccEmails);
             }
-            
+
             $mail->send($mailable);
 
             \Log::info('Status update email sent successfully', [

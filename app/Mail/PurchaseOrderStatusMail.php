@@ -41,14 +41,6 @@ class PurchaseOrderStatusMail extends Mailable
     }
 
     /**
-     * Get the mailer that should send the message.
-     */
-    public function mailer(): string
-    {
-        return 'google_alt';
-    }
-
-    /**
      * Get the message envelope.
      */
     public function envelope(): Envelope
