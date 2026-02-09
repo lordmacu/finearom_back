@@ -956,12 +956,15 @@ class PurchaseOrderController extends Controller
                 $order->save();
             }
 
+            $userEmail = auth()->user()?->email ?? config('mail.from.address');
+
             $mailable = new \App\Mail\PurchaseOrderStatusMail(
                 $order,
                 $invoicePdfPath,
                 $statusCommentHtml,
                 $baseSubject,
-                $isReply
+                $isReply,
+                $userEmail
             );
 
             $mail = \Mail::mailer('google_alt')->to($toEmail);

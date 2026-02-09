@@ -21,6 +21,7 @@ class PurchaseOrderStatusMail extends Mailable
     public ?string $statusCommentHtml;
     public ?string $subjectBase;
     public bool $isReply;
+    public string $fromEmail;
 
     /**
      * Create a new message instance.
@@ -30,7 +31,8 @@ class PurchaseOrderStatusMail extends Mailable
         ?string $invoicePdfPath = null,
         ?string $statusCommentHtml = null,
         ?string $subjectBase = null,
-        bool $isReply = false
+        bool $isReply = false,
+        ?string $fromEmail = null
     )
     {
         $this->purchaseOrder = $purchaseOrder;
@@ -38,6 +40,7 @@ class PurchaseOrderStatusMail extends Mailable
         $this->statusCommentHtml = $statusCommentHtml;
         $this->subjectBase = $subjectBase;
         $this->isReply = $isReply;
+        $this->fromEmail = $fromEmail ?? auth()->user()?->email ?? 'facturacion@finearom.com';
     }
 
     /**
@@ -55,7 +58,7 @@ class PurchaseOrderStatusMail extends Mailable
         $subject = $this->isReply ? 'Re: ' . $baseSubject : $baseSubject;
 
         return new Envelope(
-            from: new Address('facturacion@finearom.com', 'Facturación Finearom'),
+            from: new Address($this->fromEmail),
             subject: $subject
         );
     }
