@@ -107,7 +107,6 @@
                 {!! $signature !!}
             </div>
         @endif
-        <p><small>Este es un mensaje automático. Por favor, no responda a este correo.</small></p>
         <p><small>&copy; {{ date('Y') }} Finearom. Todos los derechos reservados.</small></p>
     </footer>
 </body>
