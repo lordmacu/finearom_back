@@ -47,7 +47,12 @@ return [
         ],
         'google_alt' => [
             'transport' => 'smtp',
-            'dsn' => env('MAILER_DSN'),
+            'host' => 'smtp.gmail.com',
+            'port' => 587,
+            'encryption' => 'tls',
+            'username' => env('MAIL_USERNAME_FACTURACION', 'facturacion@finearom.com'),
+            'password' => env('MAIL_PASSWORD_FACTURACION'),
+            'timeout' => null,
         ],
 
         'ses' => [
