@@ -51,8 +51,7 @@ return [
             'port' => 587,
             'encryption' => 'tls',
             'username' => env('MAIL_USERNAME_FACTURACION', 'facturacion@finearom.com'),
-            'password' => env('MAIL_PASSWORD_FACTURACION'),
-            'timeout' => null,
+            'password' => env('MAIL_PASSWORD_FACTURACION')
         ],
 
         'ses' => [
