@@ -2002,6 +2002,34 @@ class PurchaseOrderController extends Controller
             return $productData;
         });
 
+        // DEBUG: Identificar campo con problema de encoding
+        $data = $purchaseOrder->toArray();
+        $encoded = json_encode($data);
+        if ($encoded === false) {
+            $jsonError = json_last_error_msg();
+            \Log::error('JSON encode failed en show()', [
+                'order_id' => $id,
+                'json_error' => $jsonError,
+            ]);
+
+            // Buscar el campo que falla recorriendo campo a campo
+            $problematicFields = [];
+            array_walk_recursive($data, function ($value, $key) use (&$problematicFields) {
+                if (is_string($value) && json_encode($value) === false) {
+                    $problematicFields[$key] = [
+                        'error' => json_last_error_msg(),
+                        'value_preview' => substr(bin2hex($value), 0, 100),
+                    ];
+                }
+            });
+
+            return response()->json([
+                'debug_error' => 'JSON encoding failed: ' . $jsonError,
+                'problematic_fields' => $problematicFields,
+                'order_id' => $id,
+            ], 422);
+        }
+
         return response()->json($purchaseOrder);
     }
 
