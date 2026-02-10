@@ -2002,35 +2002,44 @@ class PurchaseOrderController extends Controller
             return $productData;
         });
 
-        // DEBUG: Identificar campo con problema de encoding
+        // Serializar a array plano para evitar problemas de encoding del modelo Eloquent
         $data = $purchaseOrder->toArray();
-        $encoded = json_encode($data);
+
+        // Intentar encode con sustitución de UTF-8 inválido para identificar los campos con problema
+        $encoded = json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE);
         if ($encoded === false) {
             $jsonError = json_last_error_msg();
-            \Log::error('JSON encode failed en show()', [
+            \Log::error('JSON encode failed en show() incluso con sustitución UTF-8', [
                 'order_id' => $id,
                 'json_error' => $jsonError,
             ]);
-
-            // Buscar el campo que falla recorriendo campo a campo
-            $problematicFields = [];
-            array_walk_recursive($data, function ($value, $key) use (&$problematicFields) {
-                if (is_string($value) && json_encode($value) === false) {
-                    $problematicFields[$key] = [
-                        'error' => json_last_error_msg(),
-                        'value_preview' => substr(bin2hex($value), 0, 100),
-                    ];
-                }
-            });
-
-            return response()->json([
-                'debug_error' => 'JSON encoding failed: ' . $jsonError,
-                'problematic_fields' => $problematicFields,
-                'order_id' => $id,
-            ], 422);
         }
 
-        return response()->json($purchaseOrder);
+        // Buscar campos problemáticos para loggear
+        $problematicFields = [];
+        array_walk_recursive($data, function ($value, $key) use (&$problematicFields) {
+            if (is_string($value) && json_encode($value) === false) {
+                $problematicFields[$key] = [
+                    'error' => json_last_error_msg(),
+                    'hex_preview' => substr(bin2hex($value), 0, 200),
+                ];
+            }
+        });
+
+        if (!empty($problematicFields)) {
+            \Log::error('Campos con encoding inválido en orden ' . $id, $problematicFields);
+            // Limpiar los campos problemáticos convirtiendo a UTF-8 válido
+            array_walk_recursive($data, function (&$value) {
+                if (is_string($value)) {
+                    $value = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+                    if (json_encode($value) === false) {
+                        $value = utf8_encode($value);
+                    }
+                }
+            });
+        }
+
+        return response()->json($data);
     }
 
     /**
