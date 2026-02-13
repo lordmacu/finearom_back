@@ -139,6 +139,7 @@ class PurchaseOrderMailDespacho extends Mailable
                         <th>PRECIO TOTAL</th>
                         <th>NEW WIN</th>
                         <th>LUGAR DE ENTREGA</th>
+                        <th>DIRECCIÓN DE ENTREGA</th>
                         <th>FECHA DE DESPACHO</th>
                     </tr>
                 </thead>
@@ -166,6 +167,7 @@ class PurchaseOrderMailDespacho extends Mailable
                 <td>$' . number_format($subtotal, 2) . '</td>
                 <td>' . ($product->pivot->new_win == 1 ? 'Sí' : 'No') . '</td>
                 <td>' . e($this->purchaseOrder->getBranchOfficeName($product)) . '</td>
+                <td>' . e($this->purchaseOrder->getBranchOfficeAddress($product)) . '</td>
                 <td>' . e($product->pivot->delivery_date) . '</td>
             </tr>';
         }
@@ -173,7 +175,7 @@ class PurchaseOrderMailDespacho extends Mailable
         $html .= '<tr>
                 <td colspan="5"></td>
                 <td><strong>TOTAL</strong></td>
-                <td colspan="2"><strong>$' . number_format($total, 2) . ' USD</strong></td>
+                <td colspan="3"><strong>$' . number_format($total, 2) . ' USD</strong></td>
             </tr>
             </tbody>
         </table>

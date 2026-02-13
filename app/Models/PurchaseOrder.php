@@ -72,6 +72,12 @@ class PurchaseOrder extends Model
         return $branchOffice ? $branchOffice->name : 'N/A';
     }
 
+    public function getBranchOfficeAddress(Product $product)
+    {
+        $branchOffice = BranchOffice::find($product->pivot->branch_office_id);
+        return $branchOffice ? $branchOffice->delivery_address : 'N/A';
+    }
+
     public function partials()
     {
         return $this->hasMany(Partial::class, 'order_id');
