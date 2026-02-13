@@ -271,10 +271,9 @@ class PurchaseOrderController extends Controller
             $purchaseOrder = PurchaseOrder::create($data);
             // Append id al consecutivo (legacy)
             $purchaseOrder->order_consecutive = $purchaseOrder->id . '-' . $purchaseOrder->order_consecutive;
-            // Asignar subject_client — si fue modificado manualmente, agregar prefijo Re:
+            // Asignar subject_client — siempre con prefijo Re:
             $subjectClientRaw = $validated['subject_client'] ?? 'Orden de Compra - ' . $purchaseOrder->order_consecutive;
-            $subjectModified = filter_var($request->input('subject_client_modified', false), FILTER_VALIDATE_BOOLEAN);
-            if ($subjectModified && !str_starts_with($subjectClientRaw, 'Re:')) {
+            if (!str_starts_with($subjectClientRaw, 'Re:')) {
                 $subjectClientRaw = 'Re: ' . $subjectClientRaw;
             }
             $purchaseOrder->subject_client = $subjectClientRaw;
@@ -481,6 +480,20 @@ class PurchaseOrderController extends Controller
                 'line' => $e->getLine()
             ], 500);
         }
+    }
+
+    /**
+     * Elimina la orden de compra (hard delete).
+     */
+    public function destroy(int $id): JsonResponse
+    {
+        $purchaseOrder = PurchaseOrder::findOrFail($id);
+        $purchaseOrder->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Orden eliminada correctamente',
+        ]);
     }
 
     /**

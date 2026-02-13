@@ -163,6 +163,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/purchase-orders', [PurchaseOrderController::class, 'store']);
     Route::post('/purchase-orders/{id}/resend', [PurchaseOrderController::class, 'resendOrder']);
     Route::put('/purchase-orders/{id}', [PurchaseOrderController::class, 'update']);
+    Route::delete('/purchase-orders/{id}', [PurchaseOrderController::class, 'destroy']);
     Route::delete('/purchase-orders/{id}/attachment', [PurchaseOrderController::class, 'deleteAttachment']);
     Route::get('/purchase-orders/{id}/pdf', [PurchaseOrderController::class, 'downloadPdf']);
     Route::get('/purchase-orders/{id}/proforma', [PurchaseOrderController::class, 'downloadProforma']);
