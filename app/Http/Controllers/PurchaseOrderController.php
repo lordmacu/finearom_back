@@ -189,6 +189,7 @@ class PurchaseOrderController extends Controller
             'tag_email_pedidos'         => ['nullable'],
             'tag_email_despachos'       => ['nullable'],
             'subject_client'            => ['nullable', 'string'],
+            'subject_client_modified'   => ['nullable'],
             'createdOrderDate'          => ['nullable', 'date'],
             'products'                  => ['required', 'array'],
             'products.*.product_id'     => ['required', 'integer'],
@@ -270,8 +271,13 @@ class PurchaseOrderController extends Controller
             $purchaseOrder = PurchaseOrder::create($data);
             // Append id al consecutivo (legacy)
             $purchaseOrder->order_consecutive = $purchaseOrder->id . '-' . $purchaseOrder->order_consecutive;
-            // Asignar subject_client si no viene del request (igual que legacy)
-            $purchaseOrder->subject_client = $validated['subject_client'] ?? 'Orden de Compra - ' . $purchaseOrder->order_consecutive;
+            // Asignar subject_client — si fue modificado manualmente, agregar prefijo Re:
+            $subjectClientRaw = $validated['subject_client'] ?? 'Orden de Compra - ' . $purchaseOrder->order_consecutive;
+            $subjectModified = filter_var($request->input('subject_client_modified', false), FILTER_VALIDATE_BOOLEAN);
+            if ($subjectModified && !str_starts_with($subjectClientRaw, 'Re:')) {
+                $subjectClientRaw = 'Re: ' . $subjectClientRaw;
+            }
+            $purchaseOrder->subject_client = $subjectClientRaw;
             // Generar subject_despacho (formato para email de despachos)
             $purchaseOrder->subject_despacho = ($purchaseOrder->is_new_win ? 'NEW WIN - ' : '') .
                                                'Pedido - ' .
@@ -367,6 +373,7 @@ class PurchaseOrderController extends Controller
             'tag_email_pedidos'         => ['nullable'],
             'tag_email_despachos'       => ['nullable'],
             'subject_client'            => ['nullable', 'string'],
+            'subject_client_modified'   => ['nullable'],
             'createdOrderDate'          => ['nullable', 'date'],
             'products'                  => ['required', 'array'],
             'products.*.id'             => ['nullable', 'integer'], // Allow ID for updating existing products
@@ -393,7 +400,12 @@ class PurchaseOrderController extends Controller
             $purchaseOrder->internal_observations = $validated['internal_observations'] ?? null;
             $purchaseOrder->tag_email_pedidos = $validated['tag_email_pedidos'] ?? null;
             $purchaseOrder->tag_email_despachos = $validated['tag_email_despachos'] ?? null;
-            $purchaseOrder->subject_client = $validated['subject_client'] ?? $purchaseOrder->subject_client;
+            $subjectClientRaw = $validated['subject_client'] ?? $purchaseOrder->subject_client;
+            $subjectModified = filter_var($request->input('subject_client_modified', false), FILTER_VALIDATE_BOOLEAN);
+            if ($subjectModified && !str_starts_with($subjectClientRaw, 'Re:')) {
+                $subjectClientRaw = 'Re: ' . $subjectClientRaw;
+            }
+            $purchaseOrder->subject_client = $subjectClientRaw;
             $purchaseOrder->order_creation_date = $validated['createdOrderDate'] ?? $purchaseOrder->order_creation_date;
             $purchaseOrder->trm = $this->normalizeTrm($validated['trm']);
 
