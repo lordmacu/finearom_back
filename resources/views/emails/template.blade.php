@@ -99,6 +99,12 @@
                 {!! $footer_content !!}
             </div>
         @endif
+
+        @if(!empty($plant_observations ?? ''))
+            <div>
+                {!! $plant_observations !!}
+            </div>
+        @endif
     </main>
 
     <footer>

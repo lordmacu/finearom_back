@@ -78,7 +78,9 @@ class PurchaseOrderMailDespacho extends Mailable
 
         return new Content(
             view: 'emails.template',
-            with: $rendered
+            with: array_merge($rendered, [
+                'plant_observations' => $variables['plant_observations'] ?? '',
+            ])
         );
     }
 
@@ -113,12 +115,22 @@ class PurchaseOrderMailDespacho extends Mailable
         // Información TRM
         $trmInfo = $this->buildTrmInfo();
 
+        // Observaciones para planta (solo email despacho)
+        $plantObservations = '';
+        if (!empty($this->purchaseOrder->internal_observations)) {
+            $plantObservations = '<div style="margin-top:16px;padding:12px;background:#fff8e1;border-left:4px solid #f59e0b;border-radius:4px;">
+                <p><strong>🏭 Observaciones para Planta:</strong></p>
+                <p>' . nl2br(e($this->purchaseOrder->internal_observations)) . '</p>
+            </div>';
+        }
+
         return [
-            'subject_client' => $subjectClient,
+            'subject_client'      => $subjectClient,
             'required_delivery_date' => $this->purchaseOrder->required_delivery_date,
-            'order_comment' => $orderComment,
-            'products_table' => $productsTable,
-            'trm_info' => $trmInfo,
+            'order_comment'       => $orderComment,
+            'products_table'      => $productsTable,
+            'trm_info'            => $trmInfo,
+            'plant_observations'  => $plantObservations,
         ];
     }
 
