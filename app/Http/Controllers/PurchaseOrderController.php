@@ -278,16 +278,18 @@ class PurchaseOrderController extends Controller
                 $subjectClientRaw = 'Re: ' . $subjectClientRaw;
             }
             $purchaseOrder->subject_client = $subjectClientRaw;
-            // Generar subject_despacho (formato para email de despachos)
+            $purchaseOrder->save();
+
+            // Productos (syncProducts establece is_new_win en la orden)
+            $this->syncProducts($purchaseOrder, $validatedProducts);
+
+            // Generar subject_despacho DESPUÉS de sync para que is_new_win esté correcto
             $purchaseOrder->subject_despacho = ($purchaseOrder->is_new_win ? 'NEW WIN - ' : '') .
                                                'Pedido - ' .
                                                $purchaseOrder->client->client_name . ' - ' .
                                                $purchaseOrder->client->nit . ' - ' .
                                                $purchaseOrder->order_consecutive;
             $purchaseOrder->save();
-
-            // Productos
-            $this->syncProducts($purchaseOrder, $validatedProducts);
 
             // Comentario de orden
             if (!empty($validated['observations'])) {
@@ -425,6 +427,14 @@ class PurchaseOrderController extends Controller
             $purchaseOrder->save();
 
             $this->syncProductsForUpdate($purchaseOrder, $validated['products']);
+
+            // Actualizar subject_despacho DESPUÉS de sync para que is_new_win esté correcto
+            $purchaseOrder->subject_despacho = ($purchaseOrder->is_new_win ? 'NEW WIN - ' : '') .
+                                               'Pedido - ' .
+                                               $purchaseOrder->client->client_name . ' - ' .
+                                               $purchaseOrder->client->nit . ' - ' .
+                                               $purchaseOrder->order_consecutive;
+            $purchaseOrder->save();
 
             // Handle observations comments - UPDATE existing or CREATE new (legacy compatibility)
             if (!empty($validated['observations']) && $purchaseOrder->observations != $validated['observations']) {

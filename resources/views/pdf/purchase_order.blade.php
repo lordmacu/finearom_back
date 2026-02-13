@@ -372,7 +372,13 @@
                         <td class="text-center">{{ $product->pivot->quantity }}</td>
                         <td class="text-right font-bold">
                             {{ number_format($effectivePrice * $product->pivot->quantity, 2) }}</td>
-                        <td>{{ $purchaseOrder->getBranchOfficeName($product) }}</td>
+                        <td>
+                            <strong>{{ $purchaseOrder->getBranchOfficeName($product) }}</strong>
+                            @php $addr = $purchaseOrder->getBranchOfficeAddress($product); @endphp
+                            @if($addr && $addr !== 'N/A')
+                                <br><span style="color:#666;font-size:10px;">{{ $addr }}</span>
+                            @endif
+                        </td>
                     </tr>
                     @php
                         $subtotal += $effectivePrice * $product->pivot->quantity;
