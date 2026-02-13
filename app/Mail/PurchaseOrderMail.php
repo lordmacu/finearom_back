@@ -61,8 +61,14 @@ class PurchaseOrderMail extends Mailable
             $headers['References'] = '<' . $threadId . '>';
         }
 
+        $tagHeader = json_encode([
+            'type'     => 'order',
+            'purchase' => $this->purchaseOrder->id,
+        ]);
+
         return new Envelope(
             subject: $subject,
+            tags: [$tagHeader],
             using: [
                 function ($message) use ($headers) {
                     foreach ($headers as $key => $value) {

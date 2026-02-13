@@ -33,11 +33,11 @@ class EmailSentListener
             $purchaseOrder = PurchaseOrder::find($data["purchase"]);
 
             if ($purchaseOrder) {
-                if($data["purchase"] == "order"){
-                    $purchaseOrder->message_id = $messageId;   
+                if ($data["type"] == "order") {
+                    $purchaseOrder->message_id = $messageId;
                 }
-                if($data["purchase"] == "despacho"){
-                    $purchaseOrder->message_despacho_id = $messageId;   
+                if ($data["type"] == "despacho") {
+                    $purchaseOrder->message_despacho_id = $messageId;
                 }
 
                 $purchaseOrder->save();

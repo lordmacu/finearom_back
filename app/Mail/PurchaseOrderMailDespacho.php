@@ -49,8 +49,14 @@ class PurchaseOrderMailDespacho extends Mailable
                    $this->purchaseOrder->client->nit . ' - ' .
                    $this->purchaseOrder->order_consecutive);
 
+        $tagHeader = json_encode([
+            'type'     => 'despacho',
+            'purchase' => $this->purchaseOrder->id,
+        ]);
+
         return new Envelope(
             subject: $subject,
+            tags: [$tagHeader],
         );
     }
 

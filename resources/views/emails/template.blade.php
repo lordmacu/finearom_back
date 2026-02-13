@@ -88,6 +88,12 @@
             </div>
         @endif
 
+        @if(!empty($plant_observations ?? ''))
+            <div>
+                {!! $plant_observations !!}
+            </div>
+        @endif
+
         @if(!empty($header_content))
             <div>
                 {!! $header_content !!}
@@ -97,12 +103,6 @@
         @if(!empty($footer_content))
             <div>
                 {!! $footer_content !!}
-            </div>
-        @endif
-
-        @if(!empty($plant_observations ?? ''))
-            <div>
-                {!! $plant_observations !!}
             </div>
         @endif
     </main>
