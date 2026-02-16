@@ -7,14 +7,17 @@ use App\Http\Requests\Product\ProductUpdateRequest;
 use App\Models\Client;
 use App\Models\Product;
 use App\Models\ProductDiscount;
+use App\Models\ProductPriceHistory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use Carbon\Carbon;
 
 class ProductController extends Controller
 {
@@ -456,5 +459,113 @@ class ProductController extends Controller
             'success' => true,
             'data' => $history,
         ]);
+    }
+
+    /**
+     * Import price history from Excel file
+     */
+    public function importPriceHistory(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $file = $request->file('file');
+            $spreadsheet = IOFactory::load($file->getPathname());
+            $worksheet = $spreadsheet->getActiveSheet();
+            $rows = $worksheet->toArray();
+
+            // Skip header row
+            array_shift($rows);
+
+            $stats = [
+                'processed' => 0,
+                'inserted' => 0,
+                'skipped' => 0,
+                'errors' => [],
+            ];
+
+            // Column mapping based on the Excel structure
+            // ['NIT+CODIGO', 'Product Name', 'Product Name.1', 'NOMBRE - CODIGO', 'CODIGO', 
+            //  'PRECIO REGISTRADO SISTEMA', 'Client NIT', 'Client Name', 'PRECIOS 2025', 
+            //  'PRECIOS 2024', 'PRECIOS 2023', 'PRECIOS 2022']
+            $yearColumns = [
+                2025 => 8,  // Column I (index 8)
+                2024 => 9,  // Column J (index 9)
+                2023 => 10, // Column K (index 10)
+                2022 => 11, // Column L (index 11)
+            ];
+
+            foreach ($rows as $index => $row) {
+                $stats['processed']++;
+
+                // Get product code (column E, index 4)
+                $productCode = $row[4] ?? null;
+                
+                if (empty($productCode)) {
+                    $stats['skipped']++;
+                    continue;
+                }
+
+                // Find product by code
+                $product = Product::where('code', $productCode)->first();
+                
+                if (!$product) {
+                    $stats['errors'][] = "Fila " . ($index + 2) . ": Producto con código '{$productCode}' no encontrado";
+                    $stats['skipped']++;
+                    continue;
+                }
+
+                // Process each year's price
+                foreach ($yearColumns as $year => $columnIndex) {
+                    $price = $row[$columnIndex] ?? null;
+                    
+                    // Skip if price is empty or not a number
+                    if (empty($price) || !is_numeric($price)) {
+                        continue;
+                    }
+
+                    // Create effective date (January 1st of the year)
+                    $effectiveDate = Carbon::create($year, 1, 1, 0, 0, 0);
+
+                    // Check if this price history already exists
+                    $exists = ProductPriceHistory::where('product_id', $product->id)
+                        ->whereDate('effective_date', $effectiveDate->toDateString())
+                        ->exists();
+
+                    if (!$exists) {
+                        ProductPriceHistory::create([
+                            'product_id' => $product->id,
+                            'price' => $price,
+                            'effective_date' => $effectiveDate,
+                            'created_by' => auth()->id(),
+                        ]);
+                        $stats['inserted']++;
+                    }
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Importación completada exitosamente',
+                'data' => $stats,
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error importing price history: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al importar: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }
