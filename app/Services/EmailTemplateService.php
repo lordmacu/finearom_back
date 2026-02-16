@@ -3,9 +3,20 @@
 namespace App\Services;
 
 use App\Models\EmailTemplate;
+use Illuminate\Support\Facades\Cache;
 
 class EmailTemplateService
 {
+    public static function cacheKey(string $templateKey): string
+    {
+        return "email_template.{$templateKey}";
+    }
+
+    public static function clearCache(string $templateKey): void
+    {
+        Cache::forget(self::cacheKey($templateKey));
+    }
+
     /**
      * Reemplaza las variables en un texto usando el formato |variable|
      *
@@ -48,9 +59,11 @@ class EmailTemplateService
      */
     public function renderTemplate(string $templateKey, array $variables): array
     {
-        $template = EmailTemplate::where('key', $templateKey)
-            ->where('is_active', true)
-            ->firstOrFail();
+        $template = Cache::remember(self::cacheKey($templateKey), 600, function () use ($templateKey) {
+            return EmailTemplate::where('key', $templateKey)
+                ->where('is_active', true)
+                ->firstOrFail();
+        });
 
         return [
             'subject' => $this->replaceVariables($template->subject, $variables),

@@ -137,6 +137,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/cartera/estado/queue', [CarteraEstadoController::class, 'queue']);
 
     // Proforma
+    Route::get('/proforma/template', [ProformaController::class, 'downloadTemplate']);
     Route::post('/proforma/upload', [ProformaController::class, 'upload']);
 
     // Portal de Ordenes de Compra (cliente)

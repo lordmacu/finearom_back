@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\EmailTemplate;
+use App\Services\EmailTemplateService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\Rule;
@@ -74,7 +75,14 @@ class EmailTemplateController extends Controller
             'is_active' => 'boolean',
         ]);
 
+        $oldKey = $template->key;
         $template->update($validated);
+
+        // Invalidar caché del template (por si cambió el key, limpiar ambos)
+        EmailTemplateService::clearCache($oldKey);
+        if ($template->key !== $oldKey) {
+            EmailTemplateService::clearCache($template->key);
+        }
 
         return response()->json($template);
     }
@@ -85,6 +93,7 @@ class EmailTemplateController extends Controller
     public function destroy(string $id): JsonResponse
     {
         $template = EmailTemplate::findOrFail($id);
+        EmailTemplateService::clearCache($template->key);
         $template->delete();
 
         return response()->json(['message' => 'Template deleted successfully'], 200);

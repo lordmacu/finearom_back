@@ -7,6 +7,9 @@ use App\Models\Client;
 use Illuminate\Http\JsonResponse;
 use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProformaController extends Controller
 {
@@ -111,6 +114,53 @@ class ProformaController extends Controller
                 'message' => 'Error al procesar el archivo: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Descarga un archivo Excel de ejemplo con los headers requeridos y filas de muestra
+     */
+    public function downloadTemplate(): StreamedResponse
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+
+        // Headers
+        $headers = [
+            'A1' => 'NIT',
+            'B1' => 'Cliente',
+            'C1' => 'Venta de Contado',
+            'D1' => 'Ciudad',
+            'E1' => 'Tipo Contribuyente',
+            'F1' => 'Zona Franca',
+            'G1' => 'IVA',
+            'H1' => 'RETEFUENTE',
+            'I1' => 'RETE IVA',
+            'J1' => 'ICA',
+        ];
+
+        foreach ($headers as $cell => $value) {
+            $sheet->setCellValue($cell, $value);
+            $sheet->getStyle($cell)->getFont()->setBold(true);
+        }
+
+        // Example rows
+        $sheet->fromArray([
+            ['900123456', 'Empresa Ejemplo S.A.S', 'SI', 'Bogotá', 'RESPONSABLE DE IVA', '', 'IVA:19', 'RETE FUENTE:2.5', 'RETE IVA:1.104', 'ICA:1.10'],
+            ['800987654', 'Comercial Demo Ltda', 'NO', 'Medellín', 'NO RESPONSABLE', 'X', '19', '2.5', '1.104', ''],
+        ], null, 'A2');
+
+        // Auto-size columns
+        foreach (range('A', 'J') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        $writer = new Xlsx($spreadsheet);
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, 'proforma_ejemplo.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
     }
 
     /**
