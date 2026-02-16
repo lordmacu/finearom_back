@@ -6,6 +6,7 @@ use App\Http\Requests\Product\ProductStoreRequest;
 use App\Http\Requests\Product\ProductUpdateRequest;
 use App\Models\Client;
 use App\Models\Product;
+use App\Models\ProductDiscount;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,7 +44,7 @@ class ProductController extends Controller
 
         // Caché permanente (solo se invalida manualmente en CRUD)
         $data = Cache::rememberForever($cacheKey, function () use ($request) {
-            $query = Product::query()->with('client:id,client_name,nit');
+            $query = Product::query()->with(['client:id,client_name,nit', 'discounts']);
 
             if ($search = $request->query('search')) {
                 $query->where(function ($q) use ($search) {
@@ -110,30 +111,38 @@ class ProductController extends Controller
 
     public function store(ProductStoreRequest $request): JsonResponse
     {
-        $product = Product::create($request->validated());
+        $validated = $request->validated();
+        $discounts = $validated['discounts'] ?? [];
+        unset($validated['discounts']);
 
-        // Invalidar caché de productos
+        $product = Product::create($validated);
+        $this->syncDiscounts($product, $discounts);
+
         $this->clearProductsCache();
 
         return response()->json([
             'success' => true,
             'message' => 'Producto creado',
-            'data' => $product,
+            'data' => $product->load('discounts'),
         ], 201);
     }
 
     public function update(ProductUpdateRequest $request, int $productId): JsonResponse
     {
         $product = Product::query()->findOrFail($productId);
-        $product->update($request->validated());
+        $validated = $request->validated();
+        $discounts = $validated['discounts'] ?? [];
+        unset($validated['discounts']);
 
-        // Invalidar caché de productos
+        $product->update($validated);
+        $this->syncDiscounts($product, $discounts);
+
         $this->clearProductsCache();
 
         return response()->json([
             'success' => true,
             'message' => 'Producto actualizado',
-            'data' => $product,
+            'data' => $product->load('discounts'),
         ]);
     }
 
@@ -370,6 +379,21 @@ class ProductController extends Controller
         return response()->streamDownload($callback, $fileName, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
+    }
+
+    /**
+     * Sincroniza los descuentos de un producto (reemplaza los existentes).
+     */
+    private function syncDiscounts(Product $product, array $discounts): void
+    {
+        $product->discounts()->delete();
+
+        foreach ($discounts as $discount) {
+            $product->discounts()->create([
+                'min_quantity' => $discount['min_quantity'],
+                'discount_percentage' => $discount['discount_percentage'],
+            ]);
+        }
     }
 
     /**

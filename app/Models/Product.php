@@ -20,6 +20,11 @@ class Product extends Model
         return $this->belongsTo(Client::class);
     }
 
+    public function discounts()
+    {
+        return $this->hasMany(ProductDiscount::class)->orderBy('min_quantity', 'asc');
+    }
+
     /**
      * Get all price history records for this product.
      */
