@@ -37,25 +37,45 @@ class ProformaController extends Controller
             $updatedCount = 0;
             $notFoundNits = [];
 
-            // Empezar desde la fila 2 (índice 1) asumiendo que fila 1 son headers
+            // Construir mapa de nombre de columna → índice desde la fila 1 (headers)
+            $colMap = [];
+            foreach ($rows[0] as $idx => $header) {
+                if ($header !== null) {
+                    $colMap[strtoupper(trim((string) $header))] = $idx;
+                }
+            }
+
+            // Columnas esperadas (mayúsculas para comparación)
+            $COL_NIT              = $colMap['NIT'] ?? 0;
+            $COL_CLIENTE          = $colMap['CLIENTE'] ?? 1;
+            $COL_VENTA_CONTADO    = $colMap['VENTA DE CONTADO'] ?? 2;
+            $COL_CIUDAD           = $colMap['CIUDAD'] ?? 3;
+            $COL_TIPO_CONTRIB     = $colMap['TIPO CONTRIBUYENTE'] ?? 4;
+            $COL_ZONA_FRANCA      = $colMap['ZONA FRANCA'] ?? 9;
+            $COL_IVA              = $colMap['IVA'] ?? 10;
+            $COL_RETEFUENTE       = $colMap['RETEFUENTE'] ?? 11;
+            $COL_RETEIVA          = $colMap['RETE IVA'] ?? 12;
+            $COL_ICA              = $colMap['ICA'] ?? 13;
+
+            // Empezar desde la fila 2 (índice 1)
             for ($i = 1; $i < count($rows); $i++) {
                 $row = $rows[$i];
 
                 // Si el NIT está vacío, saltar
-                if (empty($row[0])) {
+                if (empty($row[$COL_NIT])) {
                     continue;
                 }
 
-                $nit = (string) $row[0];
-                $nombreCliente = (string) ($row[1] ?? '');
-                $ventaDeContado = (string) ($row[2] ?? '');
-                $ciudad = (string) ($row[3] ?? '');
-                $tipoContribuyente = (string) ($row[4] ?? '');
-                $zonaFranca = (string) ($row[5] ?? '');
-                $ivaStr = (string) ($row[6] ?? '');
-                $retefuenteStr = (string) ($row[7] ?? '');
-                $reteivaStr = (string) ($row[8] ?? '');
-                $icaStr = (string) ($row[9] ?? '');
+                $nit = (string) $row[$COL_NIT];
+                $nombreCliente = (string) ($row[$COL_CLIENTE] ?? '');
+                $ventaDeContado = (string) ($row[$COL_VENTA_CONTADO] ?? '');
+                $ciudad = (string) ($row[$COL_CIUDAD] ?? '');
+                $tipoContribuyente = (string) ($row[$COL_TIPO_CONTRIB] ?? '');
+                $zonaFranca = (string) ($row[$COL_ZONA_FRANCA] ?? '');
+                $ivaStr = (string) ($row[$COL_IVA] ?? '');
+                $retefuenteStr = (string) ($row[$COL_RETEFUENTE] ?? '');
+                $reteivaStr = (string) ($row[$COL_RETEIVA] ?? '');
+                $icaStr = (string) ($row[$COL_ICA] ?? '');
 
                 // Parsear valores numéricos
                 $iva = $this->parseIva($ivaStr);
@@ -93,6 +113,7 @@ class ProformaController extends Controller
                 if ($nit === '900564535') {
                     \Log::info('PROFORMA DEBUG - NIT 900564535', [
                         'nit' => $nit,
+                        'col_map' => $colMap,
                         'raw_row' => $row,
                         'parsed' => $updatePayload,
                         'client_exists' => Client::where('nit', $nit)->exists(),
