@@ -1464,13 +1464,21 @@ class PurchaseOrderController extends Controller
                 $processEmails = []; // No agregar emails de procesos si el usuario seleccionó emails
             }
 
-            // Email principal del cliente (solo este recibe el email de "solo tabla")
-            $mainClientEmail = $this->normalizeEmails([$order->client->email]);
-            $clientRecipients = $mainClientEmail;
+            // Recopilar TODOS los emails del cliente (principal + despacho + ejecutivo)
+            $clientEmailsRaw = array_filter([
+                $order->client->email ?? null,
+                ...(!empty($order->client->dispatch_confirmation_email)
+                    ? explode(',', $order->client->dispatch_confirmation_email)
+                    : []),
+                ...(!empty($order->client->executive_email)
+                    ? [$order->client->executive_email]
+                    : []),
+            ]);
+            $allClientEmails = $this->normalizeEmails(array_values($clientEmailsRaw));
+            $clientRecipients = $allClientEmails;
 
-            // TODOS los emails seleccionados en el frontend (excepto el email principal del cliente)
-            // reciben el email interno (tabla + texto)
-            $allInternalEmails = array_values(array_diff($tagEmails, $mainClientEmail));
+            // Emails internos (despacho): todos los seleccionados en el frontend EXCEPTO emails del cliente
+            $allInternalEmails = array_values(array_diff($tagEmails, $allClientEmails));
             
             // Si no hay emails seleccionados, usar emails de procesos
             if (empty($allInternalEmails)) {
@@ -1481,7 +1489,7 @@ class PurchaseOrderController extends Controller
                 'order_id' => $order->id,
                 'tagEmails' => $tagEmails,
                 'processEmails' => $processEmails,
-                'mainClientEmail' => $mainClientEmail,
+                'allClientEmails' => $allClientEmails,
                 'clientRecipients' => $clientRecipients,
                 'allInternalEmails' => $allInternalEmails,
             ]);
