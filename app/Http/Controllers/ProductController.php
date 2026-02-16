@@ -253,15 +253,15 @@ class ProductController extends Controller
                     continue;
                 }
 
-                $code = trim((string) ($row[$colIndex['code'] + 1] ?? ''));
-                $name = trim((string) ($row[$colIndex['product_name'] + 1] ?? ''));
-                $price = $row[$colIndex['price'] + 1] ?? 0;
+                $code = trim((string) ($row[$colIndex['code']] ?? ''));
+                $name = trim((string) ($row[$colIndex['product_name']] ?? ''));
+                $price = $row[$colIndex['price']] ?? 0;
                 $clientId = null;
 
                 if (isset($colIndex['client_id'])) {
-                    $clientId = (int) ($row[$colIndex['client_id'] + 1] ?? 0);
+                    $clientId = (int) ($row[$colIndex['client_id']] ?? 0);
                 } elseif (isset($colIndex['nit'])) {
-                    $nit = trim((string) ($row[$colIndex['nit'] + 1] ?? ''));
+                    $nit = trim((string) ($row[$colIndex['nit']] ?? ''));
                     $clientId = Client::query()->where('nit', $nit)->value('id');
                 }
 
@@ -354,7 +354,7 @@ class ProductController extends Controller
             $sheet = $spreadsheet->getActiveSheet();
 
             $sheet->fromArray([
-                ['Code', 'Product Name', 'Price', 'Client NIT', 'Client Name', 'Operation'],
+                ['code', 'product_name', 'price', 'nit', 'client_name'],
             ], null, 'A1', true);
 
             $rowNumber = 2;
@@ -365,7 +365,6 @@ class ProductController extends Controller
                     $sheet->setCellValue("C{$rowNumber}", (float) $product->price);
                     $sheet->setCellValue("D{$rowNumber}", optional($product->client)->nit);
                     $sheet->setCellValue("E{$rowNumber}", optional($product->client)->client_name);
-                    $sheet->setCellValue("F{$rowNumber}", '');
                     $rowNumber++;
                 }
             });
