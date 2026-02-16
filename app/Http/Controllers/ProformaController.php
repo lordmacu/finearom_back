@@ -83,7 +83,10 @@ class ProformaController extends Controller
                 $reteiva = $this->parseReteIva($reteivaStr);
                 $ica = $this->parseIca($icaStr);
 
+                $client = Client::where('nit', $nit)->first();
+
                 $processedData[] = [
+                    'id' => $client?->id,
                     'nit' => $nit,
                     'nombre_cliente' => $nombreCliente,
                     'venta_de_contado' => $ventaDeContado,
@@ -120,9 +123,8 @@ class ProformaController extends Controller
                     ]);
                 }
 
-                $updated = Client::where('nit', $nit)->update($updatePayload);
-
-                if ($updated > 0) {
+                if ($client) {
+                    $client->update($updatePayload);
                     $updatedCount++;
                 } else {
                     $notFoundNits[] = $nit;
