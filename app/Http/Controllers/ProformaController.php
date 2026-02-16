@@ -78,7 +78,7 @@ class ProformaController extends Controller
                 ];
 
                 // Actualizar en base de datos
-                $updated = Client::where('nit', $nit)->update([
+                $updatePayload = [
                     'venta_de_contado' => $ventaDeContado,
                     'ciudad' => $ciudad,
                     'tipo_contribuyente' => $tipoContribuyente,
@@ -88,7 +88,18 @@ class ProformaController extends Controller
                     'reteiva' => $reteiva,
                     'ica' => $ica,
                     'actualizado_proforma' => true,
-                ]);
+                ];
+
+                if ($nit === '900564535') {
+                    \Log::info('PROFORMA DEBUG - NIT 900564535', [
+                        'nit' => $nit,
+                        'raw_row' => $row,
+                        'parsed' => $updatePayload,
+                        'client_exists' => Client::where('nit', $nit)->exists(),
+                    ]);
+                }
+
+                $updated = Client::where('nit', $nit)->update($updatePayload);
 
                 if ($updated > 0) {
                     $updatedCount++;
