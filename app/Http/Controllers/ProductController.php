@@ -463,23 +463,38 @@ class ProductController extends Controller
 
     /**
      * Import price history from Excel file
+     * Ultra-optimized with cache and bulk insert
      */
     public function importPriceHistory(Request $request): JsonResponse
     {
+        ini_set('memory_limit', '1G');
+        set_time_limit(600);
+
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+            'file' => 'required|file|mimes:xlsx,xls|max:51200',
         ]);
 
         try {
-            DB::beginTransaction();
-
             $file = $request->file('file');
             $spreadsheet = IOFactory::load($file->getPathname());
             $worksheet = $spreadsheet->getActiveSheet();
-            $rows = $worksheet->toArray();
+            
+            // *** OPTIMIZACIÓN 1: Cargar TODOS los productos en memoria (indexados por código) ***
+            $productsCache = Product::all()->keyBy('code');
+            
+            // *** OPTIMIZACIÓN 2: Cargar price history existente para evitar duplicados ***
+            $existingPriceHistory = ProductPriceHistory::select('product_id', 'effective_date')
+                ->get()
+                ->map(fn($item) => $item->product_id . '_' . $item->effective_date->format('Y-m-d'))
+                ->flip()
+                ->toArray();
 
-            // Skip header row
-            array_shift($rows);
+            $yearColumns = [
+                2025 => 8,
+                2024 => 9,
+                2023 => 10,
+                2022 => 11,
+            ];
 
             $stats = [
                 'processed' => 0,
@@ -488,76 +503,95 @@ class ProductController extends Controller
                 'errors' => [],
             ];
 
-            // Column mapping based on the Excel structure
-            // ['NIT+CODIGO', 'Product Name', 'Product Name.1', 'NOMBRE - CODIGO', 'CODIGO', 
-            //  'PRECIO REGISTRADO SISTEMA', 'Client NIT', 'Client Name', 'PRECIOS 2025', 
-            //  'PRECIOS 2024', 'PRECIOS 2023', 'PRECIOS 2022']
-            $yearColumns = [
-                2025 => 8,  // Column I (index 8)
-                2024 => 9,  // Column J (index 9)
-                2023 => 10, // Column K (index 10)
-                2022 => 11, // Column L (index 11)
-            ];
+            $batchInsertData = [];
+            $batchSize = 500;
+            $rowIndex = 0;
 
-            foreach ($rows as $index => $row) {
+            // *** OPTIMIZACIÓN 3: Leer fila por fila (streaming) ***
+            foreach ($worksheet->getRowIterator(2) as $row) {
+                $rowIndex++;
                 $stats['processed']++;
 
-                // Get product code (column E, index 4)
-                $productCode = $row[4] ?? null;
-                
+                $cellIterator = $row->getCellIterator();
+                $cellIterator->setIterateOnlyExistingCells(false);
+
+                $rowData = [];
+                foreach ($cellIterator as $cell) {
+                    $rowData[] = $cell->getValue();
+                }
+
+                $productCode = $rowData[4] ?? null;
+
                 if (empty($productCode)) {
                     $stats['skipped']++;
                     continue;
                 }
 
-                // Find product by code
-                $product = Product::where('code', $productCode)->first();
-                
+                // *** OPTIMIZACIÓN 4: Búsqueda O(1) en caché en lugar de query ***
+                $product = $productsCache->get($productCode);
+
                 if (!$product) {
-                    $stats['errors'][] = "Fila " . ($index + 2) . ": Producto con código '{$productCode}' no encontrado";
+                    if (count($stats['errors']) < 50) {
+                        $stats['errors'][] = "Fila " . ($rowIndex + 1) . " : Producto '{$productCode}' no encontrado";
+                    }
                     $stats['skipped']++;
                     continue;
                 }
 
-                // Process each year's price
                 foreach ($yearColumns as $year => $columnIndex) {
-                    $price = $row[$columnIndex] ?? null;
-                    
-                    // Skip if price is empty or not a number
+                    $price = $rowData[$columnIndex] ?? null;
+
                     if (empty($price) || !is_numeric($price)) {
                         continue;
                     }
 
-                    // Create effective date (January 1st of the year)
                     $effectiveDate = Carbon::create($year, 1, 1, 0, 0, 0);
+                    $cacheKey = $product->id . '_' . $effectiveDate->format('Y-m-d');
 
-                    // Check if this price history already exists
-                    $exists = ProductPriceHistory::where('product_id', $product->id)
-                        ->whereDate('effective_date', $effectiveDate->toDateString())
-                        ->exists();
-
-                    if (!$exists) {
-                        ProductPriceHistory::create([
+                    // *** OPTIMIZACIÓN 5: Verificación O(1) en memoria ***
+                    if (!isset($existingPriceHistory[$cacheKey])) {
+                        $batchInsertData[] = [
                             'product_id' => $product->id,
                             'price' => $price,
                             'effective_date' => $effectiveDate,
                             'created_by' => auth()->id(),
-                        ]);
-                        $stats['inserted']++;
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ];
+
+                        $existingPriceHistory[$cacheKey] = true;
+                    }
+                }
+
+                // *** OPTIMIZACIÓN 6: Bulk insert cada 500 registros ***
+                if (count($batchInsertData) >= $batchSize) {
+                    DB::table('product_price_history')->insert($batchInsertData);
+                    $stats['inserted'] += count($batchInsertData);
+                    $batchInsertData = [];
+                    
+                    if ($rowIndex % 1000 === 0) {
+                        gc_collect_cycles();
                     }
                 }
             }
 
-            DB::commit();
+            // Insertar registros restantes
+            if (count($batchInsertData) > 0) {
+                DB::table('product_price_history')->insert($batchInsertData);
+                $stats['inserted'] += count($batchInsertData);
+            }
+
+            if (count($stats['errors']) >= 50) {
+                $stats['errors'][] = "... y más errores";
+            }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Importación completada exitosamente',
+                'message' => 'Importación completada',
                 'data' => $stats,
             ]);
 
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error('Error importing price history: ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString(),
             ]);
