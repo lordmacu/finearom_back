@@ -42,7 +42,12 @@ class SendClientWelcome extends Command
             return self::FAILURE;
         }
 
-        $toEmail = $overrideTo ?: $client->email ?: $client->executive_email;
+        $toEmail = $overrideTo ?: $client->email;
+        // Si no hay email del cliente, usar el primer email del ejecutivo (puede haber varios separados por coma)
+        if (empty($toEmail) && !empty($client->executive_email)) {
+            $execEmails = array_filter(array_map('trim', explode(',', $client->executive_email)));
+            $toEmail = $execEmails[0] ?? null;
+        }
         if (empty($toEmail)) {
             $this->error('No hay correo destino (cliente y ejecutivo sin email). Usa --to para forzar uno.');
             return self::FAILURE;

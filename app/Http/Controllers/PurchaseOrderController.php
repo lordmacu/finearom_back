@@ -617,7 +617,9 @@ class PurchaseOrderController extends Controller
 
             $ccEmails = [];
             if ($client->executive_email) {
-                $ccEmails[] = $client->executive_email;
+                // Expandir executive_email que puede contener múltiples emails separados por coma
+                $execEmails = array_map('trim', explode(',', $client->executive_email));
+                $ccEmails = array_merge($ccEmails, array_filter($execEmails));
             }
 
             // CC desde procesos (orden_de_compra / pedido)
@@ -1036,10 +1038,15 @@ class PurchaseOrderController extends Controller
                 $ccEmails = $expandedEmails;
             }
 
-            // Add executive email to CC if exists and not duplicate
-            $executiveEmail = $order->client->executive_email ?? null;
-            if (!empty($executiveEmail) && !in_array($executiveEmail, $ccEmails) && $executiveEmail !== $toEmail) {
-                $ccEmails[] = $executiveEmail;
+            // Add executive email(s) to CC if exists — may contain comma-separated emails
+            $executiveEmailRaw = $order->client->executive_email ?? null;
+            if (!empty($executiveEmailRaw)) {
+                $execEmails = array_map('trim', explode(',', $executiveEmailRaw));
+                foreach ($execEmails as $execEmail) {
+                    if (!empty($execEmail) && !in_array($execEmail, $ccEmails) && $execEmail !== $toEmail) {
+                        $ccEmails[] = $execEmail;
+                    }
+                }
             }
 
             // Remove duplicates and filter
@@ -1112,22 +1119,26 @@ class PurchaseOrderController extends Controller
                 ->values()
                 ->toArray();
 
-            // Email del ejecutivo
-            $executiveEmail = $order->client->executive_email;
+            // Email(s) del ejecutivo — puede contener múltiples separados por coma
+            $executiveEmailRaw = $order->client->executive_email;
+            $executiveEmails = !empty($executiveEmailRaw)
+                ? array_filter(array_map('trim', explode(',', $executiveEmailRaw)))
+                : [];
 
             Log::info('📧 CAMBIO DE ESTADO - Emails identificados', [
                 'order_id' => $order->id,
                 'order_consecutive' => $order->order_consecutive,
                 'status' => $order->status,
                 'client_name' => $order->client->client_name,
-                'executive_email' => $executiveEmail,
+                'executive_emails' => $executiveEmails,
                 'process_emails' => $processEmails,
                 'process_emails_count' => count($processEmails),
             ]);
 
-            // Determinar destinatario principal (TO)
-            $toEmail = $executiveEmail;
-            $ccEmails = $processEmails;
+            // Determinar destinatario principal (TO): primer email del ejecutivo
+            $toEmail = !empty($executiveEmails) ? array_shift($executiveEmails) : null;
+            // Resto de emails del ejecutivo + procesos van a CC
+            $ccEmails = array_merge($executiveEmails, $processEmails);
 
             // Si no hay ejecutivo, intentar usar el primer email de procesos como TO
             if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
@@ -1142,7 +1153,7 @@ class PurchaseOrderController extends Controller
             if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
                 Log::warning('No valid recipient email for simple status change', [
                     'order_id' => $order->id,
-                    'executive_email' => $executiveEmail,
+                    'executive_emails' => $executiveEmails,
                     'process_emails_count' => count($processEmails),
                 ]);
                 return;
@@ -1471,7 +1482,7 @@ class PurchaseOrderController extends Controller
                     ? explode(',', $order->client->dispatch_confirmation_email)
                     : []),
                 ...(!empty($order->client->executive_email)
-                    ? [$order->client->executive_email]
+                    ? array_map('trim', explode(',', $order->client->executive_email))
                     : []),
             ]);
             $allClientEmails = $this->normalizeEmails(array_values($clientEmailsRaw));
@@ -2169,7 +2180,11 @@ class PurchaseOrderController extends Controller
         Log::info('PDF generado exitosamente', ['size' => strlen($pdfContent)]);
 
         $clientEmail = $purchaseOrder->client->email;
-        $executiveEmail = $purchaseOrder->client->executive_email ?? $purchaseOrder->client->executive;
+        // Expandir executive_email que puede contener múltiples emails separados por coma
+        $executiveEmailRaw = $purchaseOrder->client->executive_email ?? $purchaseOrder->client->executive;
+        $executiveEmails = !empty($executiveEmailRaw)
+            ? array_filter(array_map('trim', explode(',', $executiveEmailRaw)))
+            : [];
         $coordinator = 'monica.castano@finearom.com';
         // Usar los adjuntos ya almacenados en la orden (array)
         $attachmentPaths = $purchaseOrder->attachment ?? [];
@@ -2187,8 +2202,8 @@ class PurchaseOrderController extends Controller
             }
             $expandedEmails = array_filter(array_unique($expandedEmails));
 
-            // CC: process emails + executive + coordinator
-            $ccEmails = array_merge($expandedEmails, [$executiveEmail, $coordinator]);
+            // CC: process emails + executive emails + coordinator
+            $ccEmails = array_merge($expandedEmails, $executiveEmails, [$coordinator]);
 
             // TO: primer email del cliente
             $toEmails = explode(',', $clientEmail);
@@ -2269,8 +2284,8 @@ class PurchaseOrderController extends Controller
             }
             $expandedEmails = array_filter(array_unique($expandedEmails));
 
-            // CC: process emails + executive + coordinator
-            $ccEmails = array_merge($expandedEmails, [$executiveEmail, $coordinator]);
+            // CC: process emails + executive emails + coordinator
+            $ccEmails = array_merge($expandedEmails, $executiveEmails, [$coordinator]);
         } else {
             // Si hay tag_email_despachos, usarlos
             $ccEmails = explode(',', $validated['tag_email_despachos']);
