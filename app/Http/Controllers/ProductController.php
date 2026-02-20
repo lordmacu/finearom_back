@@ -726,18 +726,28 @@ class ProductController extends Controller
             $currentYear = (int) now()->year;
             $effectiveDate = Carbon::create($currentYear, 1, 1, 0, 0, 0);
 
-            // Cargar historial existente del año actual indexado por product_id
-            $existingPriceHistory = ProductPriceHistory::select('id', 'product_id', 'effective_date', 'price')
+            // Cargar el ÚLTIMO precio en bitácora del año actual por producto
+            // para saber si cambió y debe crear nuevo registro
+            $latestPriceHistory = DB::table('product_price_history')
+                ->select('product_id', DB::raw('MAX(id) as last_id'))
                 ->whereYear('effective_date', $currentYear)
+                ->groupBy('product_id')
                 ->get()
-                ->keyBy('product_id');
+                ->pluck('last_id', 'product_id');
+
+            $lastPrices = collect();
+            if ($latestPriceHistory->isNotEmpty()) {
+                $lastPrices = DB::table('product_price_history')
+                    ->whereIn('id', $latestPriceHistory->values())
+                    ->get()
+                    ->keyBy('product_id');
+            }
 
             $stats = [
                 'processed' => 0,
                 'created' => 0,
                 'updated' => 0,
                 'history_inserted' => 0,
-                'history_updated' => 0,
                 'skipped' => 0,
                 'errors' => [],
             ];
@@ -857,30 +867,23 @@ class ProductController extends Controller
                         $stats['created']++;
                     }
 
-                    // Upsert product_price_history para año actual
-                    $existingHistory = $existingPriceHistory->get($product->id);
+                    // Bitácora: crear nuevo registro si el precio cambió o no existe
+                    $lastHistory = $lastPrices->get($product->id);
+                    $lastPrice = $lastHistory ? (float) $lastHistory->price : null;
 
-                    if ($existingHistory) {
-                        if ((float) $existingHistory->price != $price) {
-                            DB::table('product_price_history')
-                                ->where('id', $existingHistory->id)
-                                ->update(['price' => $price, 'updated_at' => now()]);
-                            $existingHistory->price = $price;
-                            $stats['history_updated']++;
-                        }
-                    } else {
+                    if ($lastPrice === null || $lastPrice != $price) {
+                        // No existe registro o el precio cambió: insertar nuevo
                         $batchHistoryInsert[] = [
                             'product_id' => $product->id,
                             'price' => $price,
-                            'effective_date' => $effectiveDate,
+                            'effective_date' => now(),
                             'created_by' => auth()->id(),
                             'created_at' => now(),
                             'updated_at' => now(),
                         ];
 
-                        // Marcar en caché
-                        $existingPriceHistory->put($product->id, (object) [
-                            'id' => null,
+                        // Actualizar caché para evitar duplicados en el mismo archivo
+                        $lastPrices->put($product->id, (object) [
                             'product_id' => $product->id,
                             'price' => $price,
                         ]);
