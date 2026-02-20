@@ -17,6 +17,7 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 use Carbon\Carbon;
 
 class ProductController extends Controller
@@ -463,11 +464,11 @@ class ProductController extends Controller
 
     /**
      * Import price history from Excel file
-     * Ultra-optimized with cache and bulk insert
+     * Optimized with chunked reading to avoid memory exhaustion
      */
     public function importPriceHistory(Request $request): JsonResponse
     {
-        ini_set('memory_limit', '1G');
+        ini_set('memory_limit', '512M');
         set_time_limit(600);
 
         $request->validate([
@@ -476,103 +477,188 @@ class ProductController extends Controller
 
         try {
             $file = $request->file('file');
-            $spreadsheet = IOFactory::load($file->getPathname());
-            $worksheet = $spreadsheet->getActiveSheet();
-            
-            // *** OPTIMIZACIÓN 1: Cargar TODOS los productos en memoria (indexados por código) ***
+            $filePath = $file->getPathname();
+
+            // Detectar tipo de archivo
+            $inputFileType = IOFactory::identify($filePath);
+            $reader = IOFactory::createReader($inputFileType);
+
+            // CLAVE: Solo leer datos, no estilos ni formatos (ahorra mucha memoria)
+            $reader->setReadDataOnly(true);
+
+            // Cargar productos y historial existente en memoria (esto es pequeño)
             $productsCache = Product::all()->keyBy('code');
-            
-            // *** OPTIMIZACIÓN 2: Cargar price history existente para evitar duplicados ***
-            $existingPriceHistory = ProductPriceHistory::select('product_id', 'effective_date')
+
+            // Cargar historial existente con id y precio para poder actualizar
+            $existingPriceHistory = ProductPriceHistory::select('id', 'product_id', 'effective_date', 'price')
                 ->get()
-                ->map(fn($item) => $item->product_id . '_' . $item->effective_date->format('Y-m-d'))
-                ->flip()
-                ->toArray();
+                ->keyBy(fn($item) => $item->product_id . '_' . $item->effective_date->format('Y-m-d'));
+
+            $currentYear = (int) now()->year;
 
             $yearColumns = [
-                2025 => 8,
-                2024 => 9,
-                2023 => 10,
-                2022 => 11,
+                2025 => 'I', // Columna I (índice 8)
+                2024 => 'J', // Columna J (índice 9)
+                2023 => 'K', // Columna K (índice 10)
+                2022 => 'L', // Columna L (índice 11)
             ];
 
             $stats = [
                 'processed' => 0,
                 'inserted' => 0,
+                'updated' => 0,
                 'skipped' => 0,
                 'errors' => [],
             ];
 
             $batchInsertData = [];
             $batchSize = 500;
-            $rowIndex = 0;
+            $chunkSize = 1000; // Leer 1000 filas a la vez
 
-            // *** OPTIMIZACIÓN 3: Leer fila por fila (streaming) ***
-            foreach ($worksheet->getRowIterator(2) as $row) {
-                $rowIndex++;
-                $stats['processed']++;
-
-                $cellIterator = $row->getCellIterator();
-                $cellIterator->setIterateOnlyExistingCells(false);
-
-                $rowData = [];
-                foreach ($cellIterator as $cell) {
-                    $rowData[] = $cell->getValue();
+            // Primero, obtener el total de filas sin cargar todo
+            // Usamos un filtro que solo lee la columna E (código producto) para contar
+            $countFilter = new class implements IReadFilter {
+                public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+                {
+                    return $row === 1 || $columnAddress === 'E';
                 }
+            };
 
-                $productCode = $rowData[4] ?? null;
+            $reader->setReadFilter($countFilter);
+            $tempSpreadsheet = $reader->load($filePath);
+            $totalRows = $tempSpreadsheet->getActiveSheet()->getHighestDataRow();
+            $tempSpreadsheet->disconnectWorksheets();
+            unset($tempSpreadsheet);
+            gc_collect_cycles();
 
-                if (empty($productCode)) {
-                    $stats['skipped']++;
-                    continue;
-                }
+            Log::info("Import price history: Total rows detected: {$totalRows}");
 
-                // *** OPTIMIZACIÓN 4: Búsqueda O(1) en caché en lugar de query ***
-                $product = $productsCache->get($productCode);
+            // Procesar en chunks
+            for ($startRow = 2; $startRow <= $totalRows; $startRow += $chunkSize) {
+                $endRow = min($startRow + $chunkSize - 1, $totalRows);
 
-                if (!$product) {
-                    if (count($stats['errors']) < 50) {
-                        $stats['errors'][] = "Fila " . ($rowIndex + 1) . " : Producto '{$productCode}' no encontrado";
+                // Filtro para leer solo las columnas necesarias (E, I, J, K, L) y el rango de filas
+                $chunkFilter = new class($startRow, $endRow) implements IReadFilter {
+                    private int $startRow;
+                    private int $endRow;
+
+                    public function __construct(int $startRow, int $endRow)
+                    {
+                        $this->startRow = $startRow;
+                        $this->endRow = $endRow;
                     }
-                    $stats['skipped']++;
-                    continue;
-                }
 
-                foreach ($yearColumns as $year => $columnIndex) {
-                    $price = $rowData[$columnIndex] ?? null;
+                    public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+                    {
+                        if ($row < $this->startRow || $row > $this->endRow) {
+                            return false;
+                        }
+                        return in_array($columnAddress, ['E', 'I', 'J', 'K', 'L']);
+                    }
+                };
 
-                    if (empty($price) || !is_numeric($price)) {
+                // Crear nuevo reader para cada chunk
+                $chunkReader = IOFactory::createReader($inputFileType);
+                $chunkReader->setReadDataOnly(true);
+                $chunkReader->setReadFilter($chunkFilter);
+
+                $spreadsheet = $chunkReader->load($filePath);
+                $worksheet = $spreadsheet->getActiveSheet();
+
+                for ($rowIndex = $startRow; $rowIndex <= $endRow; $rowIndex++) {
+                    $stats['processed']++;
+
+                    $productCode = $worksheet->getCell('E' . $rowIndex)->getValue();
+
+                    if (empty($productCode)) {
+                        $stats['skipped']++;
                         continue;
                     }
 
-                    $effectiveDate = Carbon::create($year, 1, 1, 0, 0, 0);
-                    $cacheKey = $product->id . '_' . $effectiveDate->format('Y-m-d');
+                    $product = $productsCache->get($productCode);
 
-                    // *** OPTIMIZACIÓN 5: Verificación O(1) en memoria ***
-                    if (!isset($existingPriceHistory[$cacheKey])) {
-                        $batchInsertData[] = [
-                            'product_id' => $product->id,
-                            'price' => $price,
-                            'effective_date' => $effectiveDate,
-                            'created_by' => auth()->id(),
-                            'created_at' => now(),
-                            'updated_at' => now(),
-                        ];
+                    if (!$product) {
+                        if (count($stats['errors']) < 50) {
+                            $stats['errors'][] = "Fila {$rowIndex}: Producto '{$productCode}' no encontrado";
+                        }
+                        $stats['skipped']++;
+                        continue;
+                    }
 
-                        $existingPriceHistory[$cacheKey] = true;
+                    foreach ($yearColumns as $year => $column) {
+                        $price = $worksheet->getCell($column . $rowIndex)->getValue();
+
+                        if (empty($price) || !is_numeric($price)) {
+                            continue;
+                        }
+
+                        $effectiveDate = Carbon::create($year, 1, 1, 0, 0, 0);
+                        $cacheKey = $product->id . '_' . $effectiveDate->format('Y-m-d');
+
+                        $existing = $existingPriceHistory->get($cacheKey);
+
+                        if ($existing) {
+                            // Ya existe: actualizar si el precio cambió (cualquier año)
+                            if ((float) $existing->price != (float) $price) {
+                                DB::table('product_price_history')
+                                    ->where('id', $existing->id)
+                                    ->update([
+                                        'price' => $price,
+                                        'updated_at' => now(),
+                                    ]);
+                                $existing->price = $price;
+                                $stats['updated']++;
+
+                                // Si es año en curso, también actualizar precio en products
+                                if ($year == $currentYear) {
+                                    DB::table('products')
+                                        ->where('id', $product->id)
+                                        ->update(['price' => $price, 'updated_at' => now()]);
+                                    $product->price = $price;
+                                }
+                            }
+                        } else {
+                            // No existe: insertar para cualquier año
+                            $batchInsertData[] = [
+                                'product_id' => $product->id,
+                                'price' => $price,
+                                'effective_date' => $effectiveDate,
+                                'created_by' => auth()->id(),
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ];
+
+                            // Marcar en caché para evitar duplicados en el mismo archivo
+                            $existingPriceHistory->put($cacheKey, (object) [
+                                'id' => null,
+                                'product_id' => $product->id,
+                                'price' => $price,
+                            ]);
+
+                            // Si es año en curso, también actualizar precio en products
+                            if ($year == $currentYear) {
+                                DB::table('products')
+                                    ->where('id', $product->id)
+                                    ->update(['price' => $price, 'updated_at' => now()]);
+                                $product->price = $price;
+                            }
+                        }
+                    }
+
+                    // Bulk insert cada N registros
+                    if (count($batchInsertData) >= $batchSize) {
+                        DB::table('product_price_history')->insert($batchInsertData);
+                        $stats['inserted'] += count($batchInsertData);
+                        $batchInsertData = [];
                     }
                 }
 
-                // *** OPTIMIZACIÓN 6: Bulk insert cada 500 registros ***
-                if (count($batchInsertData) >= $batchSize) {
-                    DB::table('product_price_history')->insert($batchInsertData);
-                    $stats['inserted'] += count($batchInsertData);
-                    $batchInsertData = [];
-                    
-                    if ($rowIndex % 1000 === 0) {
-                        gc_collect_cycles();
-                    }
-                }
+                // Liberar memoria del chunk
+                $spreadsheet->disconnectWorksheets();
+                unset($spreadsheet, $worksheet, $chunkReader);
+                gc_collect_cycles();
+
+                Log::info("Import price history: Processed rows {$startRow}-{$endRow} of {$totalRows}");
             }
 
             // Insertar registros restantes
@@ -593,6 +679,249 @@ class ProductController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Error importing price history: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al importar: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Import current year product prices from Excel file (BASE SISTEMA format)
+     * Format: A=Code, B=Product Name, C=Price, D=Client NIT, E=Client Name, F=Operation
+     * 
+     * Logic per row:
+     * - Find client by NIT (column D)
+     * - Find product by code (column A) + client_id
+     * - If product exists for that client: update price
+     * - If product does NOT exist for that client: create it
+     * - Also upserts product_price_history for the current year
+     */
+    public function importCurrentPrices(Request $request): JsonResponse
+    {
+        ini_set('memory_limit', '512M');
+        set_time_limit(600);
+
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:51200',
+        ]);
+
+        try {
+            $file = $request->file('file');
+            $filePath = $file->getPathname();
+
+            $inputFileType = IOFactory::identify($filePath);
+            $reader = IOFactory::createReader($inputFileType);
+            $reader->setReadDataOnly(true);
+
+            // Cargar clientes indexados por NIT
+            $clientsCache = Client::all()->keyBy('nit');
+
+            // Cargar productos indexados por "code_clientId"
+            $productsCache = Product::all()->keyBy(fn($p) => $p->code . '_' . $p->client_id);
+
+            $currentYear = (int) now()->year;
+            $effectiveDate = Carbon::create($currentYear, 1, 1, 0, 0, 0);
+
+            // Cargar historial existente del año actual indexado por product_id
+            $existingPriceHistory = ProductPriceHistory::select('id', 'product_id', 'effective_date', 'price')
+                ->whereYear('effective_date', $currentYear)
+                ->get()
+                ->keyBy('product_id');
+
+            $stats = [
+                'processed' => 0,
+                'created' => 0,
+                'updated' => 0,
+                'history_inserted' => 0,
+                'history_updated' => 0,
+                'skipped' => 0,
+                'errors' => [],
+            ];
+
+            $chunkSize = 1000;
+
+            // Obtener total de filas
+            $countFilter = new class implements IReadFilter {
+                public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+                {
+                    return $row === 1 || $columnAddress === 'A';
+                }
+            };
+            $reader->setReadFilter($countFilter);
+            $tempSpreadsheet = $reader->load($filePath);
+            $totalRows = $tempSpreadsheet->getActiveSheet()->getHighestDataRow();
+            $tempSpreadsheet->disconnectWorksheets();
+            unset($tempSpreadsheet);
+            gc_collect_cycles();
+
+            Log::info("Import current prices: Total rows detected: {$totalRows}");
+
+            $batchHistoryInsert = [];
+            $batchSize = 500;
+
+            // Procesar en chunks
+            for ($startRow = 2; $startRow <= $totalRows; $startRow += $chunkSize) {
+                $endRow = min($startRow + $chunkSize - 1, $totalRows);
+
+                $chunkFilter = new class($startRow, $endRow) implements IReadFilter {
+                    private int $startRow;
+                    private int $endRow;
+
+                    public function __construct(int $startRow, int $endRow)
+                    {
+                        $this->startRow = $startRow;
+                        $this->endRow = $endRow;
+                    }
+
+                    public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+                    {
+                        if ($row < $this->startRow || $row > $this->endRow) {
+                            return false;
+                        }
+                        return in_array($columnAddress, ['A', 'B', 'C', 'D']);
+                    }
+                };
+
+                $chunkReader = IOFactory::createReader($inputFileType);
+                $chunkReader->setReadDataOnly(true);
+                $chunkReader->setReadFilter($chunkFilter);
+
+                $spreadsheet = $chunkReader->load($filePath);
+                $worksheet = $spreadsheet->getActiveSheet();
+
+                for ($rowIndex = $startRow; $rowIndex <= $endRow; $rowIndex++) {
+                    $stats['processed']++;
+
+                    $code = $worksheet->getCell('A' . $rowIndex)->getValue();
+                    $productName = $worksheet->getCell('B' . $rowIndex)->getValue();
+                    $price = $worksheet->getCell('C' . $rowIndex)->getValue();
+                    $clientNit = $worksheet->getCell('D' . $rowIndex)->getValue();
+
+                    if (empty($code) || empty($price) || !is_numeric($price)) {
+                        $stats['skipped']++;
+                        continue;
+                    }
+
+                    $code = trim((string) $code);
+                    $price = floor((float) $price * 100) / 100; // Truncar a 2 decimales
+                    $clientNit = trim((string) $clientNit);
+
+                    if (empty($clientNit)) {
+                        if (count($stats['errors']) < 50) {
+                            $stats['errors'][] = "Fila {$rowIndex}: Sin NIT de cliente para producto '{$code}'";
+                        }
+                        $stats['skipped']++;
+                        continue;
+                    }
+
+                    // Buscar cliente por NIT
+                    $client = $clientsCache->get($clientNit);
+                    if (!$client) {
+                        if (count($stats['errors']) < 50) {
+                            $stats['errors'][] = "Fila {$rowIndex}: Cliente con NIT '{$clientNit}' no encontrado";
+                        }
+                        $stats['skipped']++;
+                        continue;
+                    }
+
+                    $cacheKey = $code . '_' . $client->id;
+                    $product = $productsCache->get($cacheKey);
+
+                    if ($product) {
+                        // Producto existe para este cliente: actualizar precio
+                        if ((float) $product->price != $price) {
+                            DB::table('products')
+                                ->where('id', $product->id)
+                                ->update(['price' => $price, 'updated_at' => now()]);
+                            $product->price = $price;
+                            $stats['updated']++;
+                        } else {
+                            $stats['skipped']++;
+                        }
+                    } else {
+                        // Producto NO existe para este cliente: crearlo
+                        $newProduct = Product::create([
+                            'code' => $code,
+                            'product_name' => $productName ?: $code,
+                            'price' => $price,
+                            'client_id' => $client->id,
+                        ]);
+
+                        // Agregar al caché para evitar duplicados en el mismo archivo
+                        $productsCache->put($cacheKey, $newProduct);
+                        $product = $newProduct;
+                        $stats['created']++;
+                    }
+
+                    // Upsert product_price_history para año actual
+                    $existingHistory = $existingPriceHistory->get($product->id);
+
+                    if ($existingHistory) {
+                        if ((float) $existingHistory->price != $price) {
+                            DB::table('product_price_history')
+                                ->where('id', $existingHistory->id)
+                                ->update(['price' => $price, 'updated_at' => now()]);
+                            $existingHistory->price = $price;
+                            $stats['history_updated']++;
+                        }
+                    } else {
+                        $batchHistoryInsert[] = [
+                            'product_id' => $product->id,
+                            'price' => $price,
+                            'effective_date' => $effectiveDate,
+                            'created_by' => auth()->id(),
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ];
+
+                        // Marcar en caché
+                        $existingPriceHistory->put($product->id, (object) [
+                            'id' => null,
+                            'product_id' => $product->id,
+                            'price' => $price,
+                        ]);
+
+                        if (count($batchHistoryInsert) >= $batchSize) {
+                            DB::table('product_price_history')->insert($batchHistoryInsert);
+                            $stats['history_inserted'] += count($batchHistoryInsert);
+                            $batchHistoryInsert = [];
+                        }
+                    }
+                }
+
+                // Liberar memoria del chunk
+                $spreadsheet->disconnectWorksheets();
+                unset($spreadsheet, $worksheet, $chunkReader);
+                gc_collect_cycles();
+
+                Log::info("Import current prices: Processed rows {$startRow}-{$endRow} of {$totalRows}");
+            }
+
+            // Insertar historial restante
+            if (count($batchHistoryInsert) > 0) {
+                DB::table('product_price_history')->insert($batchHistoryInsert);
+                $stats['history_inserted'] += count($batchHistoryInsert);
+            }
+
+            if (count($stats['errors']) >= 50) {
+                $stats['errors'][] = "... y más errores";
+            }
+
+            // Invalidar caché de productos
+            Cache::put('products.last_modified', now()->timestamp);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Importación de precios actuales completada',
+                'data' => $stats,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error importing current prices: ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString(),
             ]);
 

@@ -27,6 +27,12 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Aumentar límites de PHP para PhpSpreadsheet y archivos grandes
+RUN echo "memory_limit=512M" > /usr/local/etc/php/conf.d/custom.ini \
+    && echo "upload_max_filesize=64M" >> /usr/local/etc/php/conf.d/custom.ini \
+    && echo "post_max_size=64M" >> /usr/local/etc/php/conf.d/custom.ini \
+    && echo "max_execution_time=300" >> /usr/local/etc/php/conf.d/custom.ini
+
 WORKDIR /var/www/html
 
 COPY . /var/www/html
