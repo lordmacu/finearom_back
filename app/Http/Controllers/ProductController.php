@@ -463,6 +463,29 @@ class ProductController extends Controller
     }
 
     /**
+     * Update a specific price history record.
+     */
+    public function updatePriceHistory(Request $request, int $productId, int $historyId): JsonResponse
+    {
+        $request->validate([
+            'price' => 'required|numeric|min:0',
+        ]);
+
+        $product = Product::query()->findOrFail($productId);
+
+        $record = ProductPriceHistory::where('id', $historyId)
+            ->where('product_id', $product->id)
+            ->firstOrFail();
+
+        $record->update(['price' => $request->price]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Precio actualizado',
+        ]);
+    }
+
+    /**
      * Delete a specific price history record.
      */
     public function deletePriceHistory(int $productId, int $historyId): JsonResponse
