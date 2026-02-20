@@ -463,6 +463,25 @@ class ProductController extends Controller
     }
 
     /**
+     * Delete a specific price history record.
+     */
+    public function deletePriceHistory(int $productId, int $historyId): JsonResponse
+    {
+        $product = Product::query()->findOrFail($productId);
+
+        $record = ProductPriceHistory::where('id', $historyId)
+            ->where('product_id', $product->id)
+            ->firstOrFail();
+
+        $record->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Registro de historial eliminado',
+        ]);
+    }
+
+    /**
      * Import price history from Excel file
      * Optimized with chunked reading to avoid memory exhaustion
      */

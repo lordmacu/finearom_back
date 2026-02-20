@@ -155,6 +155,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/products/import-price-history', [ProductController::class, 'importPriceHistory']);
     Route::post('/products/import-current-prices', [ProductController::class, 'importCurrentPrices']);
     Route::get('/products/{productId}/price-history', [ProductController::class, 'priceHistory']);
+    Route::delete('/products/{productId}/price-history/{historyId}', [ProductController::class, 'deletePriceHistory']);
 
     // Órdenes de compra
     Route::get('/purchase-orders', [PurchaseOrderController::class, 'index']);
