@@ -54,6 +54,8 @@ class ClientStoreRequest extends FormRequest
             'billing_contact_phone' => ['nullable', 'string', 'max:255'],
             'taxpayer_type' => ['nullable', 'string', 'max:255'],
             'credit_term' => ['nullable', 'integer'],
+            'client_type' => ['nullable', 'string', 'max:10'],
+            'lead_time' => ['nullable', 'integer'],
             'portfolio_contact_name' => ['nullable', 'string', 'max:255'],
             'portfolio_contact_phone' => ['nullable', 'string', 'max:255'],
             'r_and_d_contact_name' => ['nullable', 'string', 'max:255'],
