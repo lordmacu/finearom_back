@@ -68,6 +68,7 @@ class Client extends Model
         'estados_financieros_file',
         'user_id',
         'executive_phone',
+        'lead_time',
     ];
 
     public function user()

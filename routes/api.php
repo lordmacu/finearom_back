@@ -182,6 +182,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Clientes y sucursales
     Route::get('/clients', [ClientController::class, 'index']);
     Route::post('/clients/import', [ClientController::class, 'importClients']);
+    Route::post('/clients/import-lead-time', [ClientController::class, 'importLeadTime']);
     Route::get('/clients/export', [ClientController::class, 'exportClients']);
     Route::get('/clients/{clientId}', [ClientController::class, 'show']);
     Route::post('/clients', [ClientController::class, 'store']);

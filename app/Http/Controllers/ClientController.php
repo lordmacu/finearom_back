@@ -444,6 +444,107 @@ class ClientController extends Controller
         ]);
     }
 
+    /**
+     * Importa lead_time y client_type desde un Excel con columnas:
+     * NIT, TIPO CLIENTE, LEAD TIME, ORIGEN, CLIENTE
+     */
+    public function importLeadTime(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => ['required', 'file', 'mimes:xls,xlsx,csv,txt'],
+        ]);
+
+        $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($request->file('file')->getRealPath());
+        $sheet = $spreadsheet->getSheet(0);
+        $rows = $sheet->toArray(null, true, true, true);
+
+        if (count($rows) < 2) {
+            return response()->json(['success' => false, 'message' => 'Archivo sin datos'], 422);
+        }
+
+        // Mapeo flexible de headers
+        $headers = array_map(function ($val) {
+            return strtolower(trim((string) $val));
+        }, $rows[1] ?? []);
+
+        $colIndex = array_flip($headers);
+
+        // Mapear nombres del Excel a nuestras claves internas
+        $nitCol = $colIndex['nit'] ?? null;
+        $tipoCol = $colIndex['tipo cliente'] ?? ($colIndex['tipo_cliente'] ?? ($colIndex['client_type'] ?? null));
+        $leadCol = $colIndex['lead time'] ?? ($colIndex['lead_time'] ?? ($colIndex['leadtime'] ?? null));
+
+        if ($nitCol === null) {
+            return response()->json(['success' => false, 'message' => 'Falta columna requerida: NIT'], 422);
+        }
+
+        $updated = 0;
+        $notFound = 0;
+        $errors = [];
+
+        DB::beginTransaction();
+        try {
+            for ($i = 2; $i <= count($rows); $i++) {
+                $row = $rows[$i];
+                if (! is_array($row)) {
+                    continue;
+                }
+
+                $nit = trim((string) ($row[$nitCol] ?? ''));
+                if ($nit === '') {
+                    continue; // Filas sin NIT se saltan silenciosamente
+                }
+
+                $client = Client::query()->where('nit', $nit)->first();
+                if (! $client) {
+                    $notFound++;
+                    $errors[] = ['row' => $i, 'nit' => $nit, 'message' => 'Cliente no encontrado'];
+                    continue;
+                }
+
+                $payload = [];
+
+                if ($tipoCol !== null) {
+                    $tipo = strtoupper(trim((string) ($row[$tipoCol] ?? '')));
+                    if ($tipo !== '') {
+                        $payload['client_type'] = $tipo;
+                    }
+                }
+
+                if ($leadCol !== null) {
+                    $lead = $row[$leadCol] ?? null;
+                    if ($lead !== null && $lead !== '' && is_numeric($lead)) {
+                        $payload['lead_time'] = (int) $lead;
+                    }
+                }
+
+                if (! empty($payload)) {
+                    $client->update($payload);
+                    $updated++;
+                }
+            }
+
+            DB::commit();
+
+            if ($updated > 0) {
+                $this->clearClientsCache();
+            }
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => "Lead Time importado: {$updated} actualizados, {$notFound} no encontrados",
+            'data' => [
+                'updated' => $updated,
+                'not_found' => $notFound,
+                'errors' => $errors,
+            ],
+        ]);
+    }
+
     public function importOffices(Request $request): JsonResponse
     {
         $request->validate([
