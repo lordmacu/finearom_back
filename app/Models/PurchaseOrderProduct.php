@@ -17,12 +17,14 @@ class PurchaseOrderProduct extends Model
         'muestra',
         'parcial',
         'new_win',
+        'new_win_date',
         'quantity',
         'delivery_date',
     ];
 
     protected $casts = [
         'delivery_date' => 'date',
+        'new_win_date'  => 'date',
         'quantity'      => 'integer',
         'price'         => 'decimal:2',
         'muestra'       => 'boolean',

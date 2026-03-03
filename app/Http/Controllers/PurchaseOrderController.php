@@ -1800,6 +1800,7 @@ class PurchaseOrderController extends Controller
                 'quantity' => $product['quantity'],
                 'price' => $priceToSave,
                 'new_win' => $newWinFlag ? 1 : 0,
+                'new_win_date' => $newWinFlag ? now()->toDateString() : null,
                 'muestra' => $muestraFlag ? 1 : 0,
                 'branch_office_id' => $product['branch_office_id'],
                 'delivery_date' => !empty($product['delivery_date']) ? $product['delivery_date'] : now()->format('Y-m-d'),
@@ -1847,6 +1848,7 @@ class PurchaseOrderController extends Controller
                     'price' => $priceToSave,
                     'branch_office_id' => (int) ($productData['branch_office_id'] ?? 0),
                     'new_win' => $newWinFlag ? 1 : 0,
+                    'new_win_date' => null, // se ajusta según el caso abajo
                     'muestra' => $muestraFlag ? 1 : 0,
                 ];
 
@@ -1870,6 +1872,11 @@ class PurchaseOrderController extends Controller
                         ->first();
 
                     if ($existing) {
+                        // Preservar new_win_date si ya tenía una; si se activa ahora, poner hoy
+                        $updateData['new_win_date'] = $newWinFlag
+                            ? ($existing->new_win_date ?? now()->toDateString())
+                            : null;
+
                         // Actualizar existente
                         \DB::table('purchase_order_product')
                             ->where('id', $id)
@@ -1879,6 +1886,7 @@ class PurchaseOrderController extends Controller
                         $keptIds[] = $id;
                     } else {
                         // El ID no existe, crear nuevo
+                        $updateData['new_win_date'] = $newWinFlag ? now()->toDateString() : null;
                         $newId = \DB::table('purchase_order_product')->insertGetId([
                             'purchase_order_id' => $purchaseOrderId,
                             ...$updateData
@@ -1887,6 +1895,7 @@ class PurchaseOrderController extends Controller
                     }
                 } else {
                     // Sin ID válido, crear nuevo
+                    $updateData['new_win_date'] = $newWinFlag ? now()->toDateString() : null;
                     $newId = \DB::table('purchase_order_product')->insertGetId([
                         'purchase_order_id' => $purchaseOrderId,
                         ...$updateData

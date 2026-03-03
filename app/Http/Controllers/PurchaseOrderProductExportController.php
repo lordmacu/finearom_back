@@ -106,7 +106,7 @@ class PurchaseOrderProductExportController extends Controller
             'H1' => 'Cantidad',
             'I1' => 'Precio Unitario',
             'J1' => 'Subtotal',
-            'K1' => 'New Win',
+            'K1' => 'Fecha New Win',
             'L1' => 'Fecha Despacho Efectiva',
             'M1' => 'Origen Fecha Despacho'
         ];
@@ -145,7 +145,7 @@ class PurchaseOrderProductExportController extends Controller
             $sheet->setCellValue('H' . $row, $product->quantity);
             $sheet->setCellValue('I' . $row, $product->price_product);
             $sheet->setCellValue('J' . $row, $subtotal);
-            $sheet->setCellValue('K' . $row, $product->new_win ? 'Sí' : 'No');
+            $sheet->setCellValue('K' . $row, $product->new_win_date ?? '');
             $sheet->setCellValue('L' . $row, $product->effective_dispatch_date);
             $sheet->setCellValue('M' . $row, $dateOrigin);
 
