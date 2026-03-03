@@ -64,9 +64,15 @@ class ProductCategoryController extends Controller
     public function productsCount(int $id): JsonResponse
     {
         $category = ProductCategory::findOrFail($id);
-        $count = Product::whereJsonContains('categories', $category->slug)->count();
 
-        return response()->json(['success' => true, 'data' => ['count' => $count, 'slug' => $category->slug]]);
+        // Usar LIKE en lugar de whereJsonContains para máxima compatibilidad con MySQL/MariaDB
+        $slug = $category->slug;
+        $count = Product::whereNotNull('categories')
+            ->where('categories', '!=', 'null')
+            ->where('categories', 'like', '%"' . $slug . '"%')
+            ->count();
+
+        return response()->json(['success' => true, 'data' => ['count' => $count, 'slug' => $slug]]);
     }
 
     public function destroy(int $id): JsonResponse
