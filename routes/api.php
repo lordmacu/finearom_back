@@ -110,6 +110,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('email-campaigns', EmailCampaignController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
 
     // Categorías de productos
+    Route::get('/product-categories/{id}/products-count', [ProductCategoryController::class, 'productsCount']);
     Route::apiResource('product-categories', ProductCategoryController::class)->only(['index', 'store', 'update', 'destroy']);
 
     // Configuración del sistema (Admin)

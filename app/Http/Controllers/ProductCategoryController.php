@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Product;
 use App\Models\ProductCategory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -9,6 +10,14 @@ use Illuminate\Support\Str;
 
 class ProductCategoryController extends Controller
 {
+    public function __construct()
+    {
+        $this->middleware('can:product list')->only(['index', 'productsCount']);
+        $this->middleware('can:product create')->only(['store']);
+        $this->middleware('can:product edit')->only(['update']);
+        $this->middleware('can:product delete')->only(['destroy']);
+    }
+
     public function index(): JsonResponse
     {
         $categories = ProductCategory::orderBy('name')->get();
@@ -50,6 +59,14 @@ class ProductCategoryController extends Controller
         $category->update($data);
 
         return response()->json(['success' => true, 'data' => $category]);
+    }
+
+    public function productsCount(int $id): JsonResponse
+    {
+        $category = ProductCategory::findOrFail($id);
+        $count = Product::whereJsonContains('categories', $category->slug)->count();
+
+        return response()->json(['success' => true, 'data' => ['count' => $count, 'slug' => $category->slug]]);
     }
 
     public function destroy(int $id): JsonResponse
