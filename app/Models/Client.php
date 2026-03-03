@@ -69,6 +69,12 @@ class Client extends Model
         'user_id',
         'executive_phone',
         'lead_time',
+        'first_dispatch_date',
+        'estimated_launch_date',
+        'first_dispatch_quantity',
+        'purchase_frequency',
+        'estimated_monthly_quantity',
+        'product_category',
     ];
 
     public function user()

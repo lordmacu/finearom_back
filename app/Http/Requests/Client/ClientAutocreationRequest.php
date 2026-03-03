@@ -20,6 +20,12 @@ class ClientAutocreationRequest extends FormRequest
             'executive_name' => ['nullable', 'string', 'max:255'],
             'executive_email' => ['nullable', 'email', 'max:255'],
             'executive_phone' => ['nullable', 'string', 'max:255'],
+            'first_dispatch_date' => ['nullable', 'date'],
+            'estimated_launch_date' => ['nullable', 'date'],
+            'first_dispatch_quantity' => ['nullable', 'numeric'],
+            'purchase_frequency' => ['nullable', 'string', 'max:255'],
+            'estimated_monthly_quantity' => ['nullable', 'numeric'],
+            'product_category' => ['nullable', 'string', 'max:500'],
         ];
     }
 

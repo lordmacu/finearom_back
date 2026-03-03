@@ -13,6 +13,11 @@ class Product extends Model
         'product_name',
         'price',
         'client_id',
+        'categories',
+    ];
+
+    protected $casts = [
+        'categories' => 'array',
     ];
 
     public function client()

@@ -784,6 +784,12 @@ class ClientController extends Controller
             'city' => '',
             'billing_closure' => '',
             'commercial_conditions' => '',
+            'first_dispatch_date' => $data['first_dispatch_date'] ?? null,
+            'estimated_launch_date' => $data['estimated_launch_date'] ?? null,
+            'first_dispatch_quantity' => $data['first_dispatch_quantity'] ?? null,
+            'purchase_frequency' => $data['purchase_frequency'] ?? null,
+            'estimated_monthly_quantity' => $data['estimated_monthly_quantity'] ?? null,
+            'product_category' => $data['product_category'] ?? null,
         ]);
 
         BranchOffice::query()->create([

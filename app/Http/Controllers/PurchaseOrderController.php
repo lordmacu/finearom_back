@@ -247,8 +247,8 @@ class PurchaseOrderController extends Controller
                 'status'             => $validated['status'],
                 'observations'           => $validated['observations'] ?? null,
                 'internal_observations'  => $validated['internal_observations'] ?? null,
-                'tag_email_pedidos'      => $validated['tag_email_pedidos'] ?? null,
-                'tag_email_despachos'    => $validated['tag_email_despachos'] ?? null,
+                'tag_email_pedidos'      => $this->sanitizeEmailTag($validated['tag_email_pedidos'] ?? null),
+                'tag_email_despachos'    => $this->sanitizeEmailTag($validated['tag_email_despachos'] ?? null),
                 'subject_client'     => $validated['subject_client'] ?? null,
                 'order_creation_date'=> $validated['createdOrderDate'] ?? now()->format('Y-m-d'),
                 'trm'                => $normalizedTrm,
@@ -399,8 +399,8 @@ class PurchaseOrderController extends Controller
             $purchaseOrder->status = $validated['status'];
             $purchaseOrder->observations = $validated['observations'] ?? null;
             $purchaseOrder->internal_observations = $validated['internal_observations'] ?? null;
-            $purchaseOrder->tag_email_pedidos = $validated['tag_email_pedidos'] ?? null;
-            $purchaseOrder->tag_email_despachos = $validated['tag_email_despachos'] ?? null;
+            $purchaseOrder->tag_email_pedidos = $this->sanitizeEmailTag($validated['tag_email_pedidos'] ?? null);
+            $purchaseOrder->tag_email_despachos = $this->sanitizeEmailTag($validated['tag_email_despachos'] ?? null);
             $subjectClientRaw = $validated['subject_client'] ?? $purchaseOrder->subject_client;
             $subjectModified = filter_var($request->input('subject_client_modified', false), FILTER_VALIDATE_BOOLEAN);
             if ($subjectModified && !str_starts_with($subjectClientRaw, 'Re:')) {
@@ -1707,6 +1707,27 @@ class PurchaseOrderController extends Controller
         }
 
         return $normalized;
+    }
+
+    /**
+     * Sanitiza un string de emails separados por coma:
+     * elimina caracteres inválidos (<, >, ", ', espacios) y filtra los que no tengan formato válido.
+     */
+    private function sanitizeEmailTag(?string $emailTag): ?string
+    {
+        if (empty($emailTag)) {
+            return $emailTag;
+        }
+
+        $sanitized = [];
+        foreach (explode(',', $emailTag) as $email) {
+            $clean = preg_replace('/[<>"\'\\s]/', '', trim($email));
+            if ($clean !== '' && filter_var($clean, FILTER_VALIDATE_EMAIL) !== false) {
+                $sanitized[] = $clean;
+            }
+        }
+
+        return !empty($sanitized) ? implode(',', $sanitized) : null;
     }
 
     /**

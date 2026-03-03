@@ -249,6 +249,9 @@ class ProductController extends Controller
         $created = 0;
         $errors = [];
 
+        $allowedCategories = ['body_care', 'home_care', 'air_care', 'fine_fragrance'];
+        $hasCategoriesColumn = isset($colIndex['categories']);
+
         DB::beginTransaction();
         try {
             for ($i = 2; $i <= count($rows); $i++) {
@@ -279,17 +282,33 @@ class ProductController extends Controller
                     continue;
                 }
 
+                // Parsear categorías si la columna existe
+                $categories = null;
+                if ($hasCategoriesColumn) {
+                    $rawCat = trim((string) ($row[$colIndex['categories']] ?? ''));
+                    $categories = $rawCat !== ''
+                        ? array_values(array_filter(
+                            array_map(fn ($c) => strtolower(trim($c)), explode(',', $rawCat)),
+                            fn ($c) => in_array($c, $allowedCategories)
+                          ))
+                        : [];
+                }
+
                 $product = Product::query()
                     ->where('code', $code)
                     ->where('client_id', $clientId)
                     ->first();
 
                 if ($product) {
-                    $product->update([
+                    $payload = [
                         'product_name' => $name,
                         'price' => is_numeric($price) ? (float) $price : 0,
                         'client_id' => $clientId,
-                    ]);
+                    ];
+                    if ($categories !== null) {
+                        $payload['categories'] = $categories;
+                    }
+                    $product->update($payload);
                     $updated++;
                 } else {
                     Product::query()->create([
@@ -297,6 +316,7 @@ class ProductController extends Controller
                         'product_name' => $name,
                         'price' => is_numeric($price) ? (float) $price : 0,
                         'client_id' => $clientId,
+                        'categories' => $categories ?? [],
                     ]);
                     $created++;
                 }
