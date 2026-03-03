@@ -165,6 +165,28 @@ class ProductController extends Controller
     }
 
     /**
+     * Retorna los product_id que el cliente ya ha ordenado al menos una vez.
+     * Úsalo en el frontend para detectar NEW WIN: si el producto NO está en esta lista → es nuevo.
+     */
+    public function newWinCheck(Request $request): JsonResponse
+    {
+        $clientId = (int) $request->query('client_id');
+        if (! $clientId) {
+            return response()->json(['success' => false, 'message' => 'client_id requerido'], 422);
+        }
+
+        $orderedIds = DB::table('purchase_order_product')
+            ->join('purchase_orders', 'purchase_orders.id', '=', 'purchase_order_product.purchase_order_id')
+            ->where('purchase_orders.client_id', $clientId)
+            ->distinct()
+            ->pluck('purchase_order_product.product_id')
+            ->values()
+            ->toArray();
+
+        return response()->json(['success' => true, 'data' => $orderedIds]);
+    }
+
+    /**
      * Búsqueda de productos para componentes Select/Autocomplete.
      * Retorna formato compatible con Select2: [{id, text}].
      */

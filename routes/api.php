@@ -147,6 +147,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Productos
     Route::get('/products', [ProductController::class, 'index']);
     Route::get('/products/search', [ProductController::class, 'search']);
+    Route::get('/products/new-win-check', [ProductController::class, 'newWinCheck']);
     Route::get('/products/export', [ProductController::class, 'export']);
     Route::post('/products', [ProductController::class, 'store']);
     Route::put('/products/{productId}', [ProductController::class, 'update']);
