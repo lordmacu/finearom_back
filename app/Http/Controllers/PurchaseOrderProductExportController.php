@@ -106,17 +106,18 @@ class PurchaseOrderProductExportController extends Controller
             'H1' => 'Cantidad',
             'I1' => 'Precio Unitario',
             'J1' => 'Subtotal',
-            'K1' => 'Fecha New Win',
-            'L1' => 'Fecha Despacho Efectiva',
-            'M1' => 'Origen Fecha Despacho'
+            'K1' => 'New Win',
+            'L1' => 'Fecha New Win',
+            'M1' => 'Fecha Despacho Efectiva',
+            'N1' => 'Origen Fecha Despacho'
         ];
 
         foreach ($headers as $cell => $header) {
             $sheet->setCellValue($cell, $header);
         }
 
-        $sheet->getStyle('A1:M1')->getFont()->setBold(true);
-        $sheet->getStyle('A1:M1')->getFill()
+        $sheet->getStyle('A1:N1')->getFont()->setBold(true);
+        $sheet->getStyle('A1:N1')->getFill()
             ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
             ->getStartColor()->setARGB('FFE0E0E0');
 
@@ -145,9 +146,10 @@ class PurchaseOrderProductExportController extends Controller
             $sheet->setCellValue('H' . $row, $product->quantity);
             $sheet->setCellValue('I' . $row, $product->price_product);
             $sheet->setCellValue('J' . $row, $subtotal);
-            $sheet->setCellValue('K' . $row, $product->new_win_date ?? '');
-            $sheet->setCellValue('L' . $row, $product->effective_dispatch_date);
-            $sheet->setCellValue('M' . $row, $dateOrigin);
+            $sheet->setCellValue('K' . $row, $product->new_win ? 'Sí' : 'No');
+            $sheet->setCellValue('L' . $row, $product->new_win_date ?? '');
+            $sheet->setCellValue('M' . $row, $product->effective_dispatch_date);
+            $sheet->setCellValue('N' . $row, $dateOrigin);
 
             $row++;
         }
