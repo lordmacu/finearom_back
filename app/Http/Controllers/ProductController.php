@@ -6,6 +6,7 @@ use App\Http\Requests\Product\ProductStoreRequest;
 use App\Http\Requests\Product\ProductUpdateRequest;
 use App\Models\Client;
 use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\ProductDiscount;
 use App\Models\ProductPriceHistory;
 use Illuminate\Http\JsonResponse;
@@ -271,7 +272,7 @@ class ProductController extends Controller
         $created = 0;
         $errors = [];
 
-        $allowedCategories = ['body_care', 'home_care', 'air_care', 'fine_fragrance'];
+        $allowedCategories = ProductCategory::active()->pluck('slug')->toArray();
         $hasCategoriesColumn = isset($colIndex['categories']);
 
         DB::beginTransaction();

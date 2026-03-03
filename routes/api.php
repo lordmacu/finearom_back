@@ -15,6 +15,7 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProcessEmailController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\ProductCategoryController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\Uploads\CkeditorUploadController;
 use App\Http\Controllers\PurchaseOrderController;
@@ -107,6 +108,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/email-campaigns/{campaignId}/logs/{logId}/resend-custom', [EmailCampaignController::class, 'resendCustom']);
     Route::put('/email-campaigns/{campaignId}/logs/{logId}/email', [EmailCampaignController::class, 'updateLogEmail']);
     Route::apiResource('email-campaigns', EmailCampaignController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
+
+    // Categorías de productos
+    Route::apiResource('product-categories', ProductCategoryController::class)->only(['index', 'store', 'update', 'destroy']);
 
     // Configuración del sistema (Admin)
     Route::get('/settings/admin-configuration', [SettingsController::class, 'adminConfiguration']);

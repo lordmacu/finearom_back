@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Product;
 
+use App\Models\ProductCategory;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ProductUpdateRequest extends FormRequest
 {
@@ -18,7 +20,7 @@ class ProductUpdateRequest extends FormRequest
             'price' => ['required', 'numeric', 'min:0'],
             'client_id' => ['required', 'integer', 'exists:clients,id'],
             'categories' => ['nullable', 'array'],
-            'categories.*' => ['string', 'in:body_care,home_care,air_care,fine_fragrance'],
+            'categories.*' => ['string', Rule::in(ProductCategory::active()->pluck('slug')->toArray())],
             'discounts' => ['sometimes', 'array'],
             'discounts.*.min_quantity' => ['required', 'numeric', 'min:0'],
             'discounts.*.discount_percentage' => ['required', 'numeric', 'min:0', 'max:100'],
