@@ -378,7 +378,7 @@ class ProductController extends Controller
             $sheet = $spreadsheet->getActiveSheet();
 
             $sheet->fromArray([
-                ['code', 'product_name', 'price', 'nit', 'client_name'],
+                ['code', 'product_name', 'price', 'nit', 'client_name', 'categories'],
             ], null, 'A1', true);
 
             $rowNumber = 2;
@@ -389,6 +389,7 @@ class ProductController extends Controller
                     $sheet->setCellValue("C{$rowNumber}", (float) $product->price);
                     $sheet->setCellValue("D{$rowNumber}", optional($product->client)->nit);
                     $sheet->setCellValue("E{$rowNumber}", optional($product->client)->client_name);
+                    $sheet->setCellValue("F{$rowNumber}", implode(', ', $product->categories ?? []));
                     $rowNumber++;
                 }
             });
