@@ -102,6 +102,8 @@ class IaAnalysisService
             ? " [PICOS: peak={$metricas['peakHistorico']}kg]"
             : '';
 
+        $maxProyeccion = (int) max($metricas['max'] * 1.3, $metricas['prom12m'] * 3, 5);
+
         $contextoProducto = "PRODUCTO: {$producto->codigo} | {$producto->producto}\n"
             . "ESCENARIO: {$metricas['escenario']} | TENDENCIA: {$tendencia} ("
             . ($metricas['pct_cambio'] >= 0 ? '+' : '') . "{$metricas['pct_cambio']}%)\n"
@@ -110,6 +112,7 @@ class IaAnalysisService
             . "CONSISTENCIA: {$metricas['consistencia']}% ({$metricas['mesesConCompra']}/12 meses) | "
             . "CV: {$metricas['cv']}% | PENDIENTE: {$metricas['pendienteKgMes']}kg/mes\n"
             . "EN TRÁNSITO: {$enTransito} kg" . ($proximaEntrega ? " (entrega: {$proximaEntrega})" : '') . "\n"
+            . "RESTRICCIÓN: ningún mes puede superar {$maxProyeccion} kg (1.3× pico histórico={$metricas['max']}kg)\n"
             . "PROYECCIÓN ESTADÍSTICA:\n{$proyStr}\n"
             . "HISTORIAL (últimos 12 meses):\n{$filasMes}";
 
@@ -192,11 +195,18 @@ class IaAnalysisService
         $r3      = $this->llamarMiddleware($prompt3, $convId, false);
         $planProd = $this->extraerJSON($r3);
 
-        // ── Redondear a múltiplos de 5 ────────────────────────────────────────
+        // ── Redondear a múltiplos de 5 + techo anti-alucinación ──────────────
+        // El AI puede sobreestimar con factores de ajuste muy agresivos.
+        // Cap: 1.3× el pico histórico o 3× el prom12m (el mayor de los dos).
+        $maxAllowed = max($metricas['max'] * 1.3, $metricas['prom12m'] * 3, 5);
+
         foreach ($planProd['meses'] ?? [] as &$mes) {
-            $mes['kg_proyectados'] = $this->round5($mes['kg_proyectados'] ?? 0);
+            $kg = min($mes['kg_proyectados'] ?? 0, $maxAllowed);
+            $mes['kg_proyectados'] = $this->round5($kg);
             $mes['kg_en_transito'] = $this->round5($mes['kg_en_transito'] ?? 0);
-            $mes['kg_a_comprar']   = $this->round5($mes['kg_a_comprar']   ?? 0);
+            // kg_a_comprar no puede superar lo proyectado
+            $kgAComprar = min($mes['kg_a_comprar'] ?? 0, $mes['kg_proyectados']);
+            $mes['kg_a_comprar']   = $this->round5(max(0, $kgAComprar));
         }
         unset($mes);
 
