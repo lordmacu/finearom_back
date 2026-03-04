@@ -14,7 +14,7 @@ class IaForecastClientProcessingUpdated implements ShouldBroadcastNow
 
     public function __construct(
         public int $clientId,
-        public array $payload
+        public array $payload = []
     ) {
     }
 
@@ -30,6 +30,9 @@ class IaForecastClientProcessingUpdated implements ShouldBroadcastNow
 
     public function broadcastWith(): array
     {
-        return $this->payload;
+        return array_merge([
+            'client_id' => $this->clientId,
+            'refresh' => true,
+        ], $this->payload);
     }
 }

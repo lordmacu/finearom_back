@@ -302,6 +302,14 @@ class IaForecastBatchProcessingService
     public function broadcastUpdate(int $runId): void
     {
         $run = IaForecastBatchRun::query()->find($runId);
-        event(new IaForecastBatchProcessingUpdated($this->buildPayload($run)));
+        if (!$run) {
+            return;
+        }
+
+        event(new IaForecastBatchProcessingUpdated([
+            'run_id' => (int) $run->id,
+            'status' => $run->status,
+            'mode' => $run->mode,
+        ]));
     }
 }

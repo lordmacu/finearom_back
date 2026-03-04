@@ -11,7 +11,7 @@ class IaForecastBatchProcessingUpdated implements ShouldBroadcastNow
 {
     use Dispatchable, SerializesModels;
 
-    public function __construct(public array $payload)
+    public function __construct(public array $payload = [])
     {
     }
 
@@ -27,6 +27,8 @@ class IaForecastBatchProcessingUpdated implements ShouldBroadcastNow
 
     public function broadcastWith(): array
     {
-        return $this->payload;
+        return array_merge([
+            'refresh' => true,
+        ], $this->payload);
     }
 }

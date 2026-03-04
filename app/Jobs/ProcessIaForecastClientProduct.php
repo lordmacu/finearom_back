@@ -183,9 +183,15 @@ class ProcessIaForecastClientProduct implements ShouldQueue
             return;
         }
 
+        $run = IaForecastClientRun::query()->find($this->runId);
+
         event(new IaForecastClientProcessingUpdated(
             $clientId,
-            $processingService->buildPayload($clientId)
+            [
+                'run_id' => $run?->id,
+                'status' => $run?->status,
+                'item_id' => $this->itemId,
+            ]
         ));
     }
 }

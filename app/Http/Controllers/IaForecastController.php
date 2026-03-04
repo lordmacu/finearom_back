@@ -230,7 +230,10 @@ class IaForecastController extends Controller
 
         event(new IaForecastClientProcessingUpdated(
             $clientId,
-            $processingService->buildPayload($clientId, $run->fresh())
+            [
+                'run_id' => (int) $run->id,
+                'status' => $run->status,
+            ]
         ));
 
         return response()->json([
