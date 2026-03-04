@@ -109,7 +109,11 @@ class IaForecastBatchProcessingService
             ->first();
 
         if ($activeRun) {
-            return $this->buildPayload($activeRun);
+            if ($force) {
+                $this->cancelActiveRuns('Reinicio global forzado manualmente.');
+            } else {
+                return $this->buildPayload($activeRun);
+            }
         }
 
         $activeClientRun = IaForecastClientRun::query()
@@ -118,7 +122,11 @@ class IaForecastBatchProcessingService
             ->first();
 
         if ($activeClientRun) {
-            throw new \RuntimeException('Ya existe un procesamiento individual en curso. Espera a que termine antes de lanzar el lote global.');
+            if ($force) {
+                $this->cancelActiveRuns('Reinicio global forzado manualmente.');
+            } else {
+                throw new \RuntimeException('Ya existe un procesamiento individual en curso. Espera a que termine antes de lanzar el lote global.');
+            }
         }
 
         $clients = $this->getClientsToProcess($force);
@@ -150,6 +158,93 @@ class IaForecastBatchProcessingService
         $this->dispatchNextClient($run->fresh());
 
         return $this->buildPayload($run->fresh());
+    }
+
+    private function cancelActiveRuns(string $reason): void
+    {
+        $timestamp = now();
+
+        $activeBatchRuns = IaForecastBatchRun::query()
+            ->whereIn('status', [IaForecastBatchRun::STATUS_QUEUED, IaForecastBatchRun::STATUS_PROCESSING])
+            ->get();
+
+        foreach ($activeBatchRuns as $batchRun) {
+            IaForecastBatchRunItem::query()
+                ->where('batch_run_id', $batchRun->id)
+                ->whereIn('status', [IaForecastBatchRunItem::STATUS_PENDING, IaForecastBatchRunItem::STATUS_PROCESSING])
+                ->update([
+                    'status' => IaForecastBatchRunItem::STATUS_ERROR,
+                    'finished_at' => $timestamp,
+                    'error_message' => $reason,
+                    'updated_at' => $timestamp,
+                ]);
+
+            $completed = IaForecastBatchRunItem::query()
+                ->where('batch_run_id', $batchRun->id)
+                ->where('status', IaForecastBatchRunItem::STATUS_COMPLETED)
+                ->count();
+
+            $errors = IaForecastBatchRunItem::query()
+                ->where('batch_run_id', $batchRun->id)
+                ->where('status', IaForecastBatchRunItem::STATUS_ERROR)
+                ->count();
+
+            $batchRun->update([
+                'status' => $completed > 0 ? IaForecastBatchRun::STATUS_COMPLETED_WITH_ERRORS : IaForecastBatchRun::STATUS_FAILED,
+                'procesados' => $completed + $errors,
+                'completados' => $completed,
+                'errores' => $errors,
+                'pendientes' => 0,
+                'finished_at' => $timestamp,
+                'error_message' => $reason,
+            ]);
+
+            $this->broadcastUpdate($batchRun->id);
+        }
+
+        $activeClientRuns = IaForecastClientRun::query()
+            ->whereIn('status', [IaForecastClientRun::STATUS_QUEUED, IaForecastClientRun::STATUS_PROCESSING])
+            ->get();
+
+        foreach ($activeClientRuns as $clientRun) {
+            IaForecastClientRunItem::query()
+                ->where('run_id', $clientRun->id)
+                ->whereIn('status', [IaForecastClientRunItem::STATUS_PENDING, IaForecastClientRunItem::STATUS_PROCESSING])
+                ->update([
+                    'status' => IaForecastClientRunItem::STATUS_ERROR,
+                    'finished_at' => $timestamp,
+                    'error_message' => $reason,
+                    'updated_at' => $timestamp,
+                ]);
+
+            $completed = IaForecastClientRunItem::query()
+                ->where('run_id', $clientRun->id)
+                ->where('status', IaForecastClientRunItem::STATUS_COMPLETED)
+                ->count();
+
+            $errors = IaForecastClientRunItem::query()
+                ->where('run_id', $clientRun->id)
+                ->where('status', IaForecastClientRunItem::STATUS_ERROR)
+                ->count();
+
+            $clientRun->update([
+                'status' => $completed > 0 ? IaForecastClientRun::STATUS_COMPLETED_WITH_ERRORS : IaForecastClientRun::STATUS_FAILED,
+                'procesados' => $completed + $errors,
+                'completados' => $completed,
+                'errores' => $errors,
+                'pendientes' => 0,
+                'finished_at' => $timestamp,
+                'error_message' => $reason,
+            ]);
+
+            event(new \App\Events\IaForecastClientProcessingUpdated(
+                (int) $clientRun->cliente_id,
+                [
+                    'run_id' => (int) $clientRun->id,
+                    'status' => $clientRun->status,
+                ]
+            ));
+        }
     }
 
     public function dispatchNextClient(IaForecastBatchRun $run): void
