@@ -31,4 +31,9 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'ia_middleware' => [
+        'url' => env('IA_MIDDLEWARE_URL', 'http://localhost:54321'),
+        'key' => env('IA_MIDDLEWARE_KEY', 'finearom-ai-2025'),
+    ],
+
 ];
