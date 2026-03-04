@@ -80,7 +80,7 @@ class ClientController extends Controller
             }
             $query->orderBy($sortBy, $sortDir);
 
-            $perPage = max(1, min(200, (int) $request->query('per_page', 15)));
+            $perPage = max(1, min(1000, (int) $request->query('per_page', 15)));
             $paginate = filter_var($request->query('paginate', true), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
 
             if ($paginate === false) {
