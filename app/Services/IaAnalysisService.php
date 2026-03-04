@@ -221,7 +221,7 @@ class IaAnalysisService
     private function getProducto(int $clientId, int $productoId): ?object
     {
         return DB::selectOne("
-            SELECT p.id, p.code AS codigo, p.description AS producto
+            SELECT p.id, p.code AS codigo, p.product_name AS producto
             FROM products p
             WHERE p.id = ?
         ", [$productoId]);

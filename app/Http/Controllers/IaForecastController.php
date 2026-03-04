@@ -40,7 +40,7 @@ class IaForecastController extends Controller
             SELECT
                 h.producto_id,
                 p.code AS codigo,
-                p.description AS producto,
+                p.product_name AS producto,
                 COUNT(h.mes) AS meses_historico,
                 SUM(h.kg_real) AS kg_total,
                 CASE WHEN ia.producto_id IS NOT NULL THEN 1 ELSE 0 END AS tiene_forecast,
@@ -53,7 +53,7 @@ class IaForecastController extends Controller
                 ON ia.cliente_id = h.cliente_id
                AND ia.producto_id = h.producto_id
             WHERE h.cliente_id = ?
-            GROUP BY h.producto_id, p.code, p.description, ia.producto_id, ia.escenario, ia.tendencia, ia.analizado_en
+            GROUP BY h.producto_id, p.code, p.product_name, ia.producto_id, ia.escenario, ia.tendencia, ia.analizado_en
             ORDER BY kg_total DESC
         ", [$clientId]);
 
@@ -83,7 +83,7 @@ class IaForecastController extends Controller
         }
 
         $productoInfo = DB::selectOne("
-            SELECT h.producto_id, p.code AS codigo, p.description AS producto,
+            SELECT h.producto_id, p.code AS codigo, p.product_name AS producto,
                    c.id AS cliente_id, c.client_name, c.nit
             FROM ia_historial_mensual h
             JOIN products p ON p.id = h.producto_id
