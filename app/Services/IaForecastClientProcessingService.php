@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\IaForecastClientRun;
 use App\Models\IaForecastClientRunItem;
+use App\Jobs\ProcessIaForecastClientProduct;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -87,5 +88,60 @@ class IaForecastClientProcessingService
             GROUP BY h.producto_id, p.code, p.product_name, ia.producto_id, ia.analizado_en
             ORDER BY kg_total DESC, p.product_name ASC
         ", [$clientId]);
+    }
+
+    public function getClientProductsToProcess(int $clientId, bool $force = true): array
+    {
+        $products = collect($this->getClientProductsForProcessing($clientId));
+
+        if ($force) {
+            return $products->values()->all();
+        }
+
+        return $products
+            ->filter(fn($product) => !(bool) $product->tiene_forecast)
+            ->values()
+            ->all();
+    }
+
+    public function createRun(int $clientId, array $products, ?int $createdBy = null, ?int $batchRunId = null): IaForecastClientRun
+    {
+        $run = IaForecastClientRun::query()->create([
+            'cliente_id' => $clientId,
+            'batch_run_id' => $batchRunId,
+            'status' => IaForecastClientRun::STATUS_QUEUED,
+            'total_productos' => count($products),
+            'pendientes' => count($products),
+            'creado_por' => $createdBy,
+        ]);
+
+        $items = [];
+        foreach ($products as $index => $product) {
+            $items[] = [
+                'run_id' => $run->id,
+                'cliente_id' => $clientId,
+                'producto_id' => $product->producto_id,
+                'sort_order' => $index + 1,
+                'codigo' => $product->codigo,
+                'producto' => $product->producto,
+                'kg_total' => (float) $product->kg_total,
+                'status' => IaForecastClientRunItem::STATUS_PENDING,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+        }
+
+        IaForecastClientRunItem::query()->insert($items);
+
+        $firstItem = IaForecastClientRunItem::query()
+            ->where('run_id', $run->id)
+            ->orderBy('sort_order')
+            ->first();
+
+        if ($firstItem) {
+            ProcessIaForecastClientProduct::dispatch($run->id, $firstItem->id)->onQueue('ia-forecast');
+        }
+
+        return $run->fresh();
     }
 }

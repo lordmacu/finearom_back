@@ -6,6 +6,7 @@ use App\Events\IaForecastClientProcessingUpdated;
 use App\Models\IaForecastClientRun;
 use App\Models\IaForecastClientRunItem;
 use App\Services\IaAnalysisService;
+use App\Services\IaForecastBatchProcessingService;
 use App\Services\IaForecastClientProcessingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -29,7 +30,11 @@ class ProcessIaForecastClientProduct implements ShouldQueue
         $this->onQueue('ia-forecast');
     }
 
-    public function handle(IaAnalysisService $analysisService, IaForecastClientProcessingService $processingService): void
+    public function handle(
+        IaAnalysisService $analysisService,
+        IaForecastClientProcessingService $processingService,
+        IaForecastBatchProcessingService $batchProcessingService
+    ): void
     {
         $item = null;
 
@@ -106,7 +111,11 @@ class ProcessIaForecastClientProduct implements ShouldQueue
         }
 
         $this->refreshRunState();
-        $this->broadcastUpdate($processingService, (int) ($item?->cliente_id ?? IaForecastClientRun::query()->whereKey($this->runId)->value('cliente_id')));
+        $run = IaForecastClientRun::query()->find($this->runId);
+        $this->broadcastUpdate($processingService, (int) ($item?->cliente_id ?? $run?->cliente_id));
+        if ($run && !$run->isActive()) {
+            $batchProcessingService->onClientRunFinished($run);
+        }
         $this->dispatchNextItem();
     }
 

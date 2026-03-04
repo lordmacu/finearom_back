@@ -20,3 +20,7 @@ Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
 Broadcast::channel('ia-forecast.client.{clientId}', function ($user, $clientId) {
     return !is_null($user);
 });
+
+Broadcast::channel('ia-forecast.batch', function ($user) {
+    return !is_null($user);
+});

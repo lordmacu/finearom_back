@@ -219,6 +219,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // IA Forecast
     Route::prefix('ia/forecast')->group(function () {
+        Route::get('batch-processing', [IaForecastController::class, 'batchProcessing']);
+        Route::post('analyze-all', [IaForecastController::class, 'analyzeAll']);
+        Route::post('force-restart-all', [IaForecastController::class, 'forceRestartAll']);
         Route::get('clients', [IaForecastController::class, 'clients']);
         Route::get('clients/{clientId}/products', [IaForecastController::class, 'products']);
         Route::get('clients/{clientId}/processing', [IaForecastController::class, 'processing']);

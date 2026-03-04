@@ -3,9 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Events\IaForecastClientProcessingUpdated;
-use App\Jobs\ProcessIaForecastClientProduct;
+use App\Services\IaForecastBatchProcessingService;
 use App\Models\IaForecastClientRun;
-use App\Models\IaForecastClientRunItem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\IaAnalysisService;
@@ -74,6 +73,14 @@ class IaForecastController extends Controller
         return response()->json([
             'success' => true,
             'data' => $processingService->buildPayload($clientId),
+        ]);
+    }
+
+    public function batchProcessing(IaForecastBatchProcessingService $batchProcessingService)
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $batchProcessingService->buildPayload(),
         ]);
     }
 
@@ -211,7 +218,7 @@ class IaForecastController extends Controller
             ]);
         }
 
-        $products = $processingService->getClientProductsForProcessing($clientId);
+        $products = $processingService->getClientProductsToProcess($clientId, true);
         if (empty($products)) {
             return response()->json([
                 'success' => false,
@@ -219,40 +226,7 @@ class IaForecastController extends Controller
             ], 404);
         }
 
-        $run = IaForecastClientRun::query()->create([
-            'cliente_id' => $clientId,
-            'status' => IaForecastClientRun::STATUS_QUEUED,
-            'total_productos' => count($products),
-            'pendientes' => count($products),
-            'creado_por' => $request->user()?->id,
-        ]);
-
-        $items = [];
-        foreach ($products as $index => $product) {
-            $items[] = [
-                'run_id' => $run->id,
-                'cliente_id' => $clientId,
-                'producto_id' => $product->producto_id,
-                'sort_order' => $index + 1,
-                'codigo' => $product->codigo,
-                'producto' => $product->producto,
-                'kg_total' => (float) $product->kg_total,
-                'status' => IaForecastClientRunItem::STATUS_PENDING,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
-        }
-
-        IaForecastClientRunItem::query()->insert($items);
-
-        $firstItem = IaForecastClientRunItem::query()
-            ->where('run_id', $run->id)
-            ->orderBy('sort_order')
-            ->first();
-
-        if ($firstItem) {
-            ProcessIaForecastClientProduct::dispatch($run->id, $firstItem->id)->onQueue('ia-forecast');
-        }
+        $run = $processingService->createRun($clientId, $products, $request->user()?->id);
 
         event(new IaForecastClientProcessingUpdated(
             $clientId,
@@ -264,5 +238,41 @@ class IaForecastController extends Controller
             'message' => 'Procesamiento IA por cliente iniciado.',
             'data' => $processingService->buildPayload($clientId, $run->fresh()),
         ]);
+    }
+
+    public function analyzeAll(Request $request, IaForecastBatchProcessingService $batchProcessingService)
+    {
+        try {
+            $payload = $batchProcessingService->startBatch(false, $request->user()?->id);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Procesamiento global iniciado.',
+                'data' => $payload,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function forceRestartAll(Request $request, IaForecastBatchProcessingService $batchProcessingService)
+    {
+        try {
+            $payload = $batchProcessingService->startBatch(true, $request->user()?->id);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Reinicio global forzado iniciado.',
+                'data' => $payload,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
     }
 }
