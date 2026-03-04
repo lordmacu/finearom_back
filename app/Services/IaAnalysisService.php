@@ -626,7 +626,7 @@ class IaAnalysisService
         $promActiva = max(0.0, (float) ($patrones['volumen_activo_promedio_kg'] ?? 0));
         $minActiva = max(0.0, (float) ($patrones['volumen_activo_min_kg'] ?? 0));
 
-        foreach ($meses as &$mes) {
+        foreach ($meses as $index => &$mes) {
             $esperado = max(0, (float) ($mes['kg_proyectados'] ?? 0));
             $patronMes = $this->buscarPatronMes($patrones, $mes['mes'] ?? '');
             $referencia = max(0.0, (float) ($patronMes['kg_referencia'] ?? 0));
@@ -634,7 +634,7 @@ class IaAnalysisService
             $kgSiCompra = match ($patronMes['tipo'] ?? null) {
                 'MES_PICO' => max($referencia, $medianaActiva > 0 ? $medianaActiva : $promActiva, $esperado),
                 'MES_BAJO' => max($referencia, $medianaActiva * 0.9, $esperado),
-                'MES_SIN_COMPRA' => max($medianaActiva, $promActiva, $esperado),
+                'MES_SIN_COMPRA' => $this->resolverBaseMesSinCompra($meses, $index, $patronMes, $esperado, $medianaActiva, $promActiva, $minActiva),
                 default => max($referencia > 0 ? (($referencia + max($medianaActiva, $promActiva)) / 2) : max($medianaActiva, $promActiva), $esperado),
             };
 
@@ -655,6 +655,47 @@ class IaAnalysisService
         unset($mes);
 
         return $meses;
+    }
+
+    private function resolverBaseMesSinCompra(
+        array $meses,
+        int $index,
+        ?array $patronMes,
+        float $esperado,
+        float $medianaActiva,
+        float $promActiva,
+        float $minActiva
+    ): float {
+        $baseTipica = max($medianaActiva > 0 ? $medianaActiva : $promActiva, $minActiva, $esperado, 0);
+        $kgPrevioHist = max(0.0, (float) ($patronMes['kg_previo'] ?? 0));
+        $kgSiguienteHist = max(0.0, (float) ($patronMes['kg_siguiente'] ?? 0));
+        $vecindadHistorica = array_values(array_filter([$kgPrevioHist, $kgSiguienteHist], fn($kg) => $kg > 0));
+
+        $esperadoPrevio = $index > 0 ? max(0.0, (float) ($meses[$index - 1]['kg_proyectados'] ?? 0)) : 0.0;
+        $esperadoSiguiente = $index < count($meses) - 1 ? max(0.0, (float) ($meses[$index + 1]['kg_proyectados'] ?? 0)) : 0.0;
+        $vecindadEsperada = max($esperadoPrevio, $esperadoSiguiente);
+
+        if (count($vecindadHistorica) >= 2) {
+            $promVecindad = array_sum($vecindadHistorica) / count($vecindadHistorica);
+            $kgSiCompra = max($baseTipica, $promVecindad * 0.75, $esperado);
+        } elseif (count($vecindadHistorica) === 1) {
+            $kgSiCompra = max($baseTipica * 0.95, $vecindadHistorica[0] * 0.95, $esperado);
+        } else {
+            $kgSiCompra = max($baseTipica * 0.90, $minActiva, $esperado);
+        }
+
+        if ($vecindadEsperada > 0) {
+            $pesoVecindad = $vecindadEsperada >= $baseTipica ? 0.18 : 0.10;
+            $kgSiCompra = max($kgSiCompra, ($kgSiCompra * (1 - $pesoVecindad)) + ($vecindadEsperada * $pesoVecindad));
+        }
+
+        if (($patronMes['fuerza'] ?? null) === 'BAJA' && empty($vecindadHistorica)) {
+            $kgSiCompra *= 0.95;
+        }
+
+        $sueloBloque = $minActiva > 0 ? $minActiva * 0.90 : 0;
+
+        return max($kgSiCompra, $esperado, $sueloBloque);
     }
 
     private function distribuirCompraYTransito(array $proyecciones, float $enTransito, int $diasRestantes): array
@@ -994,7 +1035,7 @@ class IaAnalysisService
             return 'Sin oportunidad clara de compra en este mes.';
         }
 
-        return "Esperado {$esperado} kg = ~{$prob}% de probabilidad de compra y ~{$siCompra} kg si la compra ocurre.";
+        return "Se esperan {$esperado} kg este mes. La probabilidad de que entre pedido es de ~{$prob}% y, si ocurre, el tamaño probable del pedido es de ~{$siCompra} kg.";
     }
 
     private function motivoCompraBase(?array $patronMes, int $kgSiCompra): string
@@ -1008,10 +1049,12 @@ class IaAnalysisService
         }
 
         return match ($patronMes['tipo'] ?? null) {
-            'MES_PICO' => "{$patronMes['label']} toma como referencia un mes históricamente alto; si compra, el bloque probable ronda {$kgSiCompra} kg.",
-            'MES_SIN_COMPRA' => "{$patronMes['label']} no tuvo compra el año pasado; si reaparece demanda, el bloque probable seguiría la escala típica del producto (~{$kgSiCompra} kg).",
-            'MES_BAJO' => "{$patronMes['label']} fue bajo frente al promedio activo, pero si compra el producto suele moverse en bloques cercanos a {$kgSiCompra} kg.",
-            default => "{$patronMes['label']} se proyecta con una compra probable cercana a {$kgSiCompra} kg si el pedido se materializa.",
+            'MES_PICO' => "{$patronMes['label']} toma como referencia un mes históricamente alto; si entra pedido, su tamaño probable ronda {$kgSiCompra} kg.",
+            'MES_SIN_COMPRA' => max(0, (float) ($patronMes['kg_previo'] ?? 0), (float) ($patronMes['kg_siguiente'] ?? 0)) > 0
+                ? "{$patronMes['label']} no tuvo compra el año pasado, pero su vecindad histórica sí mostró movimiento; si reaparece demanda, el pedido probable ronda {$kgSiCompra} kg."
+                : "{$patronMes['label']} no tuvo compra el año pasado y tampoco tiene una vecindad fuerte; si reaparece demanda, el pedido probable seguiría por debajo del tamaño pico del producto (~{$kgSiCompra} kg).",
+            'MES_BAJO' => "{$patronMes['label']} fue un mes bajo frente al rango activo, pero si entra pedido el producto suele moverse en bloques cercanos a {$kgSiCompra} kg.",
+            default => "{$patronMes['label']} se proyecta con un pedido probable cercano a {$kgSiCompra} kg si el mes se activa.",
         };
     }
 
