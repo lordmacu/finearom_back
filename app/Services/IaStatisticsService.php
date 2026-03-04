@@ -121,6 +121,70 @@ class IaStatisticsService
         return $mapa;
     }
 
+    public static function analizarPatrones(array $historial, array $mesesObjetivo = []): array
+    {
+        $serie      = self::expandirHistorial($historial);
+        $meses12    = self::mesesVentana();
+        $historial12 = array_map(fn($mes, $kg) => ['mes' => $mes, 'kg' => round((float) $kg, 1)], $meses12, $serie);
+        $activos    = array_values(array_filter($historial12, fn($row) => $row['kg'] > 0));
+        $sinCompra  = array_values(array_filter($historial12, fn($row) => $row['kg'] <= 0));
+
+        if (empty($activos)) {
+            return [
+                'resumen' => 'Sin compras en los últimos 12 meses.',
+                'picos' => [],
+                'valles' => [],
+                'meses_sin_compra' => array_map(fn($row) => $row['mes'], $sinCompra),
+                'concentracion_top2_pct' => 0,
+                'racha_sin_compra' => null,
+                'meses_objetivo' => [],
+            ];
+        }
+
+        $promActivos = self::prom(array_column($activos, 'kg'));
+        $totalActivo = array_sum(array_column($activos, 'kg'));
+        $ordenDesc   = $activos;
+        usort($ordenDesc, fn($a, $b) => $b['kg'] <=> $a['kg']);
+        $ordenAsc = $activos;
+        usort($ordenAsc, fn($a, $b) => $a['kg'] <=> $b['kg']);
+
+        $umbralPico  = $promActivos * 1.25;
+        $umbralValle = $promActivos * 0.85;
+
+        $picos = array_values(array_filter($ordenDesc, fn($row) => $row['kg'] >= $umbralPico));
+        if (empty($picos)) {
+            $picos = array_slice($ordenDesc, 0, min(2, count($ordenDesc)));
+        }
+        $picos = array_map(fn($row) => self::enriquecerMesPatron($row, $promActivos), array_slice($picos, 0, 3));
+
+        $valles = array_values(array_filter($ordenAsc, fn($row) => $row['kg'] <= $umbralValle));
+        if (empty($valles)) {
+            $valles = array_slice($ordenAsc, 0, min(2, count($ordenAsc)));
+        }
+        $valles = array_map(fn($row) => self::enriquecerMesPatron($row, $promActivos), array_slice($valles, 0, 3));
+
+        $concentracionTop2 = $totalActivo > 0
+            ? round((array_sum(array_column(array_slice($ordenDesc, 0, 2), 'kg')) / $totalActivo) * 100)
+            : 0;
+
+        $rachaSinCompra = self::calcularRacha($historial12, fn($row) => $row['kg'] <= 0);
+        $objetivos = array_map(
+            fn($mes) => self::analizarMesObjetivo($mes, $historial12, $promActivos),
+            $mesesObjetivo
+        );
+
+        return [
+            'resumen' => self::construirResumenPatrones($activos, $sinCompra, $picos, $valles, $concentracionTop2, $rachaSinCompra),
+            'picos' => $picos,
+            'valles' => $valles,
+            'meses_sin_compra' => array_map(fn($row) => $row['mes'], $sinCompra),
+            'meses_activos' => array_map(fn($row) => $row['mes'], $activos),
+            'concentracion_top2_pct' => $concentracionTop2,
+            'racha_sin_compra' => $rachaSinCompra,
+            'meses_objetivo' => $objetivos,
+        ];
+    }
+
     // ── Historial helpers ─────────────────────────────────────────────────────
 
     /**
@@ -142,6 +206,17 @@ class IaStatisticsService
         }
 
         return array_map(fn($m) => $mapa[$m] ?? 0.0, $meses12);
+    }
+
+    private static function mesesVentana(): array
+    {
+        $meses12 = [];
+        for ($i = 0; $i < 12; $i++) {
+            $ts = mktime(0, 0, 0, (int) date('n') - 11 + $i, 1, (int) date('Y'));
+            $meses12[] = date('Y-m', $ts);
+        }
+
+        return $meses12;
     }
 
     /** Mes calendario (1-12) del slot i (slot 0 = hace 11 meses) */
@@ -464,6 +539,143 @@ class IaStatisticsService
     private static function prom(array $arr): float
     {
         return count($arr) ? array_sum($arr) / count($arr) : 0.0;
+    }
+
+    private static function enriquecerMesPatron(array $row, float $promActivos): array
+    {
+        return [
+            'mes' => $row['mes'],
+            'kg' => round((float) $row['kg'], 1),
+            'label' => self::labelMes($row['mes']),
+            'ratio_vs_promedio' => $promActivos > 0 ? round($row['kg'] / $promActivos, 2) : null,
+        ];
+    }
+
+    private static function analizarMesObjetivo(string $mes, array $historial12, float $promActivos): array
+    {
+        $historialMap = [];
+        foreach ($historial12 as $row) {
+            $historialMap[$row['mes']] = $row['kg'];
+        }
+
+        [$year, $month] = array_map('intval', explode('-', $mes));
+        $mesReferencia = sprintf('%04d-%02d', $year - 1, $month);
+        $idx = array_search($mesReferencia, array_column($historial12, 'mes'), true);
+        $kgReferencia = (float) ($historialMap[$mesReferencia] ?? 0);
+        $kgPrevio = $idx !== false && $idx > 0 ? (float) $historial12[$idx - 1]['kg'] : 0.0;
+        $kgSiguiente = $idx !== false && $idx < count($historial12) - 1 ? (float) $historial12[$idx + 1]['kg'] : 0.0;
+        $vecindadActiva = $kgPrevio > 0 || $kgSiguiente > 0;
+
+        if ($kgReferencia <= 0) {
+            $tipo = 'MES_SIN_COMPRA';
+            $fuerza = $vecindadActiva ? 'BAJA' : 'BAJA';
+            $mensaje = "El mismo mes del año pasado no tuvo compras; cualquier demanda proyectada aquí debe leerse con cautela.";
+        } elseif ($promActivos > 0 && $kgReferencia >= $promActivos * 1.25) {
+            $tipo = 'MES_PICO';
+            $fuerza = $vecindadActiva ? 'MEDIA' : 'BAJA';
+            $mensaje = $vecindadActiva
+                ? "El mismo mes del año pasado fue alto y además estuvo acompañado por actividad cercana."
+                : "El mismo mes del año pasado fue alto, pero es una referencia aislada y no una estacionalidad confirmada.";
+        } elseif ($promActivos > 0 && $kgReferencia <= $promActivos * 0.85) {
+            $tipo = 'MES_BAJO';
+            $fuerza = 'MEDIA';
+            $mensaje = "El mismo mes del año pasado estuvo por debajo del promedio de meses activos.";
+        } else {
+            $tipo = 'MES_MEDIO';
+            $fuerza = 'MEDIA';
+            $mensaje = "El mismo mes del año pasado estuvo cerca del promedio histórico de meses activos.";
+        }
+
+        return [
+            'mes' => $mes,
+            'label' => self::labelMes($mes),
+            'mes_referencia' => $mesReferencia,
+            'label_referencia' => self::labelMes($mesReferencia),
+            'kg_referencia' => round($kgReferencia, 1),
+            'kg_previo' => round($kgPrevio, 1),
+            'kg_siguiente' => round($kgSiguiente, 1),
+            'tipo' => $tipo,
+            'fuerza' => $fuerza,
+            'mensaje' => $mensaje,
+        ];
+    }
+
+    private static function construirResumenPatrones(
+        array $activos,
+        array $sinCompra,
+        array $picos,
+        array $valles,
+        int $concentracionTop2,
+        ?array $rachaSinCompra
+    ): string {
+        $partes = [];
+        $partes[] = count($activos) . ' meses con compra y ' . count($sinCompra) . ' meses sin compra en los últimos 12 meses.';
+
+        if (!empty($picos)) {
+            $pico = $picos[0];
+            $partes[] = "El mayor pico fue {$pico['label']} con {$pico['kg']} kg.";
+        }
+
+        if (!empty($valles)) {
+            $valle = $valles[0];
+            $partes[] = "El valle activo más bajo fue {$valle['label']} con {$valle['kg']} kg.";
+        }
+
+        if ($concentracionTop2 > 0) {
+            $partes[] = "Los dos meses más fuertes concentran {$concentracionTop2}% del volumen comprado.";
+        }
+
+        if ($rachaSinCompra && ($rachaSinCompra['meses'] ?? 0) >= 2) {
+            $partes[] = "La racha más larga sin compra fue de {$rachaSinCompra['meses']} meses entre {$rachaSinCompra['inicio_label']} y {$rachaSinCompra['fin_label']}.";
+        }
+
+        return implode(' ', $partes);
+    }
+
+    private static function calcularRacha(array $historial12, callable $fn): ?array
+    {
+        $mejor = null;
+        $actual = null;
+
+        foreach ($historial12 as $idx => $row) {
+            if ($fn($row)) {
+                if ($actual === null) {
+                    $actual = ['inicio' => $row['mes'], 'inicio_idx' => $idx, 'meses' => 0];
+                }
+                $actual['fin'] = $row['mes'];
+                $actual['fin_idx'] = $idx;
+                $actual['meses']++;
+            } else {
+                if ($actual !== null && ($mejor === null || $actual['meses'] > $mejor['meses'])) {
+                    $mejor = $actual;
+                }
+                $actual = null;
+            }
+        }
+
+        if ($actual !== null && ($mejor === null || $actual['meses'] > $mejor['meses'])) {
+            $mejor = $actual;
+        }
+
+        if ($mejor === null) {
+            return null;
+        }
+
+        return [
+            'inicio' => $mejor['inicio'],
+            'fin' => $mejor['fin'],
+            'inicio_label' => self::labelMes($mejor['inicio']),
+            'fin_label' => self::labelMes($mejor['fin']),
+            'meses' => $mejor['meses'],
+        ];
+    }
+
+    private static function labelMes(string $mes): string
+    {
+        [$year, $month] = explode('-', $mes);
+        $labels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+        return ($labels[((int) $month) - 1] ?? $month) . ' ' . substr($year, 2);
     }
 
     private static function linearRegression(array $valores): array

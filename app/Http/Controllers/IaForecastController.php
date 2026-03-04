@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\IaAnalysisService;
+use App\Services\IaStatisticsService;
 
 class IaForecastController extends Controller
 {
@@ -120,6 +121,21 @@ class IaForecastController extends Controller
             $alertas  = json_decode($plan->alertas, true) ?? [];
         }
 
+        $historialData = array_map(fn($h) => [
+            'mes'     => $h->mes,
+            'kg_real' => (float) $h->kg_real,
+        ], $historial);
+
+        $historialParaPatrones = array_map(fn($h) => [
+            'mes' => $h['mes'],
+            'kg'  => $h['kg_real'],
+        ], $historialData);
+
+        $insights = IaStatisticsService::analizarPatrones(
+            $historialParaPatrones,
+            array_map(fn($row) => $row['mes'] ?? null, array_filter($forecast, fn($row) => !empty($row['mes'])))
+        );
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -135,10 +151,8 @@ class IaForecastController extends Controller
                 ],
                 'tiene_forecast' => $plan !== null,
                 'metricas'       => $metricas,
-                'historial'      => array_map(fn($h) => [
-                    'mes'     => $h->mes,
-                    'kg_real' => (float) $h->kg_real,
-                ], $historial),
+                'historial'      => $historialData,
+                'insights'       => $insights,
                 'forecast' => $forecast,
                 'alertas'  => $alertas,
             ],

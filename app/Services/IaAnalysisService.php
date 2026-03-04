@@ -55,6 +55,7 @@ class IaAnalysisService
         // ── FASE 2: Estadísticas ──────────────────────────────────────────────
         $mesesVida = $newWin ? (int) $newWin->meses_vida : null;
         $metricas  = IaStatisticsService::calcularMetricas($historial, $mesesVida);
+        $patrones  = IaStatisticsService::analizarPatrones($historial, $mesesForecast);
 
         if (!$metricas) {
             throw new \RuntimeException("No se pudieron calcular métricas para el producto {$productoId}");
@@ -81,11 +82,11 @@ class IaAnalysisService
 
         $diasRestantes = now()->daysInMonth - now()->day;
 
-        $CONTEXTO_SISTEMA = "Eres experto en planificación de compras de materias primas para Finearom, empresa de fragancias colombiana (B2B).\n"
+        $CONTEXTO_SISTEMA = "Eres experto en planificación de compras B2B de materias primas para Finearom.\n"
             . "FECHA HOY: {$hoy} | CLIENTE: " . ($perfil->client_name ?? $clientId) . " | TIMING: {$semanasPico}\n"
-            . "ESTACIONALIDAD NAVIDAD (único prior de industria activo): Oct:1.35x Nov:1.40x Dic:1.10x — resto del año basado en datos históricos del cliente.\n"
-            . "TÉCNICAS: HOLT_WINTERS(≥10m) | SES_SEASONAL(5-9m) | CROSTON_SBA(intermitente) | WMA(nuevo/reactivado)\n"
-            . "REGLA CLAVE: la proyección estadística es la base. Solo puedes ajustarla dentro del rango permitido y nunca inventar demanda fuera del histórico reciente sin evidencia fuerte.";
+            . "ESTACIONALIDAD DE INDUSTRIA ACTIVA: Navidad (Oct 1.35x, Nov 1.40x, Dic 1.10x). Fuera de eso manda el histórico del cliente.\n"
+            . "TÉCNICAS BASE DISPONIBLES: HOLT_WINTERS(≥10m) | SES_SEASONAL(5-9m) | CROSTON_SBA(intermitente) | WMA(nuevo/reactivado).\n"
+            . "REGLA MAESTRA: la estadística produce la base numérica; la IA solo interpreta evidencia y ajusta dentro de límites.";
 
         // ── Contexto del producto ─────────────────────────────────────────────
         $filasMes = collect($historial)
@@ -112,42 +113,38 @@ class IaAnalysisService
             . "PROM: 3m={$metricas['prom3m']}kg | 6m={$metricas['prom6m']}kg | 12m={$metricas['prom12m']}kg\n"
             . "CONSISTENCIA: {$metricas['consistencia']}% ({$metricas['mesesConCompra']}/12 meses) | "
             . "CV: {$metricas['cv']}% | PENDIENTE: {$metricas['pendienteKgMes']}kg/mes\n"
+            . "LECTURA DEL HISTORIAL: " . ($patrones['resumen'] ?? 'sin lectura disponible') . "\n"
+            . "PICOS HISTÓRICOS: " . $this->resumirMesesPatron($patrones['picos'] ?? []) . "\n"
+            . "VALLES ACTIVOS: " . $this->resumirMesesPatron($patrones['valles'] ?? []) . "\n"
+            . "MESES SIN COMPRA: " . $this->resumirMesesApagados($patrones['meses_sin_compra'] ?? []) . "\n"
+            . "EVIDENCIA PRÓXIMOS 4 MESES:\n" . $this->resumirMesesObjetivo($patrones['meses_objetivo'] ?? []) . "\n"
             . "EN TRÁNSITO: {$enTransito} kg" . ($proximaEntrega ? " (entrega: {$proximaEntrega})" : '') . "\n"
             . "RESTRICCIÓN: ningún mes puede superar {$maxAllowed} kg (1.3× pico histórico={$metricas['max']}kg)\n"
             . "RANGO DE AJUSTE IA PERMITIDO: {$minFactor}x a {$maxFactor}x sobre la proyección estadística mensual\n"
             . "PROYECCIÓN ESTADÍSTICA:\n{$proyStr}\n"
             . "HISTORIAL (últimos 12 meses):\n{$filasMes}";
 
+        $payloadAnalisis = $this->buildPromptPayload(
+            $clientId,
+            $producto,
+            $perfil,
+            $metricas,
+            $patrones,
+            $historial,
+            $mesesForecast,
+            $enTransito,
+            $proximaEntrega,
+            $diasRestantes,
+            $minFactor,
+            $maxFactor,
+            $maxAllowed,
+            $semanasPico
+        );
+
         $convId = "ia_{$clientId}_{$producto->codigo}_{$mesActual}";
 
         // ── FASE 3: IA como validador y ajustador acotado ────────────────────
-        $prompt1 = "{$CONTEXTO_SISTEMA}\n\n{$contextoProducto}\n\n"
-            . "TAREA:\n"
-            . "1. Evalúa si la proyección estadística necesita ajuste.\n"
-            . "2. Ajusta SOLO con factores multiplicadores por mes dentro del rango permitido.\n"
-            . "3. No cambies la aritmética de compra: el backend calculará tránsito y compra.\n"
-            . "4. Si un mes base es 0, mantén 0 salvo evidencia histórica muy fuerte; en escenarios DORMIDO, POSIBLE_PERDIDA, PERDIDO o CAMPAÑA_PUNTUAL no reactives meses apagados.\n"
-            . "5. Usa motivos cortos y concretos basados solo en el historial dado.\n\n"
-            . "Responde SOLO con JSON (objeto, no array):\n"
-            . "{\n"
-            . "  \"evaluacion_tendencia\": \"REALISTA|OPTIMISTA|CONSERVADOR\",\n"
-            . "  \"clasificacion\": \"...\",\n"
-            . "  \"tendencia\": \"↑|↓|→\",\n"
-            . "  \"factor_global\": 1.0,\n"
-            . "  \"confianza_global\": \"ALTA|MEDIA|BAJA\",\n"
-            . "  \"hay_estacionalidad\": true,\n"
-            . "  \"nota_estacionalidad\": \"...\",\n"
-            . "  \"justificacion\": \"...\",\n"
-            . "  \"factores_mensuales\": [\n"
-            . "    { \"mes\": \"{$mesesForecast[0]}\", \"factor\": 1.0, \"confianza\": \"ALTA|MEDIA|BAJA\", \"motivo\": \"...\" },\n"
-            . "    { \"mes\": \"{$mesesForecast[1]}\", \"factor\": 1.0, \"confianza\": \"ALTA|MEDIA|BAJA\", \"motivo\": \"...\" },\n"
-            . "    { \"mes\": \"{$mesesForecast[2]}\", \"factor\": 1.0, \"confianza\": \"ALTA|MEDIA|BAJA\", \"motivo\": \"...\" },\n"
-            . "    { \"mes\": \"{$mesesForecast[3]}\", \"factor\": 1.0, \"confianza\": \"ALTA|MEDIA|BAJA\", \"motivo\": \"...\" }\n"
-            . "  ],\n"
-            . "  \"alertas\": [\n"
-            . "    { \"tipo\": \"EN_RIESGO|CRECIENDO|SIN_STOCK|OPORTUNIDAD\", \"mensaje\": \"...\" }\n"
-            . "  ]\n"
-            . "}";
+        $prompt1 = $this->buildAnalysisPrompt($CONTEXTO_SISTEMA, $contextoProducto, $payloadAnalisis, $mesesForecast);
 
         $r1        = $this->llamarMiddleware($prompt1, $convId, true);
         $analisisAi = $this->extraerJSON($r1);
@@ -155,6 +152,7 @@ class IaAnalysisService
         $planProd = $this->construirPlanFinal(
             $analisisAi,
             $metricas,
+            $patrones,
             $mesesForecast,
             $enTransito,
             $diasRestantes,
@@ -164,6 +162,7 @@ class IaAnalysisService
         $planProd = $this->auditarPlanConIa(
             $planProd,
             $metricas,
+            $patrones,
             $mesesForecast,
             $convId,
             $newChat = false
@@ -180,14 +179,192 @@ class IaAnalysisService
             'clasificacion' => $planProd['clasificacion'] ?? null,
             'tendencia'   => $planProd['tendencia'] ?? $tendencia,
             'metricas'    => $metricas,
+            'insights'    => $patrones,
             'forecast'    => $planProd['meses'] ?? [],
             'alertas'     => $planProd['alertas'] ?? [],
         ];
     }
 
+    private function buildPromptPayload(
+        int $clientId,
+        object $producto,
+        ?object $perfil,
+        array $metricas,
+        array $patrones,
+        array $historial,
+        array $mesesForecast,
+        float $enTransito,
+        ?string $proximaEntrega,
+        int $diasRestantes,
+        float $minFactor,
+        float $maxFactor,
+        float $maxAllowed,
+        string $semanasPico
+    ): array {
+        $historialNormalizado = array_map(fn($row) => [
+            'mes' => $row['mes'],
+            'kg' => round((float) $row['kg'], 1),
+        ], $historial);
+
+        $forecastBase = array_map(function ($mes, $kg) use ($patrones) {
+            $patron = $this->buscarPatronMes($patrones, $mes);
+
+            return [
+                'mes' => $mes,
+                'kg_base' => round((float) $kg, 1),
+                'evidencia' => $patron ? [
+                    'tipo' => $patron['tipo'] ?? null,
+                    'fuerza' => $patron['fuerza'] ?? null,
+                    'kg_mismo_mes_anio_anterior' => $patron['kg_referencia'] ?? null,
+                    'mensaje' => $patron['mensaje'] ?? null,
+                ] : null,
+            ];
+        }, $mesesForecast, $metricas['proyeccion4m'] ?? array_fill(0, count($mesesForecast), 0));
+
+        return [
+            'cliente' => [
+                'id' => $clientId,
+                'nombre' => $perfil->client_name ?? null,
+                'frecuencia_compra' => $perfil->purchase_frequency ?? null,
+                'plazo_credito' => $perfil->credit_term ?? null,
+                'timing_pedidos' => $semanasPico,
+            ],
+            'producto' => [
+                'codigo' => $producto->codigo,
+                'nombre' => $producto->producto,
+            ],
+            'metricas' => [
+                'escenario' => $metricas['escenario'] ?? null,
+                'tecnica' => $metricas['tecnica'] ?? null,
+                'tendencia' => $metricas['tendencia'] ?? null,
+                'consistencia_pct' => $metricas['consistencia'] ?? null,
+                'meses_con_compra' => $metricas['mesesConCompra'] ?? null,
+                'cv_pct' => $metricas['cv'] ?? null,
+                'prom_3m_kg' => $metricas['prom3m'] ?? null,
+                'prom_6m_kg' => $metricas['prom6m'] ?? null,
+                'prom_12m_kg' => $metricas['prom12m'] ?? null,
+                'peak_historico_kg' => $metricas['peakHistorico'] ?? ($metricas['max'] ?? null),
+                'meses_desde_ultima_compra' => $metricas['meses_desde_ultima'] ?? null,
+                'referencia_ultimo_semestre' => $metricas['referenciaUltimoSemestre'] ?? false,
+            ],
+            'patrones' => [
+                'resumen' => $patrones['resumen'] ?? null,
+                'picos' => $patrones['picos'] ?? [],
+                'valles' => $patrones['valles'] ?? [],
+                'meses_sin_compra' => $patrones['meses_sin_compra'] ?? [],
+                'concentracion_top2_pct' => $patrones['concentracion_top2_pct'] ?? null,
+                'racha_sin_compra' => $patrones['racha_sin_compra'] ?? null,
+                'meses_objetivo' => $patrones['meses_objetivo'] ?? [],
+            ],
+            'operacion' => [
+                'kg_en_transito_total' => round($enTransito, 1),
+                'proxima_entrega' => $proximaEntrega,
+                'dias_restantes_mes_actual' => $diasRestantes,
+            ],
+            'restricciones' => [
+                'factor_min' => $minFactor,
+                'factor_max' => $maxFactor,
+                'maximo_kg_mes' => round($maxAllowed, 1),
+                'no_inventar_demanda_sin_evidencia' => true,
+                'no_reactivar_meses_apagados_en_escenarios_dormidos' => true,
+                'una_sola_referencia_anual_no_confirma_estacionalidad' => true,
+            ],
+            'historial_12m' => $historialNormalizado,
+            'forecast_base_4m' => $forecastBase,
+        ];
+    }
+
+    private function buildAnalysisPrompt(string $contextoSistema, string $contextoProducto, array $payload, array $mesesForecast): string
+    {
+        return "{$contextoSistema}\n\n{$contextoProducto}\n\n"
+            . "DATOS ESTRUCTURADOS (JSON):\n"
+            . $this->jsonForPrompt($payload) . "\n\n"
+            . "MODO DE TRABAJO:\n"
+            . "1. Razona internamente con prioridad en evidencia histórica real, no en intuición.\n"
+            . "2. Distingue entre patrón robusto y coincidencia aislada.\n"
+            . "3. Penaliza con menor confianza los meses cuyo soporte sea un solo pico anual o un mes previamente apagado.\n"
+            . "4. Si el mismo mes del año pasado fue 0, no proyectes crecimiento agresivo salvo evidencia reciente muy fuerte.\n"
+            . "5. Si la concentración top 2 es alta, asume que la demanda está concentrada y no extiendas picos a meses vecinos sin soporte.\n"
+            . "6. Usa la proyección estadística como base y solo devuelve factores dentro del rango permitido.\n"
+            . "7. Piensa paso a paso de forma privada y devuelve solo el JSON final.\n\n"
+            . "OBJETIVO:\n"
+            . "Evaluar si el forecast base de 4 meses debe ajustarse y con qué intensidad, manteniendo una lógica estricta frente a picos, valles y meses sin compra.\n\n"
+            . "SALIDA OBLIGATORIA. Responde SOLO con JSON válido:\n"
+            . "{\n"
+            . "  \"evaluacion_tendencia\": \"REALISTA|OPTIMISTA|CONSERVADOR\",\n"
+            . "  \"clasificacion\": \"...\",\n"
+            . "  \"tendencia\": \"↑|↓|→\",\n"
+            . "  \"factor_global\": 1.0,\n"
+            . "  \"confianza_global\": \"ALTA|MEDIA|BAJA\",\n"
+            . "  \"hay_estacionalidad\": true,\n"
+            . "  \"nota_estacionalidad\": \"máximo 180 caracteres\",\n"
+            . "  \"justificacion\": \"máximo 220 caracteres; menciona evidencia concreta\",\n"
+            . "  \"factores_mensuales\": [\n"
+            . "    { \"mes\": \"{$mesesForecast[0]}\", \"factor\": 1.0, \"confianza\": \"ALTA|MEDIA|BAJA\", \"motivo\": \"máximo 180 caracteres\" },\n"
+            . "    { \"mes\": \"{$mesesForecast[1]}\", \"factor\": 1.0, \"confianza\": \"ALTA|MEDIA|BAJA\", \"motivo\": \"máximo 180 caracteres\" },\n"
+            . "    { \"mes\": \"{$mesesForecast[2]}\", \"factor\": 1.0, \"confianza\": \"ALTA|MEDIA|BAJA\", \"motivo\": \"máximo 180 caracteres\" },\n"
+            . "    { \"mes\": \"{$mesesForecast[3]}\", \"factor\": 1.0, \"confianza\": \"ALTA|MEDIA|BAJA\", \"motivo\": \"máximo 180 caracteres\" }\n"
+            . "  ],\n"
+            . "  \"alertas\": [\n"
+            . "    { \"tipo\": \"EN_RIESGO|CRECIENDO|SIN_STOCK|OPORTUNIDAD\", \"mensaje\": \"máximo 180 caracteres\" }\n"
+            . "  ]\n"
+            . "}";
+    }
+
+    private function buildAuditPrompt(array $metricas, array $patrones, array $mesesForecast, string $proyeccionFinal): string
+    {
+        $payload = [
+            'metricas' => [
+                'escenario' => $metricas['escenario'] ?? null,
+                'tecnica' => $metricas['tecnica'] ?? null,
+                'tendencia' => $metricas['tendencia'] ?? null,
+                'consistencia_pct' => $metricas['consistencia'] ?? null,
+            ],
+            'patrones' => [
+                'resumen' => $patrones['resumen'] ?? null,
+                'meses_objetivo' => $patrones['meses_objetivo'] ?? [],
+                'concentracion_top2_pct' => $patrones['concentracion_top2_pct'] ?? null,
+                'meses_sin_compra' => $patrones['meses_sin_compra'] ?? [],
+            ],
+            'plan_cerrado' => $proyeccionFinal,
+        ];
+
+        return "Audita el plan de compra ya calculado. No puedes cambiar kilos, tránsito, compra, urgencia ni fechas.\n\n"
+            . "DATOS ESTRUCTURADOS (JSON):\n"
+            . $this->jsonForPrompt($payload) . "\n\n"
+            . "MODO DE TRABAJO:\n"
+            . "1. Revisa coherencia con el histórico y la evidencia por mes objetivo.\n"
+            . "2. Si un mes alto depende de una sola referencia anual, exprésalo como riesgo.\n"
+            . "3. Si un mes viene de un histórico apagado, exprésalo como oportunidad o cautela según el caso.\n"
+            . "4. Da explicaciones breves, concretas y accionables.\n"
+            . "5. Piensa internamente y devuelve solo el JSON final.\n\n"
+            . "SALIDA OBLIGATORIA. Responde SOLO con JSON válido:\n"
+            . "{\n"
+            . "  \"resumen_ejecutivo\": \"máximo 220 caracteres\",\n"
+            . "  \"clasificacion\": \"...\",\n"
+            . "  \"tendencia\": \"↑|↓|→\",\n"
+            . "  \"meses\": [\n"
+            . "    { \"mes\": \"{$mesesForecast[0]}\", \"motivo\": \"máximo 180 caracteres\", \"confianza\": \"ALTA|MEDIA|BAJA\" },\n"
+            . "    { \"mes\": \"{$mesesForecast[1]}\", \"motivo\": \"máximo 180 caracteres\", \"confianza\": \"ALTA|MEDIA|BAJA\" },\n"
+            . "    { \"mes\": \"{$mesesForecast[2]}\", \"motivo\": \"máximo 180 caracteres\", \"confianza\": \"ALTA|MEDIA|BAJA\" },\n"
+            . "    { \"mes\": \"{$mesesForecast[3]}\", \"motivo\": \"máximo 180 caracteres\", \"confianza\": \"ALTA|MEDIA|BAJA\" }\n"
+            . "  ],\n"
+            . "  \"alertas\": [\n"
+            . "    { \"tipo\": \"EN_RIESGO|CRECIENDO|SIN_STOCK|OPORTUNIDAD\", \"mensaje\": \"máximo 180 caracteres\" }\n"
+            . "  ]\n"
+            . "}";
+    }
+
+    private function jsonForPrompt(array $payload): string
+    {
+        return json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            ?: '{}';
+    }
+
     private function construirPlanFinal(
         array $analisisAi,
         array $metricas,
+        array $patrones,
         array $mesesForecast,
         float $enTransito,
         int $diasRestantes,
@@ -208,11 +385,14 @@ class IaAnalysisService
         foreach ($mesesForecast as $i => $mes) {
             $base = (float) ($metricas['proyeccion4m'][$i] ?? 0);
             $row  = $factoresMensuales->get($mes, []);
+            $patronMes = $this->buscarPatronMes($patrones, $mes);
+            [$minFactorMes, $maxFactorMes] = $this->resolverRangoPorPatron($patronMes, $metricas);
+            [$factorMinFinal, $factorMaxFinal] = $this->intersectarRangos($minFactor, $maxFactor, $minFactorMes, $maxFactorMes);
 
             $factor = $this->clamp(
                 $this->toFloat($row['factor'] ?? $factorGlobal, $factorGlobal),
-                $minFactor,
-                $maxFactor
+                $factorMinFinal,
+                $factorMaxFinal
             );
 
             $proyectado = $base > 0
@@ -225,19 +405,20 @@ class IaAnalysisService
                 'confianza'     => $this->sanitizeEnum(
                     $row['confianza'] ?? ($analisisAi['confianza_global'] ?? null),
                     ['ALTA', 'MEDIA', 'BAJA'],
-                    $this->confianzaPorMetricas($metricas)
+                    $this->confianzaPorPatron($patronMes, $metricas)
                 ),
                 'motivo'        => $this->normalizarMotivo(
                     $row['motivo'] ?? null,
                     $analisisAi['justificacion'] ?? null,
                     $metricas,
-                    $base
+                    $base,
+                    $patronMes
                 ),
             ];
         }
 
         $meses = $this->distribuirCompraYTransito($proyecciones, $enTransito, $diasRestantes);
-        $alertas = $this->normalizarAlertas($analisisAi['alertas'] ?? null, $metricas, $meses, $enTransito);
+        $alertas = $this->normalizarAlertas($analisisAi['alertas'] ?? null, $metricas, $patrones, $meses, $enTransito);
 
         return [
             'clasificacion' => $this->normalizarClasificacion($analisisAi['clasificacion'] ?? null, $metricas),
@@ -250,6 +431,7 @@ class IaAnalysisService
     private function auditarPlanConIa(
         array $planProd,
         array $metricas,
+        array $patrones,
         array $mesesForecast,
         string $convId,
         bool $newChat = false
@@ -269,31 +451,7 @@ class IaAnalysisService
             })
             ->implode("\n");
 
-        $prompt2 = "Audita el siguiente plan de compra ya calculado. No puedes cambiar kilos, tránsito, compra, urgencia ni fechas; solo validar coherencia y mejorar la explicación.\n\n"
-            . "ESCENARIO: {$metricas['escenario']}\n"
-            . "TÉCNICA BASE: {$metricas['tecnica']}\n"
-            . "TENDENCIA BASE: {$metricas['tendencia']}\n"
-            . "CONSISTENCIA: {$metricas['consistencia']}%\n"
-            . "PROYECCIÓN FINAL:\n{$proyeccionFinal}\n\n"
-            . "REGLAS:\n"
-            . "1. No alteres números.\n"
-            . "2. Si detectas riesgo de sobrecompra o subcompra, exprésalo en alertas.\n"
-            . "3. Da motivos cortos por mes, alineados con el histórico y el escenario.\n"
-            . "4. Mantén la salida en JSON estricto.\n\n"
-            . "Responde SOLO con JSON:\n"
-            . "{\n"
-            . "  \"clasificacion\": \"...\",\n"
-            . "  \"tendencia\": \"↑|↓|→\",\n"
-            . "  \"meses\": [\n"
-            . "    { \"mes\": \"{$mesesForecast[0]}\", \"motivo\": \"...\", \"confianza\": \"ALTA|MEDIA|BAJA\" },\n"
-            . "    { \"mes\": \"{$mesesForecast[1]}\", \"motivo\": \"...\", \"confianza\": \"ALTA|MEDIA|BAJA\" },\n"
-            . "    { \"mes\": \"{$mesesForecast[2]}\", \"motivo\": \"...\", \"confianza\": \"ALTA|MEDIA|BAJA\" },\n"
-            . "    { \"mes\": \"{$mesesForecast[3]}\", \"motivo\": \"...\", \"confianza\": \"ALTA|MEDIA|BAJA\" }\n"
-            . "  ],\n"
-            . "  \"alertas\": [\n"
-            . "    { \"tipo\": \"EN_RIESGO|CRECIENDO|SIN_STOCK|OPORTUNIDAD\", \"mensaje\": \"...\" }\n"
-            . "  ]\n"
-            . "}";
+        $prompt2 = $this->buildAuditPrompt($metricas, $patrones, $mesesForecast, $proyeccionFinal);
 
         try {
             $r2 = $this->llamarMiddleware($prompt2, $convId, $newChat);
@@ -335,6 +493,7 @@ class IaAnalysisService
         $planProd['alertas'] = $this->normalizarAlertas(
             $auditoria['alertas'] ?? ($planProd['alertas'] ?? []),
             $metricas,
+            $patrones,
             $planProd['meses'] ?? [],
             array_sum(array_map(fn($mes) => (float) ($mes['kg_en_transito'] ?? 0), $planProd['meses'] ?? []))
         );
@@ -397,6 +556,21 @@ class IaAnalysisService
         return 'BAJA';
     }
 
+    private function confianzaPorPatron(?array $patronMes, array $metricas): string
+    {
+        $base = $this->confianzaPorMetricas($metricas);
+
+        if (!$patronMes) {
+            return $base;
+        }
+
+        return match ($patronMes['fuerza'] ?? null) {
+            'ALTA' => $base === 'BAJA' ? 'MEDIA' : $base,
+            'MEDIA' => $base,
+            default => $base === 'ALTA' ? 'MEDIA' : $base,
+        };
+    }
+
     private function normalizarClasificacion(?string $clasificacion, array $metricas): string
     {
         $value = trim((string) $clasificacion);
@@ -415,7 +589,7 @@ class IaAnalysisService
         };
     }
 
-    private function normalizarMotivo(?string $motivoMes, ?string $justificacion, array $metricas, float $base): string
+    private function normalizarMotivo(?string $motivoMes, ?string $justificacion, array $metricas, float $base, ?array $patronMes = null): string
     {
         $motivo = trim((string) ($motivoMes ?: $justificacion ?: ''));
         if ($motivo !== '') {
@@ -426,10 +600,14 @@ class IaAnalysisService
             return 'Sin demanda proyectada en la base estadistica del periodo.';
         }
 
+        if ($patronMes) {
+            return substr("{$patronMes['label']}: {$patronMes['mensaje']}", 0, 240);
+        }
+
         return "Escenario {$metricas['escenario']} con base estadistica de {$this->round5($base)} kg.";
     }
 
-    private function normalizarAlertas($alertasAi, array $metricas, array $meses, float $enTransito): array
+    private function normalizarAlertas($alertasAi, array $metricas, array $patrones, array $meses, float $enTransito): array
     {
         $allowed = ['EN_RIESGO', 'CRECIENDO', 'SIN_STOCK', 'OPORTUNIDAD'];
         $alertas = [];
@@ -453,7 +631,7 @@ class IaAnalysisService
         }
 
         if (!empty($alertas)) {
-            return array_values(array_slice($alertas, 0, 3));
+            return array_values(array_slice(array_merge($alertas, $this->alertasPorPatron($patrones, $meses)), 0, 3));
         }
 
         $fallback = [];
@@ -488,7 +666,7 @@ class IaAnalysisService
             ];
         }
 
-        return array_slice($fallback, 0, 3);
+        return array_slice(array_merge($fallback, $this->alertasPorPatron($patrones, $meses)), 0, 3);
     }
 
     private function calcularUrgencia(int $index, int $proyectado, int $aplicado, int $aComprar, int $diasRestantes): string
@@ -560,6 +738,122 @@ class IaAnalysisService
     private function clamp(float $value, float $min, float $max): float
     {
         return max($min, min($max, $value));
+    }
+
+    private function intersectarRangos(float $minA, float $maxA, float $minB, float $maxB): array
+    {
+        $min = max($minA, $minB);
+        $max = min($maxA, $maxB);
+
+        if ($min <= $max) {
+            return [$min, $max];
+        }
+
+        return [$max, $max];
+    }
+
+    private function buscarPatronMes(array $patrones, string $mes): ?array
+    {
+        foreach (($patrones['meses_objetivo'] ?? []) as $row) {
+            if (($row['mes'] ?? null) === $mes) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolverRangoPorPatron(?array $patronMes, array $metricas): array
+    {
+        if (!$patronMes) {
+            return [0.75, 1.25];
+        }
+
+        return match ($patronMes['tipo'] ?? null) {
+            'MES_SIN_COMPRA' => in_array($metricas['escenario'] ?? '', ['DORMIDO', 'POSIBLE_PERDIDA', 'PERDIDO', 'CAMPAÑA_PUNTUAL'], true)
+                ? [0.0, 0.45]
+                : [0.65, 0.95],
+            'MES_BAJO' => [0.75, 1.0],
+            'MES_PICO' => ($patronMes['fuerza'] ?? null) === 'MEDIA'
+                ? [0.9, 1.15]
+                : [0.85, 1.05],
+            default => [0.85, 1.1],
+        };
+    }
+
+    private function alertasPorPatron(array $patrones, array $meses): array
+    {
+        $alertas = [];
+        $mesesMap = [];
+        foreach ($meses as $mes) {
+            $mesesMap[$mes['mes'] ?? ''] = $mes;
+        }
+
+        foreach (($patrones['meses_objetivo'] ?? []) as $patronMes) {
+            $mes = $mesesMap[$patronMes['mes'] ?? ''] ?? null;
+            if (!$mes) {
+                continue;
+            }
+
+            if (($patronMes['tipo'] ?? null) === 'MES_PICO' && ($patronMes['fuerza'] ?? null) === 'BAJA' && ($mes['kg_proyectados'] ?? 0) > 0) {
+                $alertas[] = [
+                    'tipo' => 'EN_RIESGO',
+                    'mensaje' => "{$patronMes['label']} hereda un pico aislado del año pasado; validar con comercial antes de sobrecomprar.",
+                ];
+                break;
+            }
+
+            if (($patronMes['tipo'] ?? null) === 'MES_SIN_COMPRA' && ($mes['kg_proyectados'] ?? 0) > 0) {
+                $alertas[] = [
+                    'tipo' => 'OPORTUNIDAD',
+                    'mensaje' => "{$patronMes['label']} no tuvo compras el año pasado; si este forecast se confirma, sería una recuperación frente a una base apagada.",
+                ];
+                break;
+            }
+        }
+
+        return $alertas;
+    }
+
+    private function resumirMesesPatron(array $rows): string
+    {
+        if (empty($rows)) {
+            return 'sin datos relevantes';
+        }
+
+        return collect($rows)
+            ->map(fn($row) => "{$row['label']}={$row['kg']}kg")
+            ->implode(' | ');
+    }
+
+    private function resumirMesesApagados(array $meses): string
+    {
+        if (empty($meses)) {
+            return 'ninguno';
+        }
+
+        return collect(array_slice($meses, 0, 6))
+            ->map(fn($mes) => $this->labelMes($mes))
+            ->implode(', ');
+    }
+
+    private function resumirMesesObjetivo(array $rows): string
+    {
+        if (empty($rows)) {
+            return '  sin referencias';
+        }
+
+        return collect($rows)
+            ->map(fn($row) => "  {$row['label']}: ref {$row['label_referencia']}={$row['kg_referencia']}kg | {$row['tipo']} | fuerza {$row['fuerza']} | {$row['mensaje']}")
+            ->implode("\n");
+    }
+
+    private function labelMes(string $mes): string
+    {
+        [$year, $month] = explode('-', $mes);
+        $labels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+        return ($labels[((int) $month) - 1] ?? $month) . ' ' . substr($year, 2);
     }
 
     // ── DB queries ────────────────────────────────────────────────────────────
