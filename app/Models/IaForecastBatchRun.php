@@ -9,6 +9,7 @@ class IaForecastBatchRun extends Model
 {
     public const MODE_PROCESS_ALL = 'PROCESS_ALL';
     public const MODE_FORCE_RESTART = 'FORCE_RESTART';
+    public const MODE_RETRY_ERRORS = 'RETRY_ERRORS';
 
     public const STATUS_QUEUED = 'QUEUED';
     public const STATUS_PROCESSING = 'PROCESSING';

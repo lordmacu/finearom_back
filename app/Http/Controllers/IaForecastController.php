@@ -275,4 +275,22 @@ class IaForecastController extends Controller
             ], 500);
         }
     }
+
+    public function retryErrors(Request $request, IaForecastBatchProcessingService $batchProcessingService)
+    {
+        try {
+            $payload = $batchProcessingService->startRetryErrors($request->user()?->id);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Reproceso de errores iniciado.',
+                'data' => $payload,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
 }

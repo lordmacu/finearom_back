@@ -101,7 +101,52 @@ class IaForecastBatchProcessingService
             ->values();
     }
 
+    public function getClientsWithErrorsToProcess(): Collection
+    {
+        $clients = collect(DB::select("
+            SELECT
+                c.id,
+                c.client_name,
+                COUNT(i.id) AS productos_error
+            FROM (
+                SELECT cliente_id, MAX(id) AS latest_run_id
+                FROM ia_forecast_client_runs
+                GROUP BY cliente_id
+            ) lr
+            JOIN ia_forecast_client_run_items i
+                ON i.run_id = lr.latest_run_id
+               AND i.status = 'ERROR'
+            JOIN clients c ON c.id = lr.cliente_id
+            GROUP BY c.id, c.client_name
+            ORDER BY c.client_name
+        "));
+
+        return $clients
+            ->map(fn($client) => (object) [
+                'id' => (int) $client->id,
+                'client_name' => $client->client_name,
+                'total_productos' => (int) $client->productos_error,
+                'productos_a_procesar' => (int) $client->productos_error,
+            ])
+            ->filter(fn($client) => $client->productos_a_procesar > 0)
+            ->values();
+    }
+
     public function startBatch(bool $force = false, ?int $createdBy = null): array
+    {
+        return $this->startBatchByMode(
+            $force ? IaForecastBatchRun::MODE_FORCE_RESTART : IaForecastBatchRun::MODE_PROCESS_ALL,
+            $force,
+            $createdBy,
+        );
+    }
+
+    public function startRetryErrors(?int $createdBy = null): array
+    {
+        return $this->startBatchByMode(IaForecastBatchRun::MODE_RETRY_ERRORS, false, $createdBy);
+    }
+
+    private function startBatchByMode(string $mode, bool $force, ?int $createdBy): array
     {
         $activeRun = IaForecastBatchRun::query()
             ->whereIn('status', [IaForecastBatchRun::STATUS_QUEUED, IaForecastBatchRun::STATUS_PROCESSING])
@@ -129,13 +174,21 @@ class IaForecastBatchProcessingService
             }
         }
 
-        $clients = $this->getClientsToProcess($force);
+        $clients = match ($mode) {
+            IaForecastBatchRun::MODE_FORCE_RESTART => $this->getClientsToProcess(true),
+            IaForecastBatchRun::MODE_RETRY_ERRORS => $this->getClientsWithErrorsToProcess(),
+            default => $this->getClientsToProcess(false),
+        };
+
         if ($clients->isEmpty()) {
-            throw new \RuntimeException('No hay clientes con productos pendientes para procesar.');
+            $message = $mode === IaForecastBatchRun::MODE_RETRY_ERRORS
+                ? 'No hay productos con error para reprocesar.'
+                : 'No hay clientes con productos pendientes para procesar.';
+            throw new \RuntimeException($message);
         }
 
         $run = IaForecastBatchRun::query()->create([
-            'mode' => $force ? IaForecastBatchRun::MODE_FORCE_RESTART : IaForecastBatchRun::MODE_PROCESS_ALL,
+            'mode' => $mode,
             'status' => IaForecastBatchRun::STATUS_QUEUED,
             'total_clientes' => $clients->count(),
             'total_productos' => (int) $clients->sum('productos_a_procesar'),
@@ -296,8 +349,11 @@ class IaForecastBatchProcessingService
             return;
         }
 
-        $force = $run->mode === IaForecastBatchRun::MODE_FORCE_RESTART;
-        $products = $this->clientProcessingService->getClientProductsToProcess((int) $nextItem->cliente_id, $force);
+        $products = match ($run->mode) {
+            IaForecastBatchRun::MODE_FORCE_RESTART => $this->clientProcessingService->getClientProductsToProcess((int) $nextItem->cliente_id, true),
+            IaForecastBatchRun::MODE_RETRY_ERRORS => $this->clientProcessingService->getClientProductsWithErrorsFromLatestRun((int) $nextItem->cliente_id),
+            default => $this->clientProcessingService->getClientProductsToProcess((int) $nextItem->cliente_id, false),
+        };
 
         if (empty($products)) {
             $nextItem->update([

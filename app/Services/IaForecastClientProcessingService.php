@@ -101,6 +101,34 @@ class IaForecastClientProcessingService
             ->all();
     }
 
+    public function getClientProductsWithErrorsFromLatestRun(int $clientId): array
+    {
+        $latestRunId = IaForecastClientRun::query()
+            ->where('cliente_id', $clientId)
+            ->max('id');
+
+        if (!$latestRunId) {
+            return [];
+        }
+
+        $errorProductIds = IaForecastClientRunItem::query()
+            ->where('run_id', $latestRunId)
+            ->where('status', IaForecastClientRunItem::STATUS_ERROR)
+            ->pluck('producto_id')
+            ->map(fn($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($errorProductIds->isEmpty()) {
+            return [];
+        }
+
+        return collect($this->getClientProductsForProcessing($clientId))
+            ->filter(fn($product) => $errorProductIds->contains((int) $product->producto_id))
+            ->values()
+            ->all();
+    }
+
     public function createRun(int $clientId, array $products, ?int $createdBy = null, ?int $batchRunId = null): IaForecastClientRun
     {
         $run = IaForecastClientRun::query()->create([

@@ -222,6 +222,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('batch-processing', [IaForecastController::class, 'batchProcessing']);
         Route::post('analyze-all', [IaForecastController::class, 'analyzeAll']);
         Route::post('force-restart-all', [IaForecastController::class, 'forceRestartAll']);
+        Route::post('retry-errors', [IaForecastController::class, 'retryErrors']);
         Route::get('clients', [IaForecastController::class, 'clients']);
         Route::get('clients/{clientId}/products', [IaForecastController::class, 'products']);
         Route::get('clients/{clientId}/processing', [IaForecastController::class, 'processing']);
