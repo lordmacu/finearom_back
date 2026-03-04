@@ -1882,7 +1882,7 @@ class PurchaseOrderController extends Controller
                             ->where('id', $id)
                             ->update($updateData);
 
-                        $processedRecord = ['id' => $id];
+                        $processedRecord = (object)['id' => $id];
                         $keptIds[] = $id;
                     } else {
                         // El ID no existe, crear nuevo
