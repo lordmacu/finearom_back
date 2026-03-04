@@ -25,6 +25,7 @@ use App\Http\Controllers\PurchaseOrderImportController;
 use App\Http\Controllers\RecaudoImportController;
 use App\Http\Controllers\ProformaController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\IaForecastController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -215,6 +216,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Process emails para formularios de órdenes de compra
     Route::get('/process/emails', [ProcessEmailController::class, 'getEmailsByType']);
+
+    // IA Forecast
+    Route::prefix('ia/forecast')->group(function () {
+        Route::get('clients', [IaForecastController::class, 'clients']);
+        Route::get('clients/{clientId}/products', [IaForecastController::class, 'products']);
+        Route::get('clients/{clientId}/products/{productoId}', [IaForecastController::class, 'show']);
+    });
 });
 
 // Public Pixel Route (no auth)
