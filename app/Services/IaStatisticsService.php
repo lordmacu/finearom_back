@@ -76,8 +76,9 @@ class IaStatisticsService
         // Piso picos históricos
         $peakHistorico      = count($valores) ? max($valores) : 0;
         $promNonZeroGlobal  = self::prom($valores) ?: 1;
-        $ESCENARIOS_PICOS   = ['VOLATIL','CICLO_MENSUAL_IRREGULAR','ESTACIONAL_NAVIDAD',
-                               'REACTIVADO','DORMIDO','NEW_WIN'];
+        // CICLO_MENSUAL_IRREGULAR usa SES_SEASONAL que ya captura picos via índices estacionales —
+        // no necesita pisoPicos (lo amplificaría artificialmente).
+        $ESCENARIOS_PICOS   = ['VOLATIL','ESTACIONAL_NAVIDAD','REACTIVADO','DORMIDO','NEW_WIN'];
         $tienePicosHistoricos =
             in_array($escenario, $ESCENARIOS_PICOS) &&
             $peakHistorico >= $promNonZeroGlobal * 1.5 &&
@@ -164,7 +165,7 @@ class IaStatisticsService
         $nonZero = array_values(array_filter($serie12, fn($v) => $v > 0));
         $media   = count($nonZero) ? self::prom($nonZero) : 1.0;
 
-        return array_map(function ($val, $i) use ($media, $mesesConCompra) {
+        return array_map(function ($val, $i) use ($serie12, $media, $mesesConCompra) {
             $m     = self::mesDeSlot($i);
             $prior = self::SEASONAL_PRIOR[$m] ?? 1.0;
 
@@ -173,10 +174,18 @@ class IaStatisticsService
                 return ($val / $media) * 0.6 + $prior * 0.4;
             }
 
-            // Mes sin compra histórica: floor dinámico según consistencia.
-            // A mayor consistencia, mayor probabilidad de que el cliente compre ese mes.
-            // Consistencia ≥50%: floor=0.20 | 25-49%: floor=0.10 | <25%: floor=0.04
-            $floor = $mesesConCompra >= 6 ? 0.20 : ($mesesConCompra >= 3 ? 0.10 : 0.04);
+            // Mes sin compra histórica: floor según vecindad.
+            // Si los meses adyacentes (±1) tienen compras, este mes está "dentro de temporada"
+            // y merece un floor más alto que un mes completamente aislado.
+            $prevActivo = $i > 0  && $serie12[$i - 1] > 0;
+            $nextActivo = $i < 11 && $serie12[$i + 1] > 0;
+            $enTemporada = $prevActivo || $nextActivo;
+
+            // Floor base por consistencia global
+            $floorBase = $mesesConCompra >= 6 ? 0.20 : ($mesesConCompra >= 3 ? 0.10 : 0.04);
+            // Si está entre meses activos, floor más alto (cliente probablemente compra ese mes también)
+            $floor = $enTemporada ? min($floorBase * 1.5, 0.35) : $floorBase;
+
             return $prior * $floor;
         }, $serie12, range(0, 11));
     }
