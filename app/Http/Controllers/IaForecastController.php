@@ -70,12 +70,16 @@ class IaForecastController extends Controller
     public function show(int $clientId, int $productoId)
     {
         $historial = DB::select("
-            SELECT mes, SUM(kg_real) AS kg_real
-            FROM ia_historial_mensual
-            WHERE cliente_id = ? AND producto_id = ?
-            GROUP BY mes
+            SELECT mes, kg_real
+            FROM (
+                SELECT mes, SUM(kg_real) AS kg_real
+                FROM ia_historial_mensual
+                WHERE cliente_id = ? AND producto_id = ?
+                GROUP BY mes
+                ORDER BY mes DESC
+                LIMIT 12
+            ) historial_12
             ORDER BY mes ASC
-            LIMIT 12
         ", [$clientId, $productoId]);
 
         if (empty($historial)) {
