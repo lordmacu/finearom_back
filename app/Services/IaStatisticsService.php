@@ -171,9 +171,9 @@ class IaStatisticsService
             }
 
             // Mes sin compra histórica: el cliente no compró ese mes.
-            // Damos solo un 15% al prior para no silenciar completamente meses
-            // de alta estacionalidad (Oct/Nov) que quizás el cliente no tuvo aún.
-            return $prior * 0.15;
+            // Damos solo un 4% al prior — suficiente para distinguir Oct/Nov
+            // de meses totalmente muertos, sin crear falsas alarmas (≤5 kg).
+            return $prior * 0.04;
         }, $serie12, range(0, 11));
     }
 
