@@ -187,11 +187,7 @@ class ProcessIaForecastClientProduct implements ShouldQueue
 
         event(new IaForecastClientProcessingUpdated(
             $clientId,
-            [
-                'run_id' => $run?->id,
-                'status' => $run?->status,
-                'item_id' => $this->itemId,
-            ]
+            $processingService->buildEventPayload($clientId, $run, $this->itemId)
         ));
     }
 }

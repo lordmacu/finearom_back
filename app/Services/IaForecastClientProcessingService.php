@@ -44,27 +44,24 @@ class IaForecastClientProcessingService
             ];
         })->values();
 
-        $summary = [
-            'total_productos' => (int) ($run->total_productos ?? $rows->count()),
-            'procesados' => (int) ($run->procesados ?? $rows->whereIn('status', [IaForecastClientRunItem::STATUS_COMPLETED, IaForecastClientRunItem::STATUS_ERROR])->count()),
-            'completados' => (int) ($run->completados ?? $rows->where('status', IaForecastClientRunItem::STATUS_COMPLETED)->count()),
-            'errores' => (int) ($run->errores ?? $rows->where('status', IaForecastClientRunItem::STATUS_ERROR)->count()),
-            'pendientes' => (int) ($run->pendientes ?? $rows->whereIn('status', [IaForecastClientRunItem::STATUS_PENDING, IaForecastClientRunItem::STATUS_PROCESSING])->count()),
+        return [
+            'run' => $this->buildRunPayload($run, $rows),
+            'products' => $rows,
+            'has_active_run' => $run ? $run->isActive() : false,
         ];
+    }
 
-        $currentItem = $rows->firstWhere('status', IaForecastClientRunItem::STATUS_PROCESSING);
+    public function buildEventPayload(int $clientId, ?IaForecastClientRun $run = null, ?int $itemId = null): array
+    {
+        $run = $run ?: IaForecastClientRun::query()
+            ->where('cliente_id', $clientId)
+            ->latest('id')
+            ->first();
 
         return [
-            'run' => $run ? [
-                'id' => $run->id,
-                'status' => $run->status,
-                'started_at' => optional($run->started_at)->toDateTimeString(),
-                'finished_at' => optional($run->finished_at)->toDateTimeString(),
-                'error_message' => $run->error_message,
-                'summary' => $summary,
-                'current_item' => $currentItem,
-            ] : null,
-            'products' => $rows,
+            'client_id' => $clientId,
+            'run' => $this->buildRunPayload($run),
+            'row' => $itemId ? $this->buildItemPayload($itemId, $run?->id) : null,
             'has_active_run' => $run ? $run->isActive() : false,
         ];
     }
@@ -143,5 +140,64 @@ class IaForecastClientProcessingService
         }
 
         return $run->fresh();
+    }
+
+    private function buildRunPayload(?IaForecastClientRun $run, ?Collection $rows = null): ?array
+    {
+        if (!$run) {
+            return null;
+        }
+
+        $rows = $rows ?: IaForecastClientRunItem::query()
+            ->where('run_id', $run->id)
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn(IaForecastClientRunItem $item) => $this->mapItemToPayload($item));
+
+        $summary = [
+            'total_productos' => (int) ($run->total_productos ?? $rows->count()),
+            'procesados' => (int) ($run->procesados ?? $rows->whereIn('status', [IaForecastClientRunItem::STATUS_COMPLETED, IaForecastClientRunItem::STATUS_ERROR])->count()),
+            'completados' => (int) ($run->completados ?? $rows->where('status', IaForecastClientRunItem::STATUS_COMPLETED)->count()),
+            'errores' => (int) ($run->errores ?? $rows->where('status', IaForecastClientRunItem::STATUS_ERROR)->count()),
+            'pendientes' => (int) ($run->pendientes ?? $rows->whereIn('status', [IaForecastClientRunItem::STATUS_PENDING, IaForecastClientRunItem::STATUS_PROCESSING])->count()),
+        ];
+
+        return [
+            'id' => $run->id,
+            'status' => $run->status,
+            'started_at' => optional($run->started_at)->toDateTimeString(),
+            'finished_at' => optional($run->finished_at)->toDateTimeString(),
+            'error_message' => $run->error_message,
+            'summary' => $summary,
+            'current_item' => $rows->firstWhere('status', IaForecastClientRunItem::STATUS_PROCESSING),
+        ];
+    }
+
+    private function buildItemPayload(int $itemId, ?int $runId = null): ?array
+    {
+        $query = IaForecastClientRunItem::query()->whereKey($itemId);
+        if ($runId) {
+            $query->where('run_id', $runId);
+        }
+
+        $item = $query->first();
+
+        return $item ? $this->mapItemToPayload($item) : null;
+    }
+
+    private function mapItemToPayload(IaForecastClientRunItem $item): array
+    {
+        return [
+            'producto_id' => (int) $item->producto_id,
+            'codigo' => $item->codigo,
+            'producto' => $item->producto,
+            'kg_total' => (float) $item->kg_total,
+            'analizado_en' => $item->analizado_en?->toDateTimeString(),
+            'status' => $item->status,
+            'attempts' => (int) ($item->attempts ?? 0),
+            'error_message' => $item->error_message,
+            'started_at' => $item->started_at?->toDateTimeString(),
+            'finished_at' => $item->finished_at?->toDateTimeString(),
+        ];
     }
 }
