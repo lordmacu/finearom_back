@@ -221,6 +221,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('ia/forecast')->group(function () {
         Route::get('clients', [IaForecastController::class, 'clients']);
         Route::get('clients/{clientId}/products', [IaForecastController::class, 'products']);
+        Route::get('clients/{clientId}/processing', [IaForecastController::class, 'processing']);
+        Route::post('clients/{clientId}/analyze', [IaForecastController::class, 'analyzeClient']);
         Route::get('clients/{clientId}/products/{productoId}', [IaForecastController::class, 'show']);
         Route::post('clients/{clientId}/products/{productoId}/analyze', [IaForecastController::class, 'analyze']);
     });
