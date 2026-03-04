@@ -20,6 +20,9 @@ class ProcessIaForecastClientProduct implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    private const MAX_ITEM_ATTEMPTS = 5;
+    private const RETRY_DELAYS_SECONDS = [15, 45, 120, 300, 600];
+
     public int $tries = 1;
     public int $timeout = 1800;
 
@@ -101,13 +104,28 @@ class ProcessIaForecastClientProduct implements ShouldQueue
                 'message' => $e->getMessage(),
             ]);
 
-            IaForecastClientRunItem::query()
+            $currentAttempts = (int) IaForecastClientRunItem::query()
                 ->whereKey($this->itemId)
-                ->update([
-                    'status' => IaForecastClientRunItem::STATUS_ERROR,
-                    'finished_at' => now(),
-                    'error_message' => mb_substr($e->getMessage(), 0, 1000),
-                ]);
+                ->value('attempts');
+
+            if ($currentAttempts > 0 && $currentAttempts < self::MAX_ITEM_ATTEMPTS) {
+                IaForecastClientRunItem::query()
+                    ->whereKey($this->itemId)
+                    ->update([
+                        'status' => IaForecastClientRunItem::STATUS_PENDING,
+                        'finished_at' => now(),
+                        'error_message' => mb_substr($e->getMessage(), 0, 1000),
+                    ]);
+
+            } else {
+                IaForecastClientRunItem::query()
+                    ->whereKey($this->itemId)
+                    ->update([
+                        'status' => IaForecastClientRunItem::STATUS_ERROR,
+                        'finished_at' => now(),
+                        'error_message' => mb_substr($e->getMessage(), 0, 1000),
+                    ]);
+            }
         }
 
         $this->refreshRunState();
@@ -174,7 +192,23 @@ class ProcessIaForecastClientProduct implements ShouldQueue
             return;
         }
 
-        self::dispatch($run->id, $nextItem->id)->onQueue('ia-forecast');
+        $delay = $this->getRetryDelaySeconds((int) $nextItem->attempts);
+
+        $dispatch = self::dispatch($run->id, $nextItem->id)->onQueue('ia-forecast');
+        if ($delay > 0) {
+            $dispatch->delay(now()->addSeconds($delay));
+        }
+    }
+
+    private function getRetryDelaySeconds(int $attempts): int
+    {
+        if ($attempts <= 0) {
+            return 0;
+        }
+
+        $index = min($attempts - 1, count(self::RETRY_DELAYS_SECONDS) - 1);
+
+        return (int) self::RETRY_DELAYS_SECONDS[$index];
     }
 
     private function broadcastUpdate(IaForecastClientProcessingService $processingService, ?int $clientId): void
