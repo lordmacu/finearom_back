@@ -41,16 +41,19 @@ class IaStatisticsService
             ? round((($bloque3 - $bloque6) / $bloque6) * 100, 1)
             : 0;
 
-        // Dispersión
-        $media = self::prom($serie);
-        $sigma = sqrt(self::prom(array_map(fn($v) => ($v - $media) ** 2, $serie)));
-        $cv    = $media > 0 ? (int) round(($sigma / $media) * 100) : 100;
+        // Dispersión — CV calculado solo sobre meses con compra (excluye ceros)
+        // Usar $serie completo inflaría el CV artificialmente (meses sin pedido ≠ demanda cero)
+        $mediaActivos = self::prom($valores);
+        $sigmaActivos = count($valores) > 1
+            ? sqrt(self::prom(array_map(fn($v) => ($v - $mediaActivos) ** 2, $valores)))
+            : 0.0;
+        $cv    = $mediaActivos > 0 ? (int) round(($sigmaActivos / $mediaActivos) * 100) : 100;
         $consistencia = (int) round(($mesesConCompra / 12) * 100);
 
         $meses_desde_ultima = self::mesesDesdeUltima($serie);
 
         // Índices estacionales blended
-        $indices = self::calcularIndices($serie);
+        $indices = self::calcularIndices($serie, $mesesConCompra);
 
         // Clasificar escenario
         $escenario = self::clasificarEscenario($serie, $mesesVida, $mesesConCompra, $cv);
@@ -156,12 +159,12 @@ class IaStatisticsService
 
     // ── Índices estacionales ──────────────────────────────────────────────────
 
-    private static function calcularIndices(array $serie12): array
+    private static function calcularIndices(array $serie12, int $mesesConCompra = 0): array
     {
         $nonZero = array_values(array_filter($serie12, fn($v) => $v > 0));
         $media   = count($nonZero) ? self::prom($nonZero) : 1.0;
 
-        return array_map(function ($val, $i) use ($media) {
+        return array_map(function ($val, $i) use ($media, $mesesConCompra) {
             $m     = self::mesDeSlot($i);
             $prior = self::SEASONAL_PRIOR[$m] ?? 1.0;
 
@@ -170,10 +173,11 @@ class IaStatisticsService
                 return ($val / $media) * 0.6 + $prior * 0.4;
             }
 
-            // Mes sin compra histórica: el cliente no compró ese mes.
-            // Damos solo un 4% al prior — suficiente para distinguir Oct/Nov
-            // de meses totalmente muertos, sin crear falsas alarmas (≤5 kg).
-            return $prior * 0.04;
+            // Mes sin compra histórica: floor dinámico según consistencia.
+            // A mayor consistencia, mayor probabilidad de que el cliente compre ese mes.
+            // Consistencia ≥50%: floor=0.20 | 25-49%: floor=0.10 | <25%: floor=0.04
+            $floor = $mesesConCompra >= 6 ? 0.20 : ($mesesConCompra >= 3 ? 0.10 : 0.04);
+            return $prior * $floor;
         }, $serie12, range(0, 11));
     }
 
@@ -295,8 +299,17 @@ class IaStatisticsService
                     return ['tecnica' => 'HOLT_WINTERS', 'proyeccion' => self::holtWinters($serie12, 0.3, 0.1, 0.15, $PASOS)];
                 return ['tecnica' => 'SES_SEASONAL', 'proyeccion' => self::sesSeasonal($serie12, $indices, 0.3, $PASOS)];
 
-            default: // VOLATIL, CICLO_MENSUAL_IRREGULAR
-                return ['tecnica' => 'CROSTON_SBA', 'proyeccion' => self::crostonSBA($serie12, 0.15, $PASOS, $idxMes)];
+            case 'CICLO_MENSUAL_IRREGULAR':
+                // Demanda irregular pero con volúmenes significativos — SES captura mejor el nivel
+                return ['tecnica' => 'SES_SEASONAL', 'proyeccion' => self::sesSeasonal($serie12, $indices, 0.4, $PASOS)];
+
+            default: // VOLATIL — demanda verdaderamente esporádica (CV alto en meses activos)
+                // Solo usamos CROSTON si la consistencia es baja (≤33%) — caso de demanda intermitente real
+                if ($mesesConCompra <= 4) {
+                    return ['tecnica' => 'CROSTON_SBA', 'proyeccion' => self::crostonSBA($serie12, 0.15, $PASOS, $idxMes)];
+                }
+                // Consistencia moderada-alta con volatilidad: SES con alpha más reactivo
+                return ['tecnica' => 'SES_SEASONAL', 'proyeccion' => self::sesSeasonal($serie12, $indices, 0.5, $PASOS)];
         }
     }
 
