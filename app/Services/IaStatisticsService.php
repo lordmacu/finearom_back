@@ -158,14 +158,22 @@ class IaStatisticsService
 
     private static function calcularIndices(array $serie12): array
     {
-        $nonZero = array_filter($serie12, fn($v) => $v > 0);
-        $media   = count($nonZero) ? self::prom(array_values($nonZero)) : 1.0;
+        $nonZero = array_values(array_filter($serie12, fn($v) => $v > 0));
+        $media   = count($nonZero) ? self::prom($nonZero) : 1.0;
 
         return array_map(function ($val, $i) use ($media) {
-            $m       = self::mesDeSlot($i);
-            $prior   = self::SEASONAL_PRIOR[$m] ?? 1.0;
-            $idxDatos = $val > 0 ? $val / $media : $prior;
-            return $idxDatos * 0.6 + $prior * 0.4;
+            $m     = self::mesDeSlot($i);
+            $prior = self::SEASONAL_PRIOR[$m] ?? 1.0;
+
+            if ($val > 0) {
+                // Mes activo: blend 60% datos del cliente + 40% prior industria
+                return ($val / $media) * 0.6 + $prior * 0.4;
+            }
+
+            // Mes sin compra histórica: el cliente no compró ese mes.
+            // Damos solo un 15% al prior para no silenciar completamente meses
+            // de alta estacionalidad (Oct/Nov) que quizás el cliente no tuvo aún.
+            return $prior * 0.15;
         }, $serie12, range(0, 11));
     }
 
