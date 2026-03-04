@@ -135,6 +135,10 @@ class IaStatisticsService
                 'picos' => [],
                 'valles' => [],
                 'meses_sin_compra' => array_map(fn($row) => $row['mes'], $sinCompra),
+                'volumen_activo_promedio_kg' => 0,
+                'volumen_activo_mediana_kg' => 0,
+                'volumen_activo_min_kg' => 0,
+                'volumen_activo_max_kg' => 0,
                 'concentracion_top2_pct' => 0,
                 'racha_sin_compra' => null,
                 'meses_objetivo' => [],
@@ -142,6 +146,7 @@ class IaStatisticsService
         }
 
         $promActivos = self::prom(array_column($activos, 'kg'));
+        $medianaActivos = self::mediana(array_column($activos, 'kg'));
         $totalActivo = array_sum(array_column($activos, 'kg'));
         $ordenDesc   = $activos;
         usort($ordenDesc, fn($a, $b) => $b['kg'] <=> $a['kg']);
@@ -179,6 +184,10 @@ class IaStatisticsService
             'valles' => $valles,
             'meses_sin_compra' => array_map(fn($row) => $row['mes'], $sinCompra),
             'meses_activos' => array_map(fn($row) => $row['mes'], $activos),
+            'volumen_activo_promedio_kg' => round($promActivos, 1),
+            'volumen_activo_mediana_kg' => round($medianaActivos, 1),
+            'volumen_activo_min_kg' => round(min(array_column($activos, 'kg')), 1),
+            'volumen_activo_max_kg' => round(max(array_column($activos, 'kg')), 1),
             'concentracion_top2_pct' => $concentracionTop2,
             'racha_sin_compra' => $rachaSinCompra,
             'meses_objetivo' => $objetivos,
@@ -539,6 +548,23 @@ class IaStatisticsService
     private static function prom(array $arr): float
     {
         return count($arr) ? array_sum($arr) / count($arr) : 0.0;
+    }
+
+    private static function mediana(array $arr): float
+    {
+        if (empty($arr)) {
+            return 0.0;
+        }
+
+        sort($arr, SORT_NUMERIC);
+        $n = count($arr);
+        $mid = intdiv($n, 2);
+
+        if ($n % 2 === 0) {
+            return ($arr[$mid - 1] + $arr[$mid]) / 2;
+        }
+
+        return (float) $arr[$mid];
     }
 
     private static function enriquecerMesPatron(array $row, float $promActivos): array

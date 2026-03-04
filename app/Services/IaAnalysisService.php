@@ -159,6 +159,15 @@ class IaAnalysisService
             $maxAllowed
         );
 
+        $planProd = $this->enriquecerOportunidadCompra(
+            $planProd,
+            $metricas,
+            $patrones,
+            $mesesForecast,
+            $maxAllowed,
+            $convId
+        );
+
         $planProd = $this->auditarPlanConIa(
             $planProd,
             $metricas,
@@ -355,6 +364,57 @@ class IaAnalysisService
             . "}";
     }
 
+    private function buildOpportunityPrompt(array $metricas, array $patrones, array $planProd, array $mesesForecast, float $maxAllowed): string
+    {
+        $payload = [
+            'metricas' => [
+                'escenario' => $metricas['escenario'] ?? null,
+                'tecnica' => $metricas['tecnica'] ?? null,
+                'consistencia_pct' => $metricas['consistencia'] ?? null,
+            ],
+            'patrones' => [
+                'resumen' => $patrones['resumen'] ?? null,
+                'volumen_activo_promedio_kg' => $patrones['volumen_activo_promedio_kg'] ?? null,
+                'volumen_activo_mediana_kg' => $patrones['volumen_activo_mediana_kg'] ?? null,
+                'volumen_activo_min_kg' => $patrones['volumen_activo_min_kg'] ?? null,
+                'volumen_activo_max_kg' => $patrones['volumen_activo_max_kg'] ?? null,
+                'meses_objetivo' => $patrones['meses_objetivo'] ?? [],
+            ],
+            'forecast_esperado' => array_map(fn($mes) => [
+                'mes' => $mes['mes'] ?? null,
+                'kg_esperados' => $mes['kg_proyectados'] ?? 0,
+                'kg_si_compra_base' => $mes['kg_si_compra'] ?? 0,
+                'probabilidad_base_pct' => $mes['probabilidad_compra_pct'] ?? 0,
+                'lectura_base' => $mes['lectura_compra'] ?? null,
+            ], $planProd['meses'] ?? []),
+            'restricciones' => [
+                'maximo_kg_mes' => round($maxAllowed, 1),
+                'no_cambiar_kg_esperados' => true,
+                'expresar_baja_probabilidad_si_el_esperado_es_bajo_pero_la_compra_tipica_es_alta' => true,
+            ],
+        ];
+
+        return "Analiza la oportunidad de compra por mes. No cambies los kg esperados del forecast; solo estima el tamaño típico de compra si el cliente sí compra ese mes.\n\n"
+            . "DATOS ESTRUCTURADOS (JSON):\n"
+            . $this->jsonForPrompt($payload) . "\n\n"
+            . "MODO DE TRABAJO:\n"
+            . "1. Separa demanda esperada de tamaño de compra si ocurre.\n"
+            . "2. Si el producto suele comprar en bloques altos (300kg o más), evita interpretar 70kg esperados como una compra pequeña; léelo como baja probabilidad de un bloque alto.\n"
+            . "3. Usa picos, valles, mismo mes del año anterior y volumen activo típico para estimar kg_si_compra.\n"
+            . "4. No superes el máximo mensual y no inventes mini-compras si el patrón histórico es por bloques altos.\n"
+            . "5. Piensa internamente y devuelve solo JSON.\n\n"
+            . "SALIDA OBLIGATORIA. Responde SOLO con JSON válido:\n"
+            . "{\n"
+            . "  \"resumen_oportunidad\": \"máximo 220 caracteres\",\n"
+            . "  \"meses\": [\n"
+            . "    { \"mes\": \"{$mesesForecast[0]}\", \"kg_si_compra\": 0, \"confianza_compra\": \"ALTA|MEDIA|BAJA\", \"motivo_compra\": \"máximo 180 caracteres\" },\n"
+            . "    { \"mes\": \"{$mesesForecast[1]}\", \"kg_si_compra\": 0, \"confianza_compra\": \"ALTA|MEDIA|BAJA\", \"motivo_compra\": \"máximo 180 caracteres\" },\n"
+            . "    { \"mes\": \"{$mesesForecast[2]}\", \"kg_si_compra\": 0, \"confianza_compra\": \"ALTA|MEDIA|BAJA\", \"motivo_compra\": \"máximo 180 caracteres\" },\n"
+            . "    { \"mes\": \"{$mesesForecast[3]}\", \"kg_si_compra\": 0, \"confianza_compra\": \"ALTA|MEDIA|BAJA\", \"motivo_compra\": \"máximo 180 caracteres\" }\n"
+            . "  ]\n"
+            . "}";
+    }
+
     private function jsonForPrompt(array $payload): string
     {
         return json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
@@ -440,9 +500,11 @@ class IaAnalysisService
             ->map(function ($mes) {
                 $fecha = $mes['fecha_compra_recomendada'] ?? 'null';
                 return sprintf(
-                    "%s: proyectado=%skg | transito=%skg | comprar=%skg | urgencia=%s | fecha=%s",
+                    "%s: proyectado=%skg | prob_compra=%s%% | si_compra=%skg | transito=%skg | comprar=%skg | urgencia=%s | fecha=%s",
                     $mes['mes'] ?? 'N/A',
                     $mes['kg_proyectados'] ?? 0,
+                    $mes['probabilidad_compra_pct'] ?? 0,
+                    $mes['kg_si_compra'] ?? 0,
                     $mes['kg_en_transito'] ?? 0,
                     $mes['kg_a_comprar'] ?? 0,
                     $mes['urgencia'] ?? 'N/A',
@@ -499,6 +561,100 @@ class IaAnalysisService
         );
 
         return $planProd;
+    }
+
+    private function enriquecerOportunidadCompra(
+        array $planProd,
+        array $metricas,
+        array $patrones,
+        array $mesesForecast,
+        float $maxAllowed,
+        string $convId
+    ): array {
+        $meses = $this->construirOportunidadBase($planProd['meses'] ?? [], $metricas, $patrones, $maxAllowed);
+        $planProd['meses'] = $meses;
+
+        $prompt = $this->buildOpportunityPrompt($metricas, $patrones, $planProd, $mesesForecast, $maxAllowed);
+
+        try {
+            $response = $this->llamarMiddleware($prompt, $convId, false);
+            $oportunidadAi = $this->extraerJSON($response);
+        } catch (\Throwable $e) {
+            return $planProd;
+        }
+
+        $mesesAi = collect($oportunidadAi['meses'] ?? [])
+            ->filter(fn($row) => is_array($row) && !empty($row['mes']))
+            ->keyBy('mes');
+
+        foreach ($planProd['meses'] ?? [] as &$mes) {
+            $row = $mesesAi->get($mes['mes'] ?? '', []);
+            $esperado = max(0, (float) ($mes['kg_proyectados'] ?? 0));
+            $baseSiCompra = max($esperado, (float) ($mes['kg_si_compra'] ?? 0));
+            $kgSiCompraAi = $this->toFloat($row['kg_si_compra'] ?? null, $baseSiCompra);
+            $kgSiCompraFinal = $this->clamp(
+                $kgSiCompraAi,
+                max($esperado, $baseSiCompra * 0.85),
+                min($maxAllowed, max($esperado, $baseSiCompra * 1.15))
+            );
+
+            $mes['kg_si_compra'] = $this->round5($kgSiCompraFinal);
+            $mes['probabilidad_compra_pct'] = $mes['kg_si_compra'] > 0
+                ? (int) round(min(95, max(0, ($esperado / $mes['kg_si_compra']) * 100)))
+                : 0;
+            $mes['escenario_probabilidad'] = $this->labelProbabilidad($mes['probabilidad_compra_pct']);
+            $mes['confianza_compra'] = $this->sanitizeEnum(
+                $row['confianza_compra'] ?? null,
+                ['ALTA', 'MEDIA', 'BAJA'],
+                $mes['confianza']
+            );
+
+            if (!empty($row['motivo_compra'])) {
+                $mes['motivo_compra'] = substr(trim((string) $row['motivo_compra']), 0, 180);
+            }
+
+            $mes['lectura_compra'] = $this->buildLecturaCompra($mes);
+        }
+        unset($mes);
+
+        return $planProd;
+    }
+
+    private function construirOportunidadBase(array $meses, array $metricas, array $patrones, float $maxAllowed): array
+    {
+        $medianaActiva = max(0.0, (float) ($patrones['volumen_activo_mediana_kg'] ?? 0));
+        $promActiva = max(0.0, (float) ($patrones['volumen_activo_promedio_kg'] ?? 0));
+        $minActiva = max(0.0, (float) ($patrones['volumen_activo_min_kg'] ?? 0));
+
+        foreach ($meses as &$mes) {
+            $esperado = max(0, (float) ($mes['kg_proyectados'] ?? 0));
+            $patronMes = $this->buscarPatronMes($patrones, $mes['mes'] ?? '');
+            $referencia = max(0.0, (float) ($patronMes['kg_referencia'] ?? 0));
+
+            $kgSiCompra = match ($patronMes['tipo'] ?? null) {
+                'MES_PICO' => max($referencia, $medianaActiva > 0 ? $medianaActiva : $promActiva, $esperado),
+                'MES_BAJO' => max($referencia, $medianaActiva * 0.9, $esperado),
+                'MES_SIN_COMPRA' => max($medianaActiva, $promActiva, $esperado),
+                default => max($referencia > 0 ? (($referencia + max($medianaActiva, $promActiva)) / 2) : max($medianaActiva, $promActiva), $esperado),
+            };
+
+            if ($kgSiCompra <= 0) {
+                $kgSiCompra = max($esperado, $medianaActiva, $promActiva, $minActiva, 0);
+            }
+
+            $kgSiCompra = min(max($kgSiCompra, $esperado), $maxAllowed);
+            $probabilidad = $kgSiCompra > 0 ? (int) round(min(95, max(0, ($esperado / $kgSiCompra) * 100))) : 0;
+
+            $mes['kg_si_compra'] = $this->round5($kgSiCompra);
+            $mes['probabilidad_compra_pct'] = $probabilidad;
+            $mes['escenario_probabilidad'] = $this->labelProbabilidad($probabilidad);
+            $mes['confianza_compra'] = $mes['confianza'] ?? $this->confianzaPorMetricas($metricas);
+            $mes['motivo_compra'] = $this->motivoCompraBase($patronMes, $mes['kg_si_compra']);
+            $mes['lectura_compra'] = $this->buildLecturaCompra($mes);
+        }
+        unset($mes);
+
+        return $meses;
     }
 
     private function distribuirCompraYTransito(array $proyecciones, float $enTransito, int $diasRestantes): array
@@ -813,6 +969,50 @@ class IaAnalysisService
         }
 
         return $alertas;
+    }
+
+    private function labelProbabilidad(int $probabilidad): string
+    {
+        if ($probabilidad >= 70) {
+            return 'ALTA';
+        }
+
+        if ($probabilidad >= 35) {
+            return 'MEDIA';
+        }
+
+        return 'BAJA';
+    }
+
+    private function buildLecturaCompra(array $mes): string
+    {
+        $esperado = (int) ($mes['kg_proyectados'] ?? 0);
+        $prob = (int) ($mes['probabilidad_compra_pct'] ?? 0);
+        $siCompra = (int) ($mes['kg_si_compra'] ?? 0);
+
+        if ($esperado <= 0 || $siCompra <= 0 || $prob <= 0) {
+            return 'Sin oportunidad clara de compra en este mes.';
+        }
+
+        return "Esperado {$esperado} kg = ~{$prob}% de probabilidad de compra y ~{$siCompra} kg si la compra ocurre.";
+    }
+
+    private function motivoCompraBase(?array $patronMes, int $kgSiCompra): string
+    {
+        if ($kgSiCompra <= 0) {
+            return 'Sin señal de compra relevante para este mes.';
+        }
+
+        if (!$patronMes) {
+            return "Si compra, el tamaño probable del pedido estaría alrededor de {$kgSiCompra} kg.";
+        }
+
+        return match ($patronMes['tipo'] ?? null) {
+            'MES_PICO' => "{$patronMes['label']} toma como referencia un mes históricamente alto; si compra, el bloque probable ronda {$kgSiCompra} kg.",
+            'MES_SIN_COMPRA' => "{$patronMes['label']} no tuvo compra el año pasado; si reaparece demanda, el bloque probable seguiría la escala típica del producto (~{$kgSiCompra} kg).",
+            'MES_BAJO' => "{$patronMes['label']} fue bajo frente al promedio activo, pero si compra el producto suele moverse en bloques cercanos a {$kgSiCompra} kg.",
+            default => "{$patronMes['label']} se proyecta con una compra probable cercana a {$kgSiCompra} kg si el pedido se materializa.",
+        };
     }
 
     private function resumirMesesPatron(array $rows): string
