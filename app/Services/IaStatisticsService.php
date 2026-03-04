@@ -153,8 +153,8 @@ class IaStatisticsService
         $ordenAsc = $activos;
         usort($ordenAsc, fn($a, $b) => $a['kg'] <=> $b['kg']);
 
-        $umbralPico  = $promActivos * 1.25;
-        $umbralValle = $promActivos * 0.85;
+        $umbralPico  = $medianaActivos * 1.35;
+        $umbralValle = $medianaActivos * 0.80;
 
         $picos = array_values(array_filter($ordenDesc, fn($row) => $row['kg'] >= $umbralPico));
         if (empty($picos)) {
@@ -174,7 +174,7 @@ class IaStatisticsService
 
         $rachaSinCompra = self::calcularRacha($historial12, fn($row) => $row['kg'] <= 0);
         $objetivos = array_map(
-            fn($mes) => self::analizarMesObjetivo($mes, $historial12, $promActivos),
+            fn($mes) => self::analizarMesObjetivo($mes, $historial12, $medianaActivos),
             $mesesObjetivo
         );
 
@@ -577,7 +577,7 @@ class IaStatisticsService
         ];
     }
 
-    private static function analizarMesObjetivo(string $mes, array $historial12, float $promActivos): array
+    private static function analizarMesObjetivo(string $mes, array $historial12, float $medianaActivos): array
     {
         $historialMap = [];
         foreach ($historial12 as $row) {
@@ -596,20 +596,20 @@ class IaStatisticsService
             $tipo = 'MES_SIN_COMPRA';
             $fuerza = $vecindadActiva ? 'BAJA' : 'BAJA';
             $mensaje = "El mismo mes del año pasado no tuvo compras; cualquier demanda proyectada aquí debe leerse con cautela.";
-        } elseif ($promActivos > 0 && $kgReferencia >= $promActivos * 1.25) {
+        } elseif ($medianaActivos > 0 && $kgReferencia >= $medianaActivos * 1.35) {
             $tipo = 'MES_PICO';
             $fuerza = $vecindadActiva ? 'MEDIA' : 'BAJA';
             $mensaje = $vecindadActiva
                 ? "El mismo mes del año pasado fue alto y además estuvo acompañado por actividad cercana."
                 : "El mismo mes del año pasado fue alto, pero es una referencia aislada y no una estacionalidad confirmada.";
-        } elseif ($promActivos > 0 && $kgReferencia <= $promActivos * 0.85) {
+        } elseif ($medianaActivos > 0 && $kgReferencia <= $medianaActivos * 0.80) {
             $tipo = 'MES_BAJO';
             $fuerza = 'MEDIA';
-            $mensaje = "El mismo mes del año pasado estuvo por debajo del promedio de meses activos.";
+            $mensaje = "El mismo mes del año pasado estuvo por debajo del rango típico de meses activos.";
         } else {
             $tipo = 'MES_MEDIO';
             $fuerza = 'MEDIA';
-            $mensaje = "El mismo mes del año pasado estuvo cerca del promedio histórico de meses activos.";
+            $mensaje = "El mismo mes del año pasado estuvo dentro del rango típico de meses activos.";
         }
 
         return [
