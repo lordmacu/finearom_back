@@ -2,9 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Events\IaForecastClientProcessingUpdated;
 use App\Models\IaForecastClientRun;
 use App\Models\IaForecastClientRunItem;
 use App\Services\IaAnalysisService;
+use App\Services\IaForecastClientProcessingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -27,7 +29,7 @@ class ProcessIaForecastClientProduct implements ShouldQueue
         $this->onQueue('ia-forecast');
     }
 
-    public function handle(IaAnalysisService $analysisService): void
+    public function handle(IaAnalysisService $analysisService, IaForecastClientProcessingService $processingService): void
     {
         $item = null;
 
@@ -75,6 +77,8 @@ class ProcessIaForecastClientProduct implements ShouldQueue
                 return;
             }
 
+            $this->broadcastUpdate($processingService, (int) $item->cliente_id);
+
             $analysisService->analyze((int) $item->cliente_id, (int) $item->producto_id);
 
             IaForecastClientRunItem::query()
@@ -102,6 +106,7 @@ class ProcessIaForecastClientProduct implements ShouldQueue
         }
 
         $this->refreshRunState();
+        $this->broadcastUpdate($processingService, (int) ($item?->cliente_id ?? IaForecastClientRun::query()->whereKey($this->runId)->value('cliente_id')));
         $this->dispatchNextItem();
     }
 
@@ -161,5 +166,17 @@ class ProcessIaForecastClientProduct implements ShouldQueue
         }
 
         self::dispatch($run->id, $nextItem->id)->onQueue('ia-forecast');
+    }
+
+    private function broadcastUpdate(IaForecastClientProcessingService $processingService, ?int $clientId): void
+    {
+        if (!$clientId) {
+            return;
+        }
+
+        event(new IaForecastClientProcessingUpdated(
+            $clientId,
+            $processingService->buildPayload($clientId)
+        ));
     }
 }
