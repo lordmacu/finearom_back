@@ -1049,8 +1049,20 @@ class PurchaseOrderController extends Controller
                 }
             }
 
-            // Remove duplicates and filter
-            $ccEmails = array_values(array_unique(array_filter($ccEmails)));
+            // Remove duplicates, filter empty and validate format
+            $ccEmails = array_values(array_unique(array_filter(
+                $ccEmails,
+                fn($e) => !empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)
+            )));
+
+            // Validate TO email
+            if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+                Log::warning('sendStatusUpdateEmail: TO email inválido, abortando', [
+                    'order_id' => $order->id,
+                    'toEmail' => $toEmail,
+                ]);
+                return;
+            }
 
             // Send email
             $baseSubject = $order->subject_dispatch;
@@ -1549,38 +1561,50 @@ class PurchaseOrderController extends Controller
 
             // 1. ENVIAR EMAIL AL CLIENTE (solo tabla)
             // A: Emails del cliente que están en el request
+            // Filtrar emails de cliente válidos antes de enviar
+            $clientRecipients = array_values(array_filter(
+                $clientRecipients,
+                fn($e) => !empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)
+            ));
             if (!empty($clientRecipients) && !empty($tablesOnly)) {
-                $clientBody = view('emails.purchase_order_observation', [
-                    'order'           => $order,
-                    'observationHtml' => $tablesOnly, // Solo tablas
-                    'forClient'       => true,
-                ])->render();
+                try {
+                    $clientBody = view('emails.purchase_order_observation', [
+                        'order'           => $order,
+                        'observationHtml' => $tablesOnly, // Solo tablas
+                        'forClient'       => true,
+                    ])->render();
 
-                $clientTo = array_shift($clientRecipients);
-                $clientCcAddresses = array_map(fn ($email) => new Address($email), $clientRecipients);
+                    $clientTo = array_shift($clientRecipients);
+                    $clientCcAddresses = array_map(fn ($email) => new Address($email), $clientRecipients);
 
-                $clientMail = (new Email())
-                    ->from($userEmail)
-                    ->to($clientTo)
-                    ->cc(...$clientCcAddresses)
-                    ->subject($subjectClient)
-                    ->html($clientBody);
+                    $clientMail = (new Email())
+                        ->from($userEmail)
+                        ->to($clientTo)
+                        ->cc(...$clientCcAddresses)
+                        ->subject($subjectClient)
+                        ->html($clientBody);
 
-                if ($threadIdClient) {
-                    $clientMail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadIdClient . '>');
-                    $clientMail->getHeaders()->addTextHeader('References', '<' . $threadIdClient . '>');
+                    if ($threadIdClient) {
+                        $clientMail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadIdClient . '>');
+                        $clientMail->getHeaders()->addTextHeader('References', '<' . $threadIdClient . '>');
+                    }
+
+                    \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email cliente', [
+                        'order_id' => $order->id,
+                        'to' => $clientTo,
+                        'cc' => $clientRecipients,
+                        'subject' => $subjectClient,
+                        'threadId' => $threadIdClient,
+                        'from' => $userEmail,
+                    ]);
+
+                    $mailer->send($clientMail);
+                } catch (\Throwable $e) {
+                    Log::error('OBSERVACIONES - Error enviando email al cliente', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                    ]);
                 }
-
-                \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email cliente', [
-                    'order_id' => $order->id,
-                    'to' => $clientTo,
-                    'cc' => $clientRecipients,
-                    'subject' => $subjectClient,
-                    'threadId' => $threadIdClient,
-                    'from' => $userEmail,
-                ]);
-
-                $mailer->send($clientMail);
             } else {
                 \Log::info('OBSERVACIONES - Email al cliente NO enviado', [
                     'order_id' => $order->id,
@@ -1592,40 +1616,52 @@ class PurchaseOrderController extends Controller
 
             // 2. ENVIAR EMAIL INTERNO (tabla + texto + observaciones internas)
             // A: Emails internos del request + emails de procesos
+            // Filtrar emails internos válidos antes de enviar
+            $allInternalEmails = array_values(array_filter(
+                $allInternalEmails,
+                fn($e) => !empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)
+            ));
             // Se envía si hay contenido en observationHtml O si hay observaciones internas
             if (!empty($allInternalEmails) && (!empty($observationHtml) || !empty($internalObservation))) {
-                $internalBody = view('emails.purchase_order_observation', [
-                    'order'           => $order,
-                    'observationHtml' => $observationHtml, // Contenido completo (tabla + texto)
-                    'internalHtml'    => $internalObservation,
-                    'forClient'       => false,
-                ])->render();
+                try {
+                    $internalBody = view('emails.purchase_order_observation', [
+                        'order'           => $order,
+                        'observationHtml' => $observationHtml, // Contenido completo (tabla + texto)
+                        'internalHtml'    => $internalObservation,
+                        'forClient'       => false,
+                    ])->render();
 
-                $internalTo = array_shift($allInternalEmails);
-                $internalCcAddresses = array_map(fn ($email) => new Address($email), $allInternalEmails);
+                    $internalTo = array_shift($allInternalEmails);
+                    $internalCcAddresses = array_map(fn ($email) => new Address($email), $allInternalEmails);
 
-                $internalEmail = (new Email())
-                    ->from($userEmail)
-                    ->to($internalTo)
-                    ->cc(...$internalCcAddresses)
-                    ->subject($subjectInternal)
-                    ->html($internalBody);
+                    $internalEmail = (new Email())
+                        ->from($userEmail)
+                        ->to($internalTo)
+                        ->cc(...$internalCcAddresses)
+                        ->subject($subjectInternal)
+                        ->html($internalBody);
 
-                if ($threadIdInternal) {
-                    $internalEmail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadIdInternal . '>');
-                    $internalEmail->getHeaders()->addTextHeader('References', '<' . $threadIdInternal . '>');
+                    if ($threadIdInternal) {
+                        $internalEmail->getHeaders()->addTextHeader('In-Reply-To', '<' . $threadIdInternal . '>');
+                        $internalEmail->getHeaders()->addTextHeader('References', '<' . $threadIdInternal . '>');
+                    }
+
+                    \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email interno', [
+                        'order_id' => $order->id,
+                        'from' => $userEmail,
+                        'to' => $internalTo,
+                        'cc' => $allInternalEmails,
+                        'subject' => $subjectInternal,
+                        'threadId' => $threadIdInternal,
+                    ]);
+
+                    $mailer->send($internalEmail);
+                } catch (\Throwable $e) {
+                    Log::error('OBSERVACIONES - Error enviando email interno', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                    ]);
                 }
-
-                \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email interno', [
-                    'order_id' => $order->id,
-                    'from' => $userEmail,
-                    'to' => $internalTo,
-                    'cc' => $allInternalEmails,
-                    'subject' => $subjectInternal,
-                    'threadId' => $threadIdInternal,
-                ]);
-
-                $mailer->send($internalEmail);
             } else {
                 \Log::info('OBSERVACIONES - Email interno NO enviado', [
                     'order_id' => $order->id,
@@ -1700,8 +1736,8 @@ class PurchaseOrderController extends Controller
             $parts = strpos((string) $email, ',') !== false ? explode(',', (string) $email) : [$email];
             foreach ($parts as $part) {
                 $clean = preg_replace('/[<>"\'\\s]/', '', trim((string) $part));
-                if ($clean !== '') {
-                    $normalized[] = $clean;
+                if ($clean !== '' && filter_var($clean, FILTER_VALIDATE_EMAIL)) {
+                    $normalized[] = strtolower($clean);
                 }
             }
         }
