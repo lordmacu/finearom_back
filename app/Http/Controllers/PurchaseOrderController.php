@@ -2249,7 +2249,10 @@ class PurchaseOrderController extends Controller
         // Expandir executive_email que puede contener múltiples emails separados por coma
         $executiveEmailRaw = $purchaseOrder->client->executive_email ?? $purchaseOrder->client->executive;
         $executiveEmails = !empty($executiveEmailRaw)
-            ? array_filter(array_map('trim', explode(',', $executiveEmailRaw)))
+            ? array_values(array_filter(
+                array_map(fn($e) => preg_replace('/[<>"\'\\s]/', '', trim($e)), explode(',', $executiveEmailRaw)),
+                fn($e) => !empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)
+            ))
             : [];
         $coordinator = 'monica.castano@finearom.com';
         // Usar los adjuntos ya almacenados en la orden (array)
@@ -2280,9 +2283,20 @@ class PurchaseOrderController extends Controller
             $primaryToEmail = array_shift($ccEmails);
         }
 
-        // Limpiar duplicados
-        $ccEmails = array_filter(array_map('trim', $ccEmails));
-        $ccEmails = array_values(array_unique(array_diff($ccEmails, [$primaryToEmail])));
+        // Limpiar duplicados y validar formato de email
+        $ccEmails = array_values(array_unique(array_diff(
+            array_filter(array_map('trim', $ccEmails), fn($e) => !empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)),
+            [$primaryToEmail]
+        )));
+
+        // Validar TO antes de enviar
+        if (!empty($primaryToEmail) && !filter_var(trim($primaryToEmail), FILTER_VALIDATE_EMAIL)) {
+            Log::warning('EMAIL PEDIDOS - TO inválido, abortando email de pedido', [
+                'order_id' => $purchaseOrder->id,
+                'primaryToEmail' => $primaryToEmail,
+            ]);
+            $primaryToEmail = null;
+        }
 
         Log::info('EMAIL PEDIDOS - Destinatarios preparados', [
             'to' => $primaryToEmail,
@@ -2379,9 +2393,20 @@ class PurchaseOrderController extends Controller
             $ccEmails = array_merge($clientCandidates, $ccEmails);
         }
 
-        // Limpiar duplicados
-        $ccEmails = array_filter(array_map('trim', $ccEmails));
-        $ccEmails = array_values(array_unique(array_diff($ccEmails, [$toEmail])));
+        // Limpiar duplicados y validar formato de email
+        $ccEmails = array_values(array_unique(array_diff(
+            array_filter(array_map('trim', $ccEmails), fn($e) => !empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)),
+            [$toEmail]
+        )));
+
+        // Validar TO antes de enviar
+        if (!empty($toEmail) && !filter_var(trim($toEmail), FILTER_VALIDATE_EMAIL)) {
+            Log::warning('EMAIL DESPACHOS - TO inválido, aplicando fallback', [
+                'order_id' => $purchaseOrder->id,
+                'toEmail' => $toEmail,
+            ]);
+            $toEmail = null;
+        }
 
         Log::info('EMAIL DESPACHOS - Destinatarios preparados', [
             'to' => $toEmail,
