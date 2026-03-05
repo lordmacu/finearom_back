@@ -1188,15 +1188,45 @@ class IaAnalysisService
 
     // ── Middleware HTTP calls ─────────────────────────────────────────────────
 
-    private function llamarMiddleware(string $prompt, string $convId, bool $newChat): string
-    {
+    /**
+     * Llama al middleware AI usando el formato estándar OpenAI /v1/chat/completions.
+     *
+     * @param string      $prompt        Mensaje del usuario
+     * @param string      $convId        ID de conversación (thread_id)
+     * @param bool        $newChat       true = nueva conversación
+     * @param string|null $systemPrompt  Instrucción de sistema (solo en newChat=true)
+     * @param string      $model         Familia del modelo (default: gpt-4.1)
+     * @param array       $modelOptions  Opciones del modelo (temperature, top_p, etc.)
+     */
+    private function llamarMiddleware(
+        string $prompt,
+        string $convId,
+        bool   $newChat,
+        ?string $systemPrompt = null,
+        string  $model        = 'gpt-4.1',
+        array   $modelOptions = []
+    ): string {
+        // Construir array de mensajes en formato OpenAI
+        $messages = [];
+        if ($systemPrompt) {
+            $messages[] = ['role' => 'system', 'content' => $systemPrompt];
+        }
+        $messages[] = ['role' => 'user', 'content' => $prompt];
+
+        $payload = [
+            'model'       => $model,
+            'messages'    => $messages,
+            'stream'      => false,
+            'thread_id'   => $newChat ? null : $convId,   // null = nueva conversación
+        ];
+
+        if (!empty($modelOptions)) {
+            $payload = array_merge($payload, $modelOptions); // temperature, top_p, etc. van al root
+        }
+
         $response = Http::withHeaders(['X-Api-Key' => $this->apiKey])
-            ->timeout(120)
-            ->post("{$this->middlewareUrl}/api/prompt/set", [
-                'prompt'  => $prompt,
-                'id'      => $convId,
-                'newChat' => $newChat,
-            ]);
+            ->timeout(130)
+            ->post("{$this->middlewareUrl}/v1/chat/completions", $payload);
 
         if (!$response->successful()) {
             throw new \RuntimeException(
@@ -1204,26 +1234,16 @@ class IaAnalysisService
             );
         }
 
-        $data     = $response->json();
-        $messages = $data['result']['messages'] ?? [];
+        $data    = $response->json();
+        $content = $data['choices'][0]['message']['content'] ?? null;
 
-        // Último mensaje del assistant
-        $lastAssistant = null;
-        foreach (array_reverse($messages) as $msg) {
-            if (($msg['role'] ?? '') === 'assistant') {
-                $lastAssistant = $msg;
-                break;
-            }
-        }
-
-        if (!$lastAssistant) {
+        if ($content === null) {
             throw new \RuntimeException(
-                "Sin respuesta del assistant. Conv: " . json_encode(array_slice($messages, -2))
+                'Sin respuesta del assistant. Response: ' . json_encode(array_slice((array) $data, 0, 3))
             );
         }
 
-        $text = $lastAssistant['text'] ?? '';
-        return is_string($text) ? $text : json_encode($text);
+        return is_string($content) ? $content : json_encode($content);
     }
 
     private function extraerJSON(string $texto): array
