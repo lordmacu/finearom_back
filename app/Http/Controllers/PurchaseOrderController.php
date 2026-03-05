@@ -1699,7 +1699,7 @@ class PurchaseOrderController extends Controller
         foreach ($emails as $email) {
             $parts = strpos((string) $email, ',') !== false ? explode(',', (string) $email) : [$email];
             foreach ($parts as $part) {
-                $clean = trim((string) $part);
+                $clean = preg_replace('/[<>"\'\\s]/', '', trim((string) $part));
                 if ($clean !== '') {
                     $normalized[] = $clean;
                 }
