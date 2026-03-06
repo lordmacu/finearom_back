@@ -234,3 +234,23 @@ Route::middleware('auth:sanctum')->group(function () {
 
 // Public Pixel Route (no auth)
 Route::get('/tracking/{uuid}/pixel.png', [App\Http\Controllers\EmailTrackingController::class, 'pixel']);
+
+// =====================================================
+// Siigo Sync - Rutas independientes para middleware Go
+// =====================================================
+use App\Http\Controllers\SiigoSyncController;
+
+// Login propio para el middleware (no requiere auth)
+Route::post('/siigo/login', [SiigoSyncController::class, 'login']);
+
+// Rutas protegidas para sincronización (sin throttle - sync masivo)
+Route::middleware('auth:sanctum')->prefix('siigo')->group(function () {
+    Route::post('/clients', [SiigoSyncController::class, 'syncClients']);
+    Route::post('/products', [SiigoSyncController::class, 'syncProducts']);
+    Route::post('/movements', [SiigoSyncController::class, 'syncMovements']);
+    Route::post('/bulk', [SiigoSyncController::class, 'bulk']);
+    Route::get('/status', [SiigoSyncController::class, 'status']);
+    Route::get('/clients', [SiigoSyncController::class, 'listClients']);
+    Route::get('/products', [SiigoSyncController::class, 'listProducts']);
+    Route::get('/movements', [SiigoSyncController::class, 'listMovements']);
+});
