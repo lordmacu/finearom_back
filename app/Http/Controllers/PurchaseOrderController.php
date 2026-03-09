@@ -182,7 +182,7 @@ class PurchaseOrderController extends Controller
             'order_consecutive'    => ['required', 'string'],
             'contact'              => ['required', 'string'],
             'phone'                => ['required', 'string'],
-            'status'               => ['required', 'string', 'in:pending,processing,completed,cancelled,parcial_status'],
+            'status'               => ['nullable', 'string', 'in:pending,processing,completed,cancelled,parcial_status'],
             'trm'                  => ['required'],
             'observations'              => ['nullable', 'string'],
             'internal_observations'     => ['nullable', 'string'],
@@ -244,7 +244,7 @@ class PurchaseOrderController extends Controller
                 'order_consecutive'  => $validated['order_consecutive'],
                 'contact'            => $validated['contact'],
                 'phone'              => $validated['phone'],
-                'status'             => $validated['status'],
+                'status'             => 'pending',
                 'observations'           => $validated['observations'] ?? null,
                 'internal_observations'  => $validated['internal_observations'] ?? null,
                 'tag_email_pedidos'      => $this->sanitizeEmailTag($validated['tag_email_pedidos'] ?? null),
@@ -1487,6 +1487,11 @@ class PurchaseOrderController extends Controller
                 $processEmails = []; // No agregar emails de procesos si el usuario seleccionó emails
             }
 
+            $stakeholderEmails = $this->normalizeEmails([
+                'monica.castano@finearom.com',
+                'coordinadora.comercial@finearom.com',
+            ]);
+
             // Recopilar TODOS los emails del cliente (principal + despacho + ejecutivo)
             $clientEmailsRaw = array_filter([
                 $order->client->email ?? null,
@@ -1507,6 +1512,11 @@ class PurchaseOrderController extends Controller
             if (empty($allInternalEmails)) {
                 $allInternalEmails = $processEmails;
             }
+
+            $allInternalEmails = array_values(array_unique(array_merge(
+                $allInternalEmails,
+                $stakeholderEmails
+            )));
 
             \Log::info('OBSERVACIONES - Emails identificados ---', [
                 'order_id' => $order->id,
@@ -1575,7 +1585,11 @@ class PurchaseOrderController extends Controller
                     ])->render();
 
                     $clientTo = array_shift($clientRecipients);
-                    $clientCcAddresses = array_map(fn ($email) => new Address($email), $clientRecipients);
+                    $clientCcRecipients = array_values(array_unique(array_merge(
+                        $clientRecipients,
+                        $stakeholderEmails
+                    )));
+                    $clientCcAddresses = array_map(fn ($email) => new Address($email), $clientCcRecipients);
 
                     $clientMail = (new Email())
                         ->from($userEmail)
@@ -1592,7 +1606,7 @@ class PurchaseOrderController extends Controller
                     \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Enviando email cliente', [
                         'order_id' => $order->id,
                         'to' => $clientTo,
-                        'cc' => $clientRecipients,
+                        'cc' => $clientCcRecipients,
                         'subject' => $subjectClient,
                         'threadId' => $threadIdClient,
                         'from' => $userEmail,

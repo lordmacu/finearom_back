@@ -35,7 +35,7 @@ class CarteraEmailHelper
         $html .= '<th style="border:1px solid #ddd; padding:8px; text-align:center;">Número de documento</th>';
         $html .= '<th style="border:1px solid #ddd; padding:8px; text-align:center;">Fecha de Emisión</th>';
         $html .= '<th style="border:1px solid #ddd; padding:8px; text-align:center;">Fecha de Vencimiento</th>';
-        $html .= '<th style="border:1px solid #ddd; padding:8px; text-align:center; width:30px;">Días vencidos</th>';
+        $html .= '<th style="border:1px solid #ddd; padding:8px; text-align:center; width:30px;">Días Vencido/a vencerse</th>';
         $html .= '<th style="border:1px solid #ddd; padding:8px; text-align:center;">Valor del documento</th>';
         $html .= '</tr>';
         $html .= '</thead>';
