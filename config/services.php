@@ -36,4 +36,8 @@ return [
         'key' => env('IA_MIDDLEWARE_KEY', 'finearom-ai-2025'),
     ],
 
+    'siigo' => [
+        'webhook_secret' => env('SIIGO_WEBHOOK_SECRET', ''),
+    ],
+
 ];

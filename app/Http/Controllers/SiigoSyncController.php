@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\SiigoClient;
 use App\Models\SiigoProduct;
 use App\Models\SiigoMovement;
+use App\Models\SiigoCartera;
 use App\Models\SiigoSyncLog;
+use App\Models\SiigoWebhookLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -61,7 +63,7 @@ class SiigoSyncController extends Controller
         $client = SiigoClient::updateOrCreate(
             ['nit' => $request->nit],
             [
-                'nombre' => $request->client_name ?? $request->business_name,
+                'nombre' => mb_substr($request->client_name ?? $request->business_name ?? '', 0, 100) ?: null,
                 'tipo_doc' => $request->tipo_doc,
                 'numero_doc' => $request->nit,
                 'direccion' => $request->address,
@@ -98,7 +100,7 @@ class SiigoSyncController extends Controller
         $product = SiigoProduct::updateOrCreate(
             ['codigo' => $request->code],
             [
-                'nombre' => $request->product_name,
+                'nombre' => $request->product_name ? mb_substr($request->product_name, 0, 120) : null,
                 'precio' => $request->price ?? 0,
                 'siigo_hash' => $request->siigo_sync_hash,
             ]
@@ -139,7 +141,7 @@ class SiigoSyncController extends Controller
                 'fecha' => $request->fecha,
                 'nit_tercero' => $request->nit_tercero,
                 'cuenta_contable' => $request->cuenta_contable,
-                'descripcion' => $request->descripcion,
+                'descripcion' => $request->descripcion ? mb_substr($request->descripcion, 0, 200) : null,
                 'valor' => $request->valor ?? 0,
                 'tipo_mov' => $request->tipo_mov,
             ]
@@ -155,13 +157,50 @@ class SiigoSyncController extends Controller
     }
 
     /**
+     * Sync cartera from Siigo.
+     * POST /api/siigo/cartera
+     */
+    public function syncCartera(Request $request)
+    {
+        $request->validate([
+            'tipo_registro' => 'nullable|string',
+            'nit_tercero' => 'nullable|string',
+            'cuenta_contable' => 'nullable|string',
+            'fecha' => 'nullable|date',
+            'descripcion' => 'nullable|string',
+            'tipo_mov' => 'nullable|string',
+            'siigo_sync_hash' => 'nullable|string',
+        ]);
+
+        $cartera = SiigoCartera::updateOrCreate(
+            ['siigo_hash' => $request->siigo_sync_hash],
+            [
+                'tipo_registro' => $request->tipo_registro,
+                'nit_tercero' => $request->nit_tercero,
+                'cuenta_contable' => $request->cuenta_contable,
+                'fecha' => $request->fecha,
+                'descripcion' => $request->descripcion ? mb_substr($request->descripcion, 0, 200) : null,
+                'tipo_mov' => $request->tipo_mov,
+            ]
+        );
+
+        $this->logSync('Z09', $cartera->wasRecentlyCreated ? 'new' : 'updated', 1);
+
+        return response()->json([
+            'message' => 'Cartera sincronizada',
+            'id' => $cartera->id,
+            'created' => $cartera->wasRecentlyCreated,
+        ]);
+    }
+
+    /**
      * Bulk sync - receive multiple records at once.
      * POST /api/siigo/bulk
      */
     public function bulk(Request $request)
     {
         $request->validate([
-            'type' => 'required|in:clients,products,movements',
+            'type' => 'required|in:clients,products,movements,cartera',
             'records' => 'required|array|min:1',
         ]);
 
@@ -173,51 +212,7 @@ class SiigoSyncController extends Controller
         DB::beginTransaction();
         try {
             foreach ($records as $record) {
-                switch ($type) {
-                    case 'clients':
-                        $item = SiigoClient::updateOrCreate(
-                            ['nit' => $record['nit']],
-                            [
-                                'nombre' => $record['client_name'] ?? $record['business_name'] ?? null,
-                                'tipo_doc' => $record['tipo_doc'] ?? null,
-                                'numero_doc' => $record['nit'],
-                                'direccion' => $record['address'] ?? null,
-                                'ciudad' => $record['city'] ?? null,
-                                'telefono' => $record['phone'] ?? null,
-                                'email' => $record['email'] ?? null,
-                                'siigo_codigo' => $record['siigo_codigo'] ?? null,
-                                'siigo_hash' => $record['siigo_sync_hash'] ?? null,
-                            ]
-                        );
-                        break;
-
-                    case 'products':
-                        $item = SiigoProduct::updateOrCreate(
-                            ['codigo' => $record['code']],
-                            [
-                                'nombre' => $record['product_name'] ?? null,
-                                'precio' => $record['price'] ?? 0,
-                                'siigo_hash' => $record['siigo_sync_hash'] ?? null,
-                            ]
-                        );
-                        break;
-
-                    case 'movements':
-                        $item = SiigoMovement::updateOrCreate(
-                            ['siigo_hash' => $record['siigo_sync_hash'] ?? uniqid()],
-                            [
-                                'tipo_comprobante' => $record['tipo_comprobante'] ?? null,
-                                'numero_doc' => $record['numero_doc'] ?? null,
-                                'fecha' => $record['fecha'] ?? null,
-                                'nit_tercero' => $record['nit_tercero'] ?? null,
-                                'cuenta_contable' => $record['cuenta_contable'] ?? null,
-                                'descripcion' => $record['descripcion'] ?? null,
-                                'valor' => $record['valor'] ?? 0,
-                                'tipo_mov' => $record['tipo_mov'] ?? null,
-                            ]
-                        );
-                        break;
-                }
+                $item = $this->upsertRecord($type, $record);
 
                 if ($item->wasRecentlyCreated) {
                     $created++;
@@ -228,7 +223,7 @@ class SiigoSyncController extends Controller
 
             DB::commit();
 
-            $fileMap = ['clients' => 'Z17', 'products' => 'Z06', 'movements' => 'Z49'];
+            $fileMap = ['clients' => 'Z17', 'products' => 'Z06', 'movements' => 'Z49', 'cartera' => 'Z09'];
             $this->logSync($fileMap[$type], 'bulk', $created + $updated, "created=$created, updated=$updated");
 
             return response()->json([
@@ -244,6 +239,112 @@ class SiigoSyncController extends Controller
     }
 
     /**
+     * Generic sync endpoint - receives a single record from Go middleware.
+     * POST /api/siigo/sync
+     *
+     * Payload: { "table": "clients|products|movements|cartera", "action": "add|edit|delete", "key": "...", "data": {...} }
+     * This is the primary endpoint the Go middleware calls for each pending record.
+     */
+    public function sync(Request $request)
+    {
+        $request->validate([
+            'table' => 'required|in:clients,products,movements,cartera',
+            'action' => 'required|in:add,edit,delete',
+            'key' => 'nullable|string',
+            'data' => 'required|array',
+        ]);
+
+        $table = $request->input('table');
+        $action = $request->input('action');
+        $key = $request->input('key', '');
+        $data = $request->input('data');
+
+        // Handle delete action
+        if ($action === 'delete') {
+            $deleted = $this->deleteRecord($table, $key, $data);
+            $fileMap = ['clients' => 'Z17', 'products' => 'Z06', 'movements' => 'Z49', 'cartera' => 'Z09'];
+            $this->logSync($fileMap[$table] ?? $table, 'deleted', $deleted ? 1 : 0, "key=$key");
+
+            return response()->json([
+                'message' => $deleted ? 'Registro eliminado' : 'Registro no encontrado',
+                'deleted' => $deleted,
+            ]);
+        }
+
+        // Add or edit: upsert the record
+        $item = $this->upsertRecord($table, $data);
+        $fileMap = ['clients' => 'Z17', 'products' => 'Z06', 'movements' => 'Z49', 'cartera' => 'Z09'];
+        $this->logSync(
+            $fileMap[$table] ?? $table,
+            $item->wasRecentlyCreated ? 'new' : 'updated',
+            1,
+            "key=$key, action=$action"
+        );
+
+        return response()->json([
+            'message' => 'Registro sincronizado',
+            'id' => $item->id,
+            'created' => $item->wasRecentlyCreated,
+            'table' => $table,
+        ]);
+    }
+
+    /**
+     * Webhook endpoint - receives notifications from Go middleware.
+     * POST /api/siigo/webhook
+     *
+     * Verifies HMAC-SHA256 signature if X-Webhook-Signature header present.
+     * Dispatches based on event type: sync_complete triggers data pull,
+     * send_complete/send_paused are logged for monitoring.
+     */
+    public function webhook(Request $request)
+    {
+        // Verify HMAC signature if configured
+        $webhookSecret = config('services.siigo.webhook_secret');
+        if ($webhookSecret) {
+            $signature = $request->header('X-Webhook-Signature');
+            if (!$signature) {
+                return response()->json(['message' => 'Missing signature'], 401);
+            }
+
+            $expectedSig = 'sha256=' . hash_hmac('sha256', $request->getContent(), $webhookSecret);
+            if (!hash_equals($expectedSig, $signature)) {
+                return response()->json(['message' => 'Invalid signature'], 401);
+            }
+        }
+
+        $event = $request->input('event', 'unknown');
+        $data = $request->input('data', []);
+        $timestamp = $request->input('timestamp');
+
+        // Log the webhook
+        $log = SiigoWebhookLog::create([
+            'event' => $event,
+            'source_ip' => $request->ip(),
+            'payload' => $request->all(),
+            'status' => 'received',
+        ]);
+
+        try {
+            $result = $this->processWebhookEvent($event, $data);
+            $log->update(['status' => 'processed']);
+
+            return response()->json([
+                'message' => 'Webhook procesado',
+                'event' => $event,
+                'result' => $result,
+            ]);
+        } catch (\Exception $e) {
+            $log->update(['status' => 'error', 'error_message' => $e->getMessage()]);
+
+            return response()->json([
+                'message' => 'Error procesando webhook',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Get sync status and recent logs.
      * GET /api/siigo/status
      */
@@ -253,7 +354,9 @@ class SiigoSyncController extends Controller
             'clients_count' => SiigoClient::count(),
             'products_count' => SiigoProduct::count(),
             'movements_count' => SiigoMovement::count(),
+            'cartera_count' => SiigoCartera::count(),
             'recent_logs' => SiigoSyncLog::latest()->take(20)->get(),
+            'recent_webhooks' => SiigoWebhookLog::latest()->take(10)->get(),
         ]);
     }
 
@@ -265,8 +368,11 @@ class SiigoSyncController extends Controller
     {
         $query = SiigoClient::query();
         if ($request->search) {
-            $query->where('nombre', 'like', "%{$request->search}%")
-                  ->orWhere('nit', 'like', "%{$request->search}%");
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('nombre', 'like', "%{$search}%")
+                  ->orWhere('nit', 'like', "%{$search}%");
+            });
         }
         return response()->json($query->orderBy('updated_at', 'desc')->paginate(50));
     }
@@ -279,8 +385,11 @@ class SiigoSyncController extends Controller
     {
         $query = SiigoProduct::query();
         if ($request->search) {
-            $query->where('nombre', 'like', "%{$request->search}%")
-                  ->orWhere('codigo', 'like', "%{$request->search}%");
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('nombre', 'like', "%{$search}%")
+                  ->orWhere('codigo', 'like', "%{$search}%");
+            });
         }
         return response()->json($query->orderBy('updated_at', 'desc')->paginate(50));
     }
@@ -299,6 +408,165 @@ class SiigoSyncController extends Controller
             $query->where('nit_tercero', $request->nit);
         }
         return response()->json($query->orderBy('fecha', 'desc')->paginate(50));
+    }
+
+    /**
+     * List synced cartera.
+     * GET /api/siigo/cartera
+     */
+    public function listCartera(Request $request)
+    {
+        $query = SiigoCartera::query();
+        if ($request->nit) {
+            $query->where('nit_tercero', $request->nit);
+        }
+        if ($request->search) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('nit_tercero', 'like', "%{$search}%")
+                  ->orWhere('descripcion', 'like', "%{$search}%")
+                  ->orWhere('cuenta_contable', 'like', "%{$search}%");
+            });
+        }
+        return response()->json($query->orderBy('fecha', 'desc')->paginate(50));
+    }
+
+    /**
+     * Webhook logs.
+     * GET /api/siigo/webhook-logs
+     */
+    public function webhookLogs(Request $request)
+    {
+        return response()->json(
+            SiigoWebhookLog::latest()->paginate($request->input('per_page', 50))
+        );
+    }
+
+    // ===== Private helpers =====
+
+    /**
+     * Process a webhook event and dispatch to the appropriate handler.
+     */
+    private function processWebhookEvent(string $event, array $data): array
+    {
+        switch ($event) {
+            case 'sync_complete':
+                // A detect cycle just finished - log the stats
+                $this->logSync('webhook', 'sync_complete', 0, json_encode($data));
+                return ['action' => 'logged', 'stats' => $data];
+
+            case 'send_complete':
+                $sent = $data['sent'] ?? 0;
+                $errors = $data['errors'] ?? 0;
+                $this->logSync('webhook', 'send_complete', $sent, "sent=$sent, errors=$errors");
+                return ['action' => 'logged', 'sent' => $sent, 'errors' => $errors];
+
+            case 'send_paused':
+                $reason = $data['reason'] ?? 'unknown';
+                $this->logSync('webhook', 'send_paused', 0, "reason=$reason");
+                return ['action' => 'alert_logged', 'reason' => $reason];
+
+            case 'record_change':
+                // A specific record changed - could trigger specific business logic
+                $table = $data['table'] ?? '';
+                $key = $data['key'] ?? '';
+                $action = $data['action'] ?? '';
+                $this->logSync('webhook', "record_{$action}", 1, "table=$table, key=$key");
+                return ['action' => 'logged', 'table' => $table, 'key' => $key];
+
+            case 'test':
+                return ['action' => 'test_ok'];
+
+            default:
+                $this->logSync('webhook', $event, 0, json_encode($data));
+                return ['action' => 'logged_unknown', 'event' => $event];
+        }
+    }
+
+    /**
+     * Upsert a single record based on type.
+     */
+    private function upsertRecord(string $type, array $record)
+    {
+        switch ($type) {
+            case 'clients':
+                return SiigoClient::updateOrCreate(
+                    ['nit' => $record['nit']],
+                    [
+                        'nombre' => $record['client_name'] ?? $record['business_name'] ?? null,
+                        'tipo_doc' => $record['tipo_doc'] ?? null,
+                        'numero_doc' => $record['nit'],
+                        'direccion' => $record['address'] ?? null,
+                        'ciudad' => $record['city'] ?? null,
+                        'telefono' => $record['phone'] ?? null,
+                        'email' => $record['email'] ?? null,
+                        'siigo_codigo' => $record['siigo_codigo'] ?? null,
+                        'siigo_hash' => $record['siigo_sync_hash'] ?? null,
+                    ]
+                );
+
+            case 'products':
+                return SiigoProduct::updateOrCreate(
+                    ['codigo' => $record['code']],
+                    [
+                        'nombre' => $record['product_name'] ?? null,
+                        'precio' => $record['price'] ?? 0,
+                        'siigo_hash' => $record['siigo_sync_hash'] ?? null,
+                    ]
+                );
+
+            case 'movements':
+                return SiigoMovement::updateOrCreate(
+                    ['siigo_hash' => $record['siigo_sync_hash'] ?? uniqid()],
+                    [
+                        'tipo_comprobante' => $record['tipo_comprobante'] ?? null,
+                        'numero_doc' => $record['numero_doc'] ?? null,
+                        'fecha' => $record['fecha'] ?? null,
+                        'nit_tercero' => $record['nit_tercero'] ?? null,
+                        'cuenta_contable' => $record['cuenta_contable'] ?? null,
+                        'descripcion' => $record['descripcion'] ?? null,
+                        'valor' => $record['valor'] ?? 0,
+                        'tipo_mov' => $record['tipo_mov'] ?? null,
+                    ]
+                );
+
+            case 'cartera':
+                return SiigoCartera::updateOrCreate(
+                    ['siigo_hash' => $record['siigo_sync_hash'] ?? uniqid()],
+                    [
+                        'tipo_registro' => $record['tipo_registro'] ?? null,
+                        'nit_tercero' => $record['nit_tercero'] ?? null,
+                        'cuenta_contable' => $record['cuenta_contable'] ?? null,
+                        'fecha' => $record['fecha'] ?? null,
+                        'descripcion' => $record['descripcion'] ?? null,
+                        'tipo_mov' => $record['tipo_mov'] ?? null,
+                    ]
+                );
+
+            default:
+                throw new \InvalidArgumentException("Tipo no soportado: $type");
+        }
+    }
+
+    /**
+     * Delete a record by key.
+     */
+    private function deleteRecord(string $table, string $key, array $data): bool
+    {
+        switch ($table) {
+            case 'clients':
+                return SiigoClient::where('nit', $key)->delete() > 0;
+            case 'products':
+                return SiigoProduct::where('codigo', $key)->delete() > 0;
+            case 'movements':
+                $hash = $data['siigo_sync_hash'] ?? $key;
+                return SiigoMovement::where('siigo_hash', $hash)->delete() > 0;
+            case 'cartera':
+                $hash = $data['siigo_sync_hash'] ?? $key;
+                return SiigoCartera::where('siigo_hash', $hash)->delete() > 0;
+            default:
+                return false;
+        }
     }
 
     private function logSync(string $fileName, string $action, int $count, ?string $details = null): void

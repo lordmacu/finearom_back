@@ -243,14 +243,24 @@ use App\Http\Controllers\SiigoSyncController;
 // Login propio para el middleware (no requiere auth)
 Route::post('/siigo/login', [SiigoSyncController::class, 'login']);
 
+// Webhook (no requiere auth Sanctum - usa HMAC signature)
+Route::post('/siigo/webhook', [SiigoSyncController::class, 'webhook']);
+
 // Rutas protegidas para sincronización (sin throttle - sync masivo)
 Route::middleware('auth:sanctum')->prefix('siigo')->group(function () {
+    // Endpoint generico - recibe { table, action, key, data }
+    Route::post('/sync', [SiigoSyncController::class, 'sync']);
+
+    // Endpoints por tabla (legacy, siguen funcionando)
     Route::post('/clients', [SiigoSyncController::class, 'syncClients']);
     Route::post('/products', [SiigoSyncController::class, 'syncProducts']);
     Route::post('/movements', [SiigoSyncController::class, 'syncMovements']);
+    Route::post('/cartera', [SiigoSyncController::class, 'syncCartera']);
     Route::post('/bulk', [SiigoSyncController::class, 'bulk']);
     Route::get('/status', [SiigoSyncController::class, 'status']);
     Route::get('/clients', [SiigoSyncController::class, 'listClients']);
     Route::get('/products', [SiigoSyncController::class, 'listProducts']);
     Route::get('/movements', [SiigoSyncController::class, 'listMovements']);
+    Route::get('/cartera', [SiigoSyncController::class, 'listCartera']);
+    Route::get('/webhook-logs', [SiigoSyncController::class, 'webhookLogs']);
 });
