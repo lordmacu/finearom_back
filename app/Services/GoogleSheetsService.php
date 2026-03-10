@@ -62,12 +62,12 @@ class GoogleSheetsService
     // ─── Carpeta Drive ────────────────────────────────────────────────────────
 
     /**
-     * Obtiene o crea la carpeta "Finearom — Reportes" en Drive.
+     * Obtiene o crea la carpeta "Finearom" en Drive.
      * El ID se guarda en cache permanente (no expira).
      */
     private function getOrCreateReportsFolder(int $userId): ?string
     {
-        $cacheKey = 'google_drive_reports_folder_id';
+        $cacheKey = 'google_drive_finearom_folder_id';
         $folderId = cache($cacheKey);
 
         if ($folderId) {
@@ -80,41 +80,38 @@ class GoogleSheetsService
             // Buscar si ya existe la carpeta
             $search = Http::withToken($accessToken)
                 ->get(self::DRIVE_URL, [
-                    'q'      => "name='Finearom — Reportes' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                    'q'      => "name='Finearom' and mimeType='application/vnd.google-apps.folder' and trashed=false",
                     'fields' => 'files(id)',
                 ]);
 
             if ($search->successful() && !empty($search->json('files'))) {
                 $folderId = $search->json('files.0.id');
             } else {
-                // Crear la carpeta
                 $create = Http::withToken($accessToken)
                     ->post(self::DRIVE_URL, [
-                        'name'     => 'Finearom — Reportes',
+                        'name'     => 'Finearom',
                         'mimeType' => 'application/vnd.google-apps.folder',
                     ]);
 
                 if ($create->failed()) {
-                    Log::warning('GoogleSheets: no se pudo crear carpeta en Drive: ' . $create->body());
+                    Log::warning('GoogleSheets: no se pudo crear carpeta Finearom en Drive: ' . $create->body());
                     return null;
                 }
 
                 $folderId = $create->json('id');
-
-                // Compartir carpeta con el dominio
                 $this->shareWithDomain($userId, $folderId, 'finearom.com');
             }
 
             cache([$cacheKey => $folderId]); // sin TTL = permanente
             return $folderId;
         } catch (\Throwable $e) {
-            Log::warning('GoogleSheets: excepción al obtener carpeta de reportes: ' . $e->getMessage());
+            Log::warning('GoogleSheets: excepción al obtener carpeta Finearom: ' . $e->getMessage());
             return null;
         }
     }
 
     /**
-     * Mueve un archivo de Drive a la carpeta de reportes.
+     * Mueve un archivo a la carpeta Finearom en Drive.
      */
     private function moveToReportsFolder(int $userId, string $fileId): void
     {
@@ -128,14 +125,37 @@ class GoogleSheetsService
             Http::withToken($accessToken)
                 ->patch(self::DRIVE_URL . "/{$fileId}?addParents={$folderId}&removeParents=root&fields=id,parents");
         } catch (\Throwable $e) {
-            Log::warning('GoogleSheets: no se pudo mover sheet a carpeta de reportes: ' . $e->getMessage());
+            Log::warning('GoogleSheets: no se pudo mover sheet a carpeta Finearom: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Elimina archivos con el mismo nombre dentro de la carpeta Finearom.
+     * Evita que queden sheets duplicados del mismo mes.
+     */
+    private function deleteExistingSheetByTitle(int $userId, string $title, string $folderId): void
+    {
+        try {
+            $accessToken = $this->getValidToken($userId);
+            $q = "name='{$title}' and '{$folderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
+
+            $search = Http::withToken($accessToken)
+                ->get(self::DRIVE_URL, ['q' => $q, 'fields' => 'files(id)']);
+
+            foreach ($search->json('files') ?? [] as $file) {
+                Http::withToken($accessToken)->delete(self::DRIVE_URL . '/' . $file['id']);
+                Log::info("GoogleSheets: eliminado sheet anterior '{$title}' (id: {$file['id']})");
+            }
+        } catch (\Throwable $e) {
+            Log::warning('GoogleSheets: no se pudo eliminar sheet existente: ' . $e->getMessage());
         }
     }
 
     // ─── Sheet mensual ────────────────────────────────────────────────────────
 
     /**
-     * Obtiene o crea el spreadsheet mensual dentro de la carpeta "Finearom — Reportes".
+     * Obtiene o crea el spreadsheet mensual dentro de la carpeta "Finearom".
+     * Si ya existe uno con el mismo nombre, lo elimina y crea uno nuevo.
      * Contiene dos hojas: "Órdenes" e "Ítems".
      */
     public function getOrCreateMonthlySheet(int $userId): ?string
@@ -150,7 +170,13 @@ class GoogleSheetsService
 
         try {
             $accessToken = $this->getValidToken($userId);
-            $title = 'Finearom — Órdenes — ' . ucfirst(now()->translatedFormat('F Y'));
+            $title    = 'Finearom — Órdenes — ' . ucfirst(now()->translatedFormat('F Y'));
+            $folderId = $this->getOrCreateReportsFolder($userId);
+
+            // Eliminar sheet anterior con el mismo nombre si existe
+            if ($folderId) {
+                $this->deleteExistingSheetByTitle($userId, $title, $folderId);
+            }
 
             $response = Http::withToken($accessToken)
                 ->post(self::SHEETS_URL, [
@@ -176,15 +202,13 @@ class GoogleSheetsService
                 ]);
 
             if ($response->failed()) {
-                Log::warning("GoogleSheets: fallo al crear sheet mensual para user {$userId}: " . $response->body());
+                Log::warning("GoogleSheets: fallo al crear sheet mensual: " . $response->body());
                 return null;
             }
 
             $sheetId = $response->json('spreadsheetId');
 
-            // Mover a carpeta de reportes
             $this->moveToReportsFolder($userId, $sheetId);
-
             $this->shareWithDomain($userId, $sheetId, 'finearom.com');
             $this->makePublicReadable($userId, $sheetId);
 
