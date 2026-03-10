@@ -24,7 +24,7 @@ class Kernel extends ConsoleKernel
             });
 
         // ⭐ Generar estadísticas de órdenes - 6:00 AM (antes del TRM)
-        $schedule->command('statistics:generate-daily')
+        $schedule->command('stats:daily-dispatch')
             ->dailyAt('06:00')
             ->timezone('America/Bogota')
             ->onSuccess(function () {
