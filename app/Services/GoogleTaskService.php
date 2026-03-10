@@ -18,6 +18,8 @@ class GoogleTaskService
     private const SCOPE_TASKS   = 'https://www.googleapis.com/auth/tasks';
     private const SCOPE_DRIVE   = 'https://www.googleapis.com/auth/drive.file';
     private const SCOPE_SHEETS  = 'https://www.googleapis.com/auth/spreadsheets';
+    private const SCOPE_EMAIL   = 'email';
+    private const SCOPE_PROFILE = 'profile';
 
     /** @deprecated Use SCOPE_TASKS */
     private const SCOPE = 'https://www.googleapis.com/auth/tasks';
@@ -40,7 +42,13 @@ class GoogleTaskService
             'client_id'     => config('services.google.client_id'),
             'redirect_uri'  => config('services.google.redirect'),
             'response_type' => 'code',
-            'scope'         => implode(' ', [self::SCOPE_TASKS, self::SCOPE_DRIVE, self::SCOPE_SHEETS]),
+            'scope'         => implode(' ', [
+                self::SCOPE_EMAIL,
+                self::SCOPE_PROFILE,
+                self::SCOPE_TASKS,
+                self::SCOPE_DRIVE,
+                self::SCOPE_SHEETS,
+            ]),
             'access_type'   => 'offline',
             'prompt'        => 'consent',
             'state'         => $state,
