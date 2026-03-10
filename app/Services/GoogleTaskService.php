@@ -25,6 +25,29 @@ class GoogleTaskService
     // ─── OAuth ────────────────────────────────────────────────────────────────
 
     /**
+     * Genera la URL de autorización de Google para LOGIN (flujo sin usuario autenticado).
+     * Incluye todos los scopes: Tasks + Drive + Sheets.
+     */
+    public function getLoginUrl(?string $returnUrl = null): string
+    {
+        $state = Str::random(40);
+        Cache::put("google_oauth_state_{$state}", [
+            'mode'       => 'login',
+            'return_url' => $returnUrl,
+        ], now()->addMinutes(15));
+
+        return self::AUTH_URL . '?' . http_build_query([
+            'client_id'     => config('services.google.client_id'),
+            'redirect_uri'  => config('services.google.redirect'),
+            'response_type' => 'code',
+            'scope'         => implode(' ', [self::SCOPE_TASKS, self::SCOPE_DRIVE, self::SCOPE_SHEETS]),
+            'access_type'   => 'offline',
+            'prompt'        => 'consent',
+            'state'         => $state,
+        ]);
+    }
+
+    /**
      * Genera la URL de autorización de Google.
      * Guarda el user_id en caché usando un state aleatorio para recuperarlo en el callback.
      */
@@ -57,11 +80,11 @@ class GoogleTaskService
 
     /**
      * Procesa el callback de Google: intercambia el code por tokens y los guarda.
-     * Retorna el user_id asociado al state.
-     */
-    /**
-     * Procesa el callback de Google: intercambia el code por tokens y los guarda.
-     * Retorna un array con user_id y return_url.
+     * Soporta dos modos:
+     *   - 'connect': usuario ya autenticado, vincula su cuenta de Google.
+     *   - 'login': sin usuario autenticado, busca user por email y crea token Sanctum.
+     *
+     * Retorna array con mode, user_id, return_url y (si login) sanctum_token.
      */
     public function handleCallback(string $code, string $state): array
     {
@@ -72,9 +95,44 @@ class GoogleTaskService
         }
 
         // Compatibilidad hacia atrás: si el cache es solo un int (formato antiguo)
-        $userId    = is_array($cached) ? $cached['user_id'] : $cached;
+        $mode      = is_array($cached) ? ($cached['mode'] ?? 'connect') : 'connect';
+        $userId    = is_array($cached) ? ($cached['user_id'] ?? null) : $cached;
         $returnUrl = is_array($cached) ? ($cached['return_url'] ?? null) : null;
 
+        $tokens = $this->exchangeCode($code);
+
+        if ($mode === 'login') {
+            $userInfo = $this->getGoogleUserInfo($tokens['access_token']);
+            $user = User::where('email', $userInfo['email'])->first();
+
+            if (!$user) {
+                throw new \RuntimeException('user_not_found');
+            }
+
+            $userId = $user->id;
+            $this->saveTokens($userId, $tokens);
+
+            // Revocar tokens previos y crear uno nuevo
+            $user->tokens()->delete();
+            $sanctumToken = $user->createToken('api-token')->plainTextToken;
+
+            return [
+                'mode'          => 'login',
+                'user_id'       => $userId,
+                'return_url'    => $returnUrl,
+                'sanctum_token' => $sanctumToken,
+            ];
+        }
+
+        $this->saveTokens($userId, $tokens);
+
+        return ['mode' => 'connect', 'user_id' => $userId, 'return_url' => $returnUrl];
+    }
+
+    // ─── Helpers privados ────────────────────────────────────────────────────
+
+    private function exchangeCode(string $code): array
+    {
         $response = Http::post(self::TOKEN_URL, [
             'client_id'     => config('services.google.client_id'),
             'client_secret' => config('services.google.client_secret'),
@@ -87,8 +145,11 @@ class GoogleTaskService
             throw new \RuntimeException('Error al obtener tokens de Google: ' . $response->body());
         }
 
-        $tokens = $response->json();
+        return $response->json();
+    }
 
+    private function saveTokens(int $userId, array $tokens): void
+    {
         $grantedScopes = isset($tokens['scope'])
             ? explode(' ', $tokens['scope'])
             : [self::SCOPE_TASKS];
@@ -104,8 +165,18 @@ class GoogleTaskService
                 'scopes'        => $grantedScopes,
             ]
         );
+    }
 
-        return ['user_id' => $userId, 'return_url' => $returnUrl];
+    private function getGoogleUserInfo(string $accessToken): array
+    {
+        $response = Http::withToken($accessToken)
+            ->get('https://www.googleapis.com/oauth2/v1/userinfo');
+
+        if ($response->failed()) {
+            throw new \RuntimeException('No se pudo obtener la información del usuario de Google');
+        }
+
+        return $response->json();
     }
 
     // ─── Tasks API ────────────────────────────────────────────────────────────

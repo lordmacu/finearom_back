@@ -61,6 +61,7 @@ Route::get('/health', function () {
 
 // Rutas públicas (sin autenticación)
 Route::post('/login', [AuthController::class, 'login']);
+Route::get('/auth/google/login-url', [GoogleAuthController::class, 'loginUrl']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 Route::get('/email-campaigns/track-open/{logId}', [EmailCampaignController::class, 'trackOpen']);

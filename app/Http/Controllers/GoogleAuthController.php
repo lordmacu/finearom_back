@@ -16,8 +16,18 @@ class GoogleAuthController extends Controller
         private readonly GoogleDriveService $driveService,
         private readonly GoogleSheetsService $sheetsService,
     ) {
-        $this->middleware('auth:sanctum')->except(['callback']);
+        $this->middleware('auth:sanctum')->except(['callback', 'loginUrl']);
         $this->middleware('can:project list')->only(['connectedUsers']);
+    }
+
+    /**
+     * URL de autorización para LOGIN con Google (sin usuario autenticado).
+     * Incluye todos los scopes: Tasks + Drive + Sheets.
+     */
+    public function loginUrl(Request $request): JsonResponse
+    {
+        $url = $this->googleService->getLoginUrl($request->query('return_url'));
+        return response()->json(['url' => $url]);
     }
 
     /**
@@ -52,11 +62,19 @@ class GoogleAuthController extends Controller
                 $request->query('state')
             );
 
+            if (($result['mode'] ?? 'connect') === 'login') {
+                $destination = $result['return_url'] ?? ($frontendUrl . '/login');
+                $separator   = str_contains($destination, '?') ? '&' : '?';
+                return redirect($destination . $separator . 'auth_token=' . urlencode($result['sanctum_token']) . '&google_connected=1');
+            }
+
             $destination = $result['return_url'] ?? ($frontendUrl . '/settings/google');
-            // Agregar ?connected=1 a la URL de destino
-            $separator = str_contains($destination, '?') ? '&' : '?';
+            $separator   = str_contains($destination, '?') ? '&' : '?';
             return redirect($destination . $separator . 'connected=1');
         } catch (\Exception $e) {
+            if ($e->getMessage() === 'user_not_found') {
+                return redirect($frontendUrl . '/login?error=google_user_not_found');
+            }
             return redirect($frontendUrl . '/settings/google?error=1');
         }
     }
