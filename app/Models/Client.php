@@ -68,6 +68,7 @@ class Client extends Model
         'declaracion_renta_file',
         'estados_financieros_file',
         'drive_doc_links',
+        'drive_folder_link',
         'user_id',
         'executive_phone',
         'lead_time',

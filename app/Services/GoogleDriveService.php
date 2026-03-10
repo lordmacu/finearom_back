@@ -130,6 +130,7 @@ class GoogleDriveService
 
     /**
      * Carpeta de cliente: [Raíz] / "NombreCliente (NIT: xxx)"
+     * Guarda el link de la carpeta en el campo drive_folder_link del cliente.
      */
     public function getOrCreateClientFolder(int $userId, \App\Models\Client $client): ?string
     {
@@ -137,7 +138,15 @@ class GoogleDriveService
         if (!$rootId) return null;
 
         $name = $client->client_name . ($client->nit ? ' (NIT: ' . $client->nit . ')' : '');
-        return $this->getOrCreate($userId, $name, $rootId);
+        $folderId = $this->getOrCreate($userId, $name, $rootId);
+
+        if ($folderId && !$client->drive_folder_link) {
+            $link = "https://drive.google.com/drive/folders/{$folderId}";
+            $client->drive_folder_link = $link;
+            $client->saveQuietly();
+        }
+
+        return $folderId;
     }
 
     /**
