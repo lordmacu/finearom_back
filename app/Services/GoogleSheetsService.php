@@ -125,10 +125,20 @@ class GoogleSheetsService
 
     /**
      * Agrega una fila en "Órdenes" y filas en "Ítems" para cada producto.
+     * Idempotente: si este estado ya fue exportado para esta orden, no duplica.
      * Nunca lanza excepción — fallo silencioso.
      */
     public function appendOrderRow(int $userId, PurchaseOrder $order): void
     {
+        // Clave única: estado + fecha de despacho (un mismo estado/día no se duplica)
+        $exportKey = $order->status . '_' . ($order->dispatch_date?->toDateString() ?? now()->toDateString());
+        $exports   = $order->sheets_exports ?? [];
+
+        if (in_array($exportKey, $exports)) {
+            Log::info("GoogleSheets: OC {$order->order_consecutive} ya exportada con clave '{$exportKey}', omitiendo.");
+            return;
+        }
+
         try {
             $sheetId = $this->getOrCreateMonthlySheet($userId);
             if (!$sheetId) {
@@ -199,6 +209,9 @@ class GoogleSheetsService
 
                 $this->appendRow($accessToken, $sheetId, 'Ítems', $itemRow);
             }
+            // Marcar como exportada para evitar duplicados futuros
+            $exports[] = $exportKey;
+            $order->updateQuietly(['sheets_exports' => $exports]);
         } catch (\Throwable $e) {
             Log::warning("GoogleSheets: excepción al agregar fila OC {$order->order_consecutive}: " . $e->getMessage());
         }

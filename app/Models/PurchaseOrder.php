@@ -41,6 +41,7 @@ class PurchaseOrder extends Model
         'drive_link',
         'drive_attachment_links',
         'project_id',
+        'sheets_exports',
     ];
 
     protected $casts = [
@@ -53,6 +54,7 @@ class PurchaseOrder extends Model
         'proforma_generada'        => 'boolean',
         'attachment'               => 'array',
         'drive_attachment_links'   => 'array',
+        'sheets_exports'           => 'array',
     ];
 
     public function client()

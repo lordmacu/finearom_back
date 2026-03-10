@@ -9,9 +9,10 @@ use Illuminate\Console\Command;
 class ExportOrdersToSheets extends Command
 {
     protected $signature = 'sheets:export-orders
-                            {--from= : Fecha inicial (Y-m-d), por defecto inicio del mes actual}
-                            {--to=   : Fecha final (Y-m-d), por defecto hoy}
-                            {--all   : Exportar todas las órdenes históricas (completed + parcial_status)}';
+                            {--from=  : Fecha inicial (Y-m-d), por defecto inicio del mes actual}
+                            {--to=    : Fecha final (Y-m-d), por defecto hoy}
+                            {--all    : Exportar todas las órdenes históricas (completed + parcial_status)}
+                            {--force  : Forzar re-exportación aunque ya hayan sido exportadas}';
 
     protected $description = 'Exporta órdenes despachadas a Google Sheets (backfill o rango de fechas)';
 
@@ -53,8 +54,13 @@ class ExportOrdersToSheets extends Command
         $bar->start();
 
         $errors = 0;
+        $force  = $this->option('force');
         foreach ($orders as $order) {
             try {
+                if ($force) {
+                    // Limpiar registro de exportaciones para forzar re-inserción
+                    $order->updateQuietly(['sheets_exports' => null]);
+                }
                 $this->sheetsService->appendOrderRow($sheetsUserId, $order);
             } catch (\Throwable $e) {
                 $errors++;
