@@ -72,13 +72,17 @@ class GoogleAuthController extends Controller
             $separator   = str_contains($destination, '?') ? '&' : '?';
             return redirect($destination . $separator . 'connected=1');
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('[GoogleCallback] Excepción en callback', [
+                'message' => $e->getMessage(),
+                'trace'   => $e->getTraceAsString(),
+            ]);
             if ($e->getMessage() === 'user_not_found') {
                 return redirect($frontendUrl . '/login?error=google_user_not_found');
             }
             if ($e->getMessage() === 'domain_not_allowed') {
                 return redirect($frontendUrl . '/login?error=google_domain_not_allowed');
             }
-            return redirect($frontendUrl . '/settings/google?error=1');
+            return redirect($frontendUrl . '/login?error=google_login_failed');
         }
     }
 

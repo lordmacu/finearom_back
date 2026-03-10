@@ -88,33 +88,52 @@ class GoogleTaskService
      */
     public function handleCallback(string $code, string $state): array
     {
+        Log::info('[GoogleCallback] Iniciando callback', ['state' => $state]);
+
         $cached = Cache::pull("google_oauth_state_{$state}");
 
         if (!$cached) {
+            Log::warning('[GoogleCallback] State no encontrado en caché', ['state' => $state]);
             throw new \RuntimeException('Estado de OAuth inválido o expirado');
         }
+
+        Log::info('[GoogleCallback] State encontrado', ['cached' => $cached]);
 
         // Compatibilidad hacia atrás: si el cache es solo un int (formato antiguo)
         $mode      = is_array($cached) ? ($cached['mode'] ?? 'connect') : 'connect';
         $userId    = is_array($cached) ? ($cached['user_id'] ?? null) : $cached;
         $returnUrl = is_array($cached) ? ($cached['return_url'] ?? null) : null;
 
+        Log::info('[GoogleCallback] Modo detectado', ['mode' => $mode, 'return_url' => $returnUrl]);
+
         $tokens = $this->exchangeCode($code);
+
+        Log::info('[GoogleCallback] Tokens obtenidos de Google', [
+            'has_access_token'  => isset($tokens['access_token']),
+            'has_refresh_token' => isset($tokens['refresh_token']),
+            'scope'             => $tokens['scope'] ?? null,
+        ]);
 
         if ($mode === 'login') {
             $userInfo = $this->getGoogleUserInfo($tokens['access_token']);
             $email = $userInfo['email'] ?? '';
 
+            Log::info('[GoogleCallback] UserInfo de Google', ['email' => $email]);
+
             // Solo se permite login con cuentas @finearom.com
             if (!str_ends_with($email, '@finearom.com')) {
+                Log::warning('[GoogleCallback] Dominio no permitido', ['email' => $email]);
                 throw new \RuntimeException('domain_not_allowed');
             }
 
             $user = User::where('email', $email)->first();
 
             if (!$user) {
+                Log::warning('[GoogleCallback] Usuario no encontrado en BD', ['email' => $email]);
                 throw new \RuntimeException('user_not_found');
             }
+
+            Log::info('[GoogleCallback] Usuario encontrado', ['user_id' => $user->id, 'email' => $user->email]);
 
             $userId = $user->id;
             $this->saveTokens($userId, $tokens);
@@ -122,6 +141,8 @@ class GoogleTaskService
             // Revocar tokens previos y crear uno nuevo
             $user->tokens()->delete();
             $sanctumToken = $user->createToken('api-token')->plainTextToken;
+
+            Log::info('[GoogleCallback] Login con Google exitoso', ['user_id' => $userId]);
 
             return [
                 'mode'          => 'login',
