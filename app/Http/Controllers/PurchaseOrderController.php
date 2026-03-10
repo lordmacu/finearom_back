@@ -1053,16 +1053,16 @@ class PurchaseOrderController extends Controller
                 }
             }
 
-            // Google Sheets: registrar orden completada en el sheet mensual (silencioso)
-            if ($validated['status'] === 'completed') {
+            // Google Sheets: registrar en el sheet mensual cuando hay despacho (completo o parcial)
+            if (in_array($validated['status'], ['completed', 'parcial_status'])) {
                 try {
                     $sheetsUserId = $this->sheetsService->getAnyUserWithSheetsAccess();
                     if ($sheetsUserId) {
-                        $order->load('client', 'products');
+                        $order->load('client', 'products', 'branchOffice', 'project');
                         $this->sheetsService->appendOrderRow($sheetsUserId, $order);
                     }
                 } catch (\Throwable $e) {
-                    Log::warning('GoogleSheets on_completed: ' . $e->getMessage());
+                    Log::warning('GoogleSheets on_dispatch: ' . $e->getMessage());
                 }
             }
 

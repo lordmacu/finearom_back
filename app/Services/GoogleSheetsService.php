@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\PurchaseOrder;
 use App\Models\UserGoogleToken;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -13,6 +14,22 @@ class GoogleSheetsService
     private const DRIVE_SCOPE  = 'https://www.googleapis.com/auth/drive.file';
     private const SHEETS_URL   = 'https://sheets.googleapis.com/v4/spreadsheets';
     private const DRIVE_URL    = 'https://www.googleapis.com/drive/v3/files';
+
+    // Columnas hoja Órdenes
+    private const HEADERS_ORDERS = [
+        'Fecha despacho', 'OC #', 'Estado', 'Cliente', 'NIT', 'Sucursal',
+        'Ciudad entrega', 'Total USD', 'Total COP', 'TRM',
+        'Factura #', 'Guía #', 'Transportadora',
+        'Es muestra', 'Tiene new win', 'Proyecto',
+        'Ejecutivo', 'Dirección entrega',
+    ];
+
+    // Columnas hoja Ítems
+    private const HEADERS_ITEMS = [
+        'Fecha despacho', 'OC #', 'Estado', 'Cliente', 'NIT',
+        'Producto', 'Cantidad', 'Precio USD', 'Subtotal USD', 'Subtotal COP', 'TRM',
+        'Es muestra', 'New win',
+    ];
 
     // ─── Verificación ─────────────────────────────────────────────────────────
 
@@ -44,15 +61,14 @@ class GoogleSheetsService
     // ─── Sheet mensual ────────────────────────────────────────────────────────
 
     /**
-     * Obtiene o crea el spreadsheet mensual de órdenes completadas.
-     * El ID se guarda en cache (Laravel cache) para no buscarlo cada vez.
-     * Nombre: "Finearom — Órdenes Completadas — Marzo 2026"
+     * Obtiene o crea el spreadsheet mensual.
+     * Contiene dos hojas: "Órdenes" e "Ítems".
      */
     public function getOrCreateMonthlySheet(int $userId): ?string
     {
-        $monthKey   = now()->format('Y-m');
-        $cacheKey   = "google_sheets_monthly_{$monthKey}";
-        $sheetId    = cache($cacheKey);
+        $monthKey = now()->format('Y-m');
+        $cacheKey = "google_sheets_monthly_{$monthKey}";
+        $sheetId  = cache($cacheKey);
 
         if ($sheetId) {
             return $sheetId;
@@ -60,26 +76,29 @@ class GoogleSheetsService
 
         try {
             $accessToken = $this->getValidToken($userId);
-            $title = 'Finearom — Órdenes Completadas — ' . ucfirst(now()->translatedFormat('F Y'));
+            $title = 'Finearom — Órdenes — ' . ucfirst(now()->translatedFormat('F Y'));
 
-            // Crear spreadsheet con encabezados
             $response = Http::withToken($accessToken)
                 ->post(self::SHEETS_URL, [
                     'properties' => ['title' => $title, 'locale' => 'es_CO'],
-                    'sheets'     => [[
-                        'properties' => ['title' => 'Órdenes'],
-                        'data'       => [[
-                            'startRow'    => 0,
-                            'startColumn' => 0,
-                            'rowData'     => [[
-                                'values' => array_map(
-                                    fn($v) => ['userEnteredValue' => ['stringValue' => $v],
-                                               'userEnteredFormat' => ['textFormat' => ['bold' => true], 'backgroundColor' => ['red' => 0.18, 'green' => 0.44, 'blue' => 0.71]]],
-                                    ['Fecha', 'OC #', 'Cliente', 'NIT', 'Total USD', 'Total COP', 'TRM', 'Dirección entrega', 'Ejecutivo', 'Productos']
-                                ),
+                    'sheets'     => [
+                        [
+                            'properties' => ['title' => 'Órdenes', 'index' => 0],
+                            'data'       => [[
+                                'startRow'    => 0,
+                                'startColumn' => 0,
+                                'rowData'     => [['values' => $this->headerRow(self::HEADERS_ORDERS)]],
                             ]],
-                        ]],
-                    ]],
+                        ],
+                        [
+                            'properties' => ['title' => 'Ítems', 'index' => 1],
+                            'data'       => [[
+                                'startRow'    => 0,
+                                'startColumn' => 0,
+                                'rowData'     => [['values' => $this->headerRow(self::HEADERS_ITEMS)]],
+                            ]],
+                        ],
+                    ],
                 ]);
 
             if ($response->failed()) {
@@ -89,13 +108,9 @@ class GoogleSheetsService
 
             $sheetId = $response->json('spreadsheetId');
 
-            // Compartir con el dominio finearom.com (todos los empleados pueden ver)
             $this->shareWithDomain($userId, $sheetId, 'finearom.com');
-
-            // También "cualquier persona con el link puede ver"
             $this->makePublicReadable($userId, $sheetId);
 
-            // Guardar en cache hasta fin de mes
             $ttl = now()->endOfMonth()->diffInSeconds(now());
             cache([$cacheKey => $sheetId], $ttl);
 
@@ -106,13 +121,13 @@ class GoogleSheetsService
         }
     }
 
-    // ─── Append fila ──────────────────────────────────────────────────────────
+    // ─── Append fila de orden ─────────────────────────────────────────────────
 
     /**
-     * Agrega una fila con los datos de una orden completada.
-     * Nunca lanza excepción.
+     * Agrega una fila en "Órdenes" y filas en "Ítems" para cada producto.
+     * Nunca lanza excepción — fallo silencioso.
      */
-    public function appendOrderRow(int $userId, \App\Models\PurchaseOrder $order): void
+    public function appendOrderRow(int $userId, PurchaseOrder $order): void
     {
         try {
             $sheetId = $this->getOrCreateMonthlySheet($userId);
@@ -122,50 +137,101 @@ class GoogleSheetsService
 
             $accessToken = $this->getValidToken($userId);
 
-            // Calcular totales
+            // Totales desde los productos del pivot (precio acordado en la OC)
             $totalUsd = 0;
-            $totalCop = 0;
-            $products = [];
             foreach ($order->products as $product) {
                 $qty   = $product->pivot->quantity ?? 0;
-                $price = $product->pivot->price ?? 0;
+                $price = $product->pivot->price    ?? 0;
                 $totalUsd += $qty * $price;
-                $products[] = $product->product_name . ' x' . $qty;
             }
-            $trm = (float) ($order->trm ?? 1);
+            $trm      = (float) ($order->trm ?? 1);
             $totalCop = $totalUsd * $trm;
 
-            $row = [
-                $order->dispatch_date?->format('d/m/Y') ?? now()->format('d/m/Y'),
+            $dispatchDate = $order->dispatch_date?->format('d/m/Y') ?? now()->format('d/m/Y');
+            $estado       = $order->status === 'completed' ? 'Completo' : 'Parcial';
+
+            // ── Hoja Órdenes ──
+            $orderRow = [
+                $dispatchDate,
                 $order->order_consecutive ?? '',
+                $estado,
                 $order->client->client_name ?? '',
                 $order->client->nit ?? '',
+                $order->branchOffice->branch_name ?? '',
+                $order->delivery_city ?? '',
                 number_format($totalUsd, 2, '.', ','),
                 number_format($totalCop, 0, '.', ','),
                 number_format($trm, 2, '.', ','),
-                $order->delivery_address ?? '',
+                $order->invoice_number ?? '',
+                $order->tracking_number ?? '',
+                '',  // transportadora (está en partials, no en la orden)
+                $order->is_muestra ? 'Sí' : 'No',
+                $order->is_new_win  ? 'Sí' : 'No',
+                $order->project?->name ?? '',
                 $order->contact ?? '',
-                implode(' | ', $products),
+                $order->delivery_address ?? '',
             ];
 
-            $response = Http::withToken($accessToken)
-                ->post(self::SHEETS_URL . "/{$sheetId}/values/Órdenes!A:J:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS", [
-                    'values' => [$row],
-                ]);
+            $this->appendRow($accessToken, $sheetId, 'Órdenes', $orderRow);
 
-            if ($response->failed()) {
-                Log::warning("GoogleSheets: fallo al agregar fila para OC {$order->order_consecutive}: " . $response->body());
+            // ── Hoja Ítems (una fila por producto) ──
+            foreach ($order->products as $product) {
+                $qty      = $product->pivot->quantity ?? 0;
+                $price    = $product->pivot->price    ?? 0;
+                $subtotalUsd = $qty * $price;
+                $subtotalCop = $subtotalUsd * $trm;
+
+                $itemRow = [
+                    $dispatchDate,
+                    $order->order_consecutive ?? '',
+                    $estado,
+                    $order->client->client_name ?? '',
+                    $order->client->nit ?? '',
+                    $product->product_name ?? '',
+                    $qty,
+                    number_format($price, 2, '.', ','),
+                    number_format($subtotalUsd, 2, '.', ','),
+                    number_format($subtotalCop, 0, '.', ','),
+                    number_format($trm, 2, '.', ','),
+                    ($product->pivot->muestra ?? false) ? 'Sí' : 'No',
+                    ($product->pivot->new_win  ?? false) ? 'Sí' : 'No',
+                ];
+
+                $this->appendRow($accessToken, $sheetId, 'Ítems', $itemRow);
             }
         } catch (\Throwable $e) {
-            Log::warning("GoogleSheets: excepción al agregar fila: " . $e->getMessage());
+            Log::warning("GoogleSheets: excepción al agregar fila OC {$order->order_consecutive}: " . $e->getMessage());
         }
+    }
+
+    // ─── Helpers internos ─────────────────────────────────────────────────────
+
+    private function appendRow(string $accessToken, string $sheetId, string $sheetName, array $row): void
+    {
+        $encodedSheet = rawurlencode($sheetName);
+        $response = Http::withToken($accessToken)
+            ->post(self::SHEETS_URL . "/{$sheetId}/values/{$encodedSheet}!A:Z:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS", [
+                'values' => [$row],
+            ]);
+
+        if ($response->failed()) {
+            Log::warning("GoogleSheets: fallo al agregar fila en '{$sheetName}': " . $response->body());
+        }
+    }
+
+    private function headerRow(array $headers): array
+    {
+        return array_map(fn ($v) => [
+            'userEnteredValue'  => ['stringValue' => $v],
+            'userEnteredFormat' => [
+                'textFormat'       => ['bold' => true],
+                'backgroundColor'  => ['red' => 0.18, 'green' => 0.44, 'blue' => 0.71],
+            ],
+        ], $headers);
     }
 
     // ─── Permisos ─────────────────────────────────────────────────────────────
 
-    /**
-     * Comparte el spreadsheet con todo el dominio (solo lectura).
-     */
     private function shareWithDomain(int $userId, string $fileId, string $domain): void
     {
         try {
@@ -181,9 +247,6 @@ class GoogleSheetsService
         }
     }
 
-    /**
-     * Hace el spreadsheet accesible para cualquier persona con el link.
-     */
     private function makePublicReadable(int $userId, string $fileId): void
     {
         try {
