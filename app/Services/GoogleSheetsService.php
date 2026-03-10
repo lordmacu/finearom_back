@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\PurchaseOrder;
 use App\Models\UserGoogleToken;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -147,20 +148,103 @@ class GoogleSheetsService
 
             $accessToken = $this->getValidToken($userId);
 
-            // Totales desde los productos del pivot (precio acordado en la OC)
-            $totalUsd = 0;
-            foreach ($order->products as $product) {
-                $qty   = $product->pivot->quantity ?? 0;
-                $price = $product->pivot->price    ?? 0;
-                $totalUsd += $qty * $price;
-            }
-            $trm      = (float) ($order->trm ?? 1);
-            $totalCop = $totalUsd * $trm;
+            // ── Fuente de verdad: partials reales (misma lógica que el dashboard) ──
+            $partials = \DB::table('partials')
+                ->join('purchase_order_product as pop', 'partials.product_order_id', '=', 'pop.id')
+                ->join('products as p', 'pop.product_id', '=', 'p.id')
+                ->where('partials.type', 'real')
+                ->where('pop.purchase_order_id', $order->id)
+                ->whereNull('partials.deleted_at')
+                ->select(
+                    'partials.quantity',
+                    'partials.dispatch_date',
+                    'partials.invoice_number',
+                    'partials.tracking_number',
+                    'partials.transporter',
+                    'partials.trm as partial_trm',
+                    'pop.muestra',
+                    'pop.new_win',
+                    'pop.price as pivot_price',
+                    'p.price as product_price',
+                    'p.product_name',
+                )
+                ->get();
 
             $dispatchDate = $order->dispatch_date?->format('d/m/Y') ?? now()->format('d/m/Y');
             $estado       = $order->status === 'completed' ? 'Completo' : 'Parcial';
+            $orderTrm     = (float) ($order->trm ?? 4000);
 
-            // ── Hoja Órdenes ──
+            $totalUsd     = 0.0;
+            $totalCop     = 0.0;
+            // Transportadora e invoice del primer partial (o de la orden si no hay parciales)
+            $transporter  = '';
+            $invoiceNum   = $order->invoice_number ?? '';
+            $trackingNum  = $order->tracking_number ?? '';
+
+            // ── Hoja Ítems (una fila por partial real) ──
+            foreach ($partials as $partial) {
+                $isSample = (int) $partial->muestra === 1;
+
+                // Precio efectivo: pivot_price > 0, si no, precio base del producto
+                $effectivePrice = $isSample ? 0.0
+                    : (float) (($partial->pivot_price > 0) ? $partial->pivot_price : ($partial->product_price ?? 0));
+
+                // TRM: del partial → del order → default 4000
+                $trm = ((float)($partial->partial_trm ?? 0) > 0)
+                    ? (float) $partial->partial_trm
+                    : ($orderTrm > 0 ? $orderTrm : 4000.0);
+
+                $qty         = (int) $partial->quantity;
+                $subtotalUsd = $effectivePrice * $qty;
+                $subtotalCop = $subtotalUsd * $trm;
+
+                $totalUsd += $subtotalUsd;
+                $totalCop += $subtotalCop;
+
+                if (!$transporter && $partial->transporter) {
+                    $transporter = $partial->transporter;
+                }
+                if (!$invoiceNum && $partial->invoice_number) {
+                    $invoiceNum = $partial->invoice_number;
+                }
+                if (!$trackingNum && $partial->tracking_number) {
+                    $trackingNum = $partial->tracking_number;
+                }
+
+                $itemRow = [
+                    $partial->dispatch_date ? \Carbon\Carbon::parse($partial->dispatch_date)->format('d/m/Y') : $dispatchDate,
+                    $order->order_consecutive ?? '',
+                    $estado,
+                    $order->client->client_name ?? '',
+                    $order->client->nit ?? '',
+                    $partial->product_name ?? '',
+                    $qty,
+                    number_format($effectivePrice, 2, '.', ','),
+                    number_format($subtotalUsd, 2, '.', ','),
+                    number_format($subtotalCop, 0, '.', ','),
+                    number_format($trm, 2, '.', ','),
+                    $isSample ? 'Sí' : 'No',
+                    ((int)($partial->new_win ?? 0) === 1) ? 'Sí' : 'No',
+                ];
+
+                $this->appendRow($accessToken, $sheetId, 'Ítems', $itemRow);
+            }
+
+            // Si no hay partials reales, calcular desde el pivot como fallback
+            if ($partials->isEmpty()) {
+                foreach ($order->products as $product) {
+                    $isSample = (bool) ($product->pivot->muestra ?? false);
+                    $pivotPrice = (float) ($product->pivot->price ?? 0);
+                    $effectivePrice = $isSample ? 0.0
+                        : ($pivotPrice > 0 ? $pivotPrice : (float) ($product->price ?? 0));
+                    $qty = (int) ($product->pivot->quantity ?? 0);
+                    $totalUsd += $effectivePrice * $qty;
+                }
+                $totalCop = $totalUsd * ($orderTrm > 0 ? $orderTrm : 4000.0);
+            }
+
+            // ── Hoja Órdenes (una fila por OC) ──
+            $trm = $orderTrm > 0 ? $orderTrm : 4000.0;
             $orderRow = [
                 $dispatchDate,
                 $order->order_consecutive ?? '',
@@ -172,9 +256,9 @@ class GoogleSheetsService
                 number_format($totalUsd, 2, '.', ','),
                 number_format($totalCop, 0, '.', ','),
                 number_format($trm, 2, '.', ','),
-                $order->invoice_number ?? '',
-                $order->tracking_number ?? '',
-                '',  // transportadora (está en partials, no en la orden)
+                $invoiceNum,
+                $trackingNum,
+                $transporter,
                 $order->is_muestra ? 'Sí' : 'No',
                 $order->is_new_win  ? 'Sí' : 'No',
                 $order->project?->name ?? '',
@@ -184,31 +268,6 @@ class GoogleSheetsService
 
             $this->appendRow($accessToken, $sheetId, 'Órdenes', $orderRow);
 
-            // ── Hoja Ítems (una fila por producto) ──
-            foreach ($order->products as $product) {
-                $qty      = $product->pivot->quantity ?? 0;
-                $price    = $product->pivot->price    ?? 0;
-                $subtotalUsd = $qty * $price;
-                $subtotalCop = $subtotalUsd * $trm;
-
-                $itemRow = [
-                    $dispatchDate,
-                    $order->order_consecutive ?? '',
-                    $estado,
-                    $order->client->client_name ?? '',
-                    $order->client->nit ?? '',
-                    $product->product_name ?? '',
-                    $qty,
-                    number_format($price, 2, '.', ','),
-                    number_format($subtotalUsd, 2, '.', ','),
-                    number_format($subtotalCop, 0, '.', ','),
-                    number_format($trm, 2, '.', ','),
-                    ($product->pivot->muestra ?? false) ? 'Sí' : 'No',
-                    ($product->pivot->new_win  ?? false) ? 'Sí' : 'No',
-                ];
-
-                $this->appendRow($accessToken, $sheetId, 'Ítems', $itemRow);
-            }
             // Marcar como exportada para evitar duplicados futuros
             $exports[] = $exportKey;
             $order->updateQuietly(['sheets_exports' => $exports]);
