@@ -59,10 +59,83 @@ class GoogleSheetsService
         return null;
     }
 
+    // ─── Carpeta Drive ────────────────────────────────────────────────────────
+
+    /**
+     * Obtiene o crea la carpeta "Finearom — Reportes" en Drive.
+     * El ID se guarda en cache permanente (no expira).
+     */
+    private function getOrCreateReportsFolder(int $userId): ?string
+    {
+        $cacheKey = 'google_drive_reports_folder_id';
+        $folderId = cache($cacheKey);
+
+        if ($folderId) {
+            return $folderId;
+        }
+
+        try {
+            $accessToken = $this->getValidToken($userId);
+
+            // Buscar si ya existe la carpeta
+            $search = Http::withToken($accessToken)
+                ->get(self::DRIVE_URL, [
+                    'q'      => "name='Finearom — Reportes' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                    'fields' => 'files(id)',
+                ]);
+
+            if ($search->successful() && !empty($search->json('files'))) {
+                $folderId = $search->json('files.0.id');
+            } else {
+                // Crear la carpeta
+                $create = Http::withToken($accessToken)
+                    ->post(self::DRIVE_URL, [
+                        'name'     => 'Finearom — Reportes',
+                        'mimeType' => 'application/vnd.google-apps.folder',
+                    ]);
+
+                if ($create->failed()) {
+                    Log::warning('GoogleSheets: no se pudo crear carpeta en Drive: ' . $create->body());
+                    return null;
+                }
+
+                $folderId = $create->json('id');
+
+                // Compartir carpeta con el dominio
+                $this->shareWithDomain($userId, $folderId, 'finearom.com');
+            }
+
+            cache([$cacheKey => $folderId]); // sin TTL = permanente
+            return $folderId;
+        } catch (\Throwable $e) {
+            Log::warning('GoogleSheets: excepción al obtener carpeta de reportes: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Mueve un archivo de Drive a la carpeta de reportes.
+     */
+    private function moveToReportsFolder(int $userId, string $fileId): void
+    {
+        $folderId = $this->getOrCreateReportsFolder($userId);
+        if (!$folderId) {
+            return;
+        }
+
+        try {
+            $accessToken = $this->getValidToken($userId);
+            Http::withToken($accessToken)
+                ->patch(self::DRIVE_URL . "/{$fileId}?addParents={$folderId}&removeParents=root&fields=id,parents");
+        } catch (\Throwable $e) {
+            Log::warning('GoogleSheets: no se pudo mover sheet a carpeta de reportes: ' . $e->getMessage());
+        }
+    }
+
     // ─── Sheet mensual ────────────────────────────────────────────────────────
 
     /**
-     * Obtiene o crea el spreadsheet mensual.
+     * Obtiene o crea el spreadsheet mensual dentro de la carpeta "Finearom — Reportes".
      * Contiene dos hojas: "Órdenes" e "Ítems".
      */
     public function getOrCreateMonthlySheet(int $userId): ?string
@@ -108,6 +181,9 @@ class GoogleSheetsService
             }
 
             $sheetId = $response->json('spreadsheetId');
+
+            // Mover a carpeta de reportes
+            $this->moveToReportsFolder($userId, $sheetId);
 
             $this->shareWithDomain($userId, $sheetId, 'finearom.com');
             $this->makePublicReadable($userId, $sheetId);
