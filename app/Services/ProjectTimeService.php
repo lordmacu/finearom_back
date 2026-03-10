@@ -30,6 +30,7 @@ class ProjectTimeService
 
         $project->loadMissing([
             'client',
+            'prospect',
             'application',
             'evaluation',
             'marketingYCalidad',
@@ -37,8 +38,14 @@ class ProjectTimeService
             'fragrances',
         ]);
 
+        // Determinar tipo_cliente desde cliente real o desde prospecto
+        $tipoCliente = $project->client?->client_type ?? $project->prospect?->tipo_cliente ?? null;
+
+        if (!$tipoCliente) {
+            return null;
+        }
+
         $potencial = ((float) $project->rango_min + (float) $project->rango_max) / 2 * (float) $project->volumen / 1000;
-        $tipoCliente = $project->client->client_type;
         $grupo = $this->lookupGrupo($potencial, $tipoCliente);
 
         $dias = 0;
@@ -92,6 +99,10 @@ class ProjectTimeService
             case 'Colección':
                 $dias += $this->lookupSample($potencial, $tipoCliente);
                 break;
+        }
+
+        if ($dias === 0) {
+            return null;
         }
 
         return $this->addBusinessDays(

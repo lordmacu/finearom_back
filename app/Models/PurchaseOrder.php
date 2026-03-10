@@ -37,6 +37,7 @@ class PurchaseOrder extends Model
         'subject_despacho',
         'subject_dispatch',
         'proforma_generada',
+        'project_id',
     ];
 
     protected $casts = [
@@ -53,6 +54,11 @@ class PurchaseOrder extends Model
     public function client()
     {
         return $this->belongsTo(Client::class);
+    }
+
+    public function project()
+    {
+        return $this->belongsTo(Project::class);
     }
 
     public function branchOffice()

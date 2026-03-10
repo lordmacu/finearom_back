@@ -14,15 +14,17 @@ class ProjectProposal extends Model
 
     protected $fillable = [
         'variant_id',
-        'swissarom_reference_id',
+        'finearom_reference_id',
+        'precio_snapshot',
         'definitiva',
         'total_propuesta',
         'total_propuesta_cop',
     ];
 
     protected $casts = [
-        'definitiva' => 'boolean',
-        'total_propuesta' => 'decimal:2',
+        'definitiva'          => 'boolean',
+        'precio_snapshot'     => 'decimal:2',
+        'total_propuesta'     => 'decimal:2',
         'total_propuesta_cop' => 'decimal:2',
     ];
 
@@ -31,8 +33,8 @@ class ProjectProposal extends Model
         return $this->belongsTo(ProjectVariant::class, 'variant_id');
     }
 
-    public function swissaromReference(): BelongsTo
+    public function finearomReference(): BelongsTo
     {
-        return $this->belongsTo(SwissaromReference::class, 'swissarom_reference_id');
+        return $this->belongsTo(FinearomReference::class, 'finearom_reference_id');
     }
 }

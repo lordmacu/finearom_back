@@ -18,6 +18,10 @@ class Project extends Model
     protected $fillable = [
         'nombre',
         'client_id',
+        'prospect_id',
+        'legacy_id',
+        'nombre_prospecto',
+        'email_prospecto',
         'product_id',
         'tipo',
         'rango_min',
@@ -35,6 +39,7 @@ class Project extends Model
         'homologacion',
         'internacional',
         'ejecutivo',
+        'ejecutivo_id',
         'estado_externo',
         'fecha_externo',
         'ejecutivo_externo',
@@ -62,6 +67,8 @@ class Project extends Model
         'obs_esp',
         'obs_ext',
         'actualizado',
+        'razon_perdida',
+        'dias_diferencia',
     ];
 
     protected $casts = [
@@ -97,9 +104,19 @@ class Project extends Model
         return $this->belongsTo(Client::class, 'client_id');
     }
 
+    public function prospect(): BelongsTo
+    {
+        return $this->belongsTo(Prospect::class, 'prospect_id');
+    }
+
+    public function ejecutivoUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'ejecutivo_id');
+    }
+
     public function product(): BelongsTo
     {
-        return $this->belongsTo(Product::class, 'product_id');
+        return $this->belongsTo(ProjectProductType::class, 'product_id');
     }
 
     public function sample(): HasOne
@@ -135,5 +152,38 @@ class Project extends Model
     public function fragrances(): HasMany
     {
         return $this->hasMany(ProjectFragrance::class, 'project_id');
+    }
+
+    public function purchaseOrders(): HasMany
+    {
+        return $this->hasMany(PurchaseOrder::class, 'project_id');
+    }
+
+    public function statusHistory(): HasMany
+    {
+        return $this->hasMany(\App\Models\ProjectStatusHistory::class, 'project_id');
+    }
+
+    public function files(): HasMany
+    {
+        return $this->hasMany(ProjectFile::class, 'project_id');
+    }
+
+    public function quotationLogs(): HasMany
+    {
+        return $this->hasMany(ProjectQuotationLog::class, 'project_id');
+    }
+
+    public function googleTaskConfigs(): HasMany
+    {
+        return $this->hasMany(ProjectGoogleTaskConfig::class, 'project_id');
+    }
+
+    /**
+     * Nombre de visualización del cliente: cliente real o nombre de prospecto.
+     */
+    public function getClientDisplayNameAttribute(): string
+    {
+        return $this->client?->client_name ?? $this->nombre_prospecto ?? '(Sin cliente)';
     }
 }

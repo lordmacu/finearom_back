@@ -53,6 +53,14 @@ class DatabaseSeeder extends Seeder
             'executive create',
             'executive edit',
             'executive delete',
+            'project list',
+            'project create',
+            'project edit',
+            'project delete',
+            'project external status',
+            'project deliver',
+            'project factor edit',
+            'project catalog manage',
         ];
 
         foreach ($permissions as $permission) {
@@ -68,7 +76,42 @@ class DatabaseSeeder extends Seeder
             $superAdminRole->syncPermissions(Permission::query()->where('guard_name', 'web')->get());
         }
 
+        // Roles con acceso completo a proyectos
+        $adminLikeRoles = ['admin', 'Administrador', 'Gerente'];
+        foreach ($adminLikeRoles as $roleName) {
+            $role = Role::query()->where('name', $roleName)->where('guard_name', 'web')->first();
+            if ($role) {
+                $role->givePermissionTo([
+                    'project list', 'project create', 'project edit', 'project delete',
+                    'project external status', 'project deliver', 'project factor edit',
+                    'project catalog manage',
+                ]);
+            }
+        }
+
+        // Roles comerciales: pueden ver, crear, editar y cambiar estado externo
+        $commercialRoles = ['Creador de Ordenes de Compra', 'order-creator'];
+        foreach ($commercialRoles as $roleName) {
+            $role = Role::query()->where('name', $roleName)->where('guard_name', 'web')->first();
+            if ($role) {
+                $role->givePermissionTo([
+                    'project list', 'project create', 'project edit', 'project external status',
+                ]);
+            }
+        }
+
+        // Roles observadores: solo lectura
+        $viewerRoles = ['Observador', 'Visualizador de Ordenes de Compra', 'Email Marketing'];
+        foreach ($viewerRoles as $roleName) {
+            $role = Role::query()->where('name', $roleName)->where('guard_name', 'web')->first();
+            if ($role) {
+                $role->givePermissionTo(['project list']);
+            }
+        }
+
         app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $this->call(ProjectTimesSeeder::class);
 
         // \App\Models\User::factory(10)->create();
 

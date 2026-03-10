@@ -26,6 +26,17 @@ use App\Http\Controllers\RecaudoImportController;
 use App\Http\Controllers\ProformaController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\IaForecastController;
+use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\ProjectFileController;
+use App\Http\Controllers\ProjectWorkflowController;
+use App\Http\Controllers\ProjectCatalogController;
+use App\Http\Controllers\ProjectDetailController;
+use App\Http\Controllers\ProjectNotificationController;
+use App\Http\Controllers\ProjectTimesController;
+use App\Http\Controllers\GoogleAuthController;
+use App\Http\Controllers\GoogleTaskController;
+use App\Http\Controllers\ProjectGoogleTaskConfigController;
+use App\Http\Controllers\OrderGoogleTaskConfigController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -63,14 +74,27 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'user']);
 
+    // Google Tasks — OAuth + crear tareas
+    Route::prefix('auth/google')->group(function () {
+        Route::get('/url',             [GoogleAuthController::class, 'authUrl']);
+        Route::get('/status',          [GoogleAuthController::class, 'status']);
+        Route::get('/connected-users', [GoogleAuthController::class, 'connectedUsers']);
+        Route::delete('/disconnect',   [GoogleAuthController::class, 'disconnect']);
+    });
+    Route::post('/projects/{project}/google-task',        [GoogleTaskController::class, 'createFromProject']);
+    Route::get('/projects/{project}/google-task-config',  [ProjectGoogleTaskConfigController::class, 'show']);
+    Route::put('/projects/{project}/google-task-config',  [ProjectGoogleTaskConfigController::class, 'update']);
+    Route::get('/order-google-task-config',  [OrderGoogleTaskConfigController::class, 'index']);
+    Route::put('/order-google-task-config',  [OrderGoogleTaskConfigController::class, 'update']);
+
     // Dashboard Stats
     Route::get('/dashboard/stats', [DashboardController::class, 'getStats']);
     Route::get('/dashboard/export-planned-stats', [DashboardController::class, 'exportPlannedStats']);
     Route::get('/dashboard/client-stats', [DashboardController::class, 'clientQuickStats']);
-    
+
     // Cuenta del usuario autenticado
     Route::get('/account', [AccountController::class, 'show']);
-    
+
     // Email Tracking
     // Email Tracking
     Route::get('/email-tracking/logs', [App\Http\Controllers\EmailTrackingController::class, 'index']);
@@ -82,7 +106,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Rutas de Permisos
     Route::apiResource('permissions', PermissionController::class);
-    
+
     // Rutas de Roles
     Route::get('roles/permissions', [RoleController::class, 'permissions']);
     Route::apiResource('roles', RoleController::class);
@@ -207,6 +231,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/branch-offices/export', [ClientController::class, 'exportOffices']);
 
     Route::post('/clients/autocreation', [ClientController::class, 'autocreation']);
+    Route::get('/clients/{client}/projects', [ProjectController::class, 'byClient']);
 
     // Ejecutivos
     Route::get('/executives', [ClientController::class, 'executives']);
@@ -230,6 +255,151 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('clients/{clientId}/products/{productoId}', [IaForecastController::class, 'show']);
         Route::post('clients/{clientId}/products/{productoId}/analyze', [IaForecastController::class, 'analyze']);
     });
+
+    // ============================================================================
+    // PROYECTOS
+    // ============================================================================
+    Route::get('/projects/export', [ProjectController::class, 'export']);
+    Route::get('/projects/dashboard', [ProjectController::class, 'dashboard']);
+    Route::get('/projects/kpi-stats', [ProjectController::class, 'kpiStats']);
+    Route::get('/projects/ejecutivos', [ProjectController::class, 'ejecutivos']);
+    Route::get('/projects', [ProjectController::class, 'index']);
+    Route::post('/projects', [ProjectController::class, 'store']);
+    Route::get('/projects/{project}', [ProjectController::class, 'show']);
+    Route::put('/projects/{project}', [ProjectController::class, 'update']);
+    Route::delete('/projects/{project}', [ProjectController::class, 'destroy']);
+
+    Route::post('/projects/{project}/duplicate', [ProjectController::class, 'duplicate']);
+    Route::patch('/projects/{project}/link-client', [ProjectController::class, 'linkClient']);
+    Route::patch('/projects/{project}/estado-externo', [ProjectWorkflowController::class, 'setExternalStatus']);
+    Route::patch('/projects/{project}/entregar', [ProjectWorkflowController::class, 'deliver']);
+    Route::get('/projects/{project}/cotizacion', [ProjectWorkflowController::class, 'quotation']);
+    Route::get('/projects/{project}/cotizacion/pdf', [ProjectWorkflowController::class, 'quotationPdf']);
+    Route::get('/projects/{project}/cotizacion/logs', [ProjectWorkflowController::class, 'quotationLogs']);
+    Route::get('/projects/{project}/purchase-orders', [ProjectWorkflowController::class, 'purchaseOrders']);
+    Route::patch('/projects/{project}/link-order', [ProjectWorkflowController::class, 'linkPurchaseOrder']);
+    Route::get('/projects/{project}/timeline', [ProjectWorkflowController::class, 'timeline']);
+    Route::patch('/projects/{project}/reabrir', [ProjectWorkflowController::class, 'reabrir']);
+
+    // Adjuntos de archivos del proyecto
+    Route::get('/projects/{project}/files', [ProjectFileController::class, 'index']);
+    Route::post('/projects/{project}/files', [ProjectFileController::class, 'store']);
+    Route::delete('/projects/{project}/files/{file}', [ProjectFileController::class, 'destroy']);
+    Route::get('/projects/{project}/files/{file}/download', [ProjectFileController::class, 'download']);
+
+    // Subentidades del proyecto (1:1)
+    Route::put('/projects/{project}/sample', [ProjectDetailController::class, 'updateSample']);
+    Route::put('/projects/{project}/application', [ProjectDetailController::class, 'updateApplication']);
+    Route::put('/projects/{project}/evaluation', [ProjectDetailController::class, 'updateEvaluation']);
+    Route::put('/projects/{project}/marketing', [ProjectDetailController::class, 'updateMarketing']);
+
+    // Observaciones departamentales
+    Route::patch('/projects/{project}/observaciones', [ProjectDetailController::class, 'updateObservaciones']);
+
+    // Toggle actualizado
+    Route::patch('/projects/{project}/actualizado', [ProjectDetailController::class, 'toggleActualizado']);
+
+    // Cambiar factor + recalcular propuestas
+    Route::patch('/projects/{project}/factor', [ProjectDetailController::class, 'updateFactor']);
+
+    // Variantes del proyecto (solo Desarrollo)
+    Route::post('/projects/{project}/variants', [ProjectDetailController::class, 'storeVariant']);
+    Route::put('/projects/{project}/variants/{variant}', [ProjectDetailController::class, 'updateVariant']);
+    Route::delete('/projects/{project}/variants/{variant}', [ProjectDetailController::class, 'destroyVariant']);
+
+    // Propuestas (por variante)
+    Route::post('/projects/{project}/variants/{variant}/proposals', [ProjectDetailController::class, 'storeProposal']);
+    Route::put('/projects/{project}/variants/{variant}/proposals/{proposal}', [ProjectDetailController::class, 'updateProposal']);
+    Route::delete('/projects/{project}/variants/{variant}/proposals/{proposal}', [ProjectDetailController::class, 'destroyProposal']);
+    Route::patch('/projects/{project}/variants/{variant}/proposals/{proposal}/definitiva', [ProjectDetailController::class, 'setDefinitiva']);
+
+    // Solicitudes de fragancia (Colección)
+    Route::post('/projects/{project}/requests', [ProjectDetailController::class, 'storeRequest']);
+    Route::put('/projects/{project}/requests/{projectRequest}', [ProjectDetailController::class, 'updateRequest']);
+    Route::delete('/projects/{project}/requests/{projectRequest}', [ProjectDetailController::class, 'destroyRequest']);
+
+    // Fragancias finas (Fine Fragances)
+    Route::post('/projects/{project}/fragrances', [ProjectDetailController::class, 'storeProjectFragrance']);
+    Route::put('/projects/{project}/fragrances/{projectFragrance}', [ProjectDetailController::class, 'updateProjectFragrance']);
+    Route::delete('/projects/{project}/fragrances/{projectFragrance}', [ProjectDetailController::class, 'destroyProjectFragrance']);
+
+    // Tiempos de lookup (para cálculo de fecha_calculada)
+    Route::get('/project-times/samples', [ProjectTimesController::class, 'samples']);
+    Route::put('/project-times/samples/{timeSample}', [ProjectTimesController::class, 'updateSample']);
+    Route::get('/project-times/applications', [ProjectTimesController::class, 'applications']);
+    Route::put('/project-times/applications/{timeApplication}', [ProjectTimesController::class, 'updateApplication']);
+    Route::get('/project-times/evaluations', [ProjectTimesController::class, 'evaluations']);
+    Route::put('/project-times/evaluations/{timeEvaluation}', [ProjectTimesController::class, 'updateEvaluation']);
+    Route::get('/project-times/marketing', [ProjectTimesController::class, 'marketing']);
+    Route::put('/project-times/marketing/{timeMarketing}', [ProjectTimesController::class, 'updateMarketing']);
+    Route::get('/project-times/quality', [ProjectTimesController::class, 'quality']);
+    Route::put('/project-times/quality/{timeQuality}', [ProjectTimesController::class, 'updateQuality']);
+    Route::get('/project-times/responses', [ProjectTimesController::class, 'responses']);
+    Route::put('/project-times/responses/{timeResponse}', [ProjectTimesController::class, 'updateResponse']);
+    Route::get('/project-times/homologations', [ProjectTimesController::class, 'homologations']);
+    Route::put('/project-times/homologations/{timeHomologation}', [ProjectTimesController::class, 'updateHomologation']);
+    Route::get('/project-times/fine', [ProjectTimesController::class, 'fine']);
+    Route::put('/project-times/fine/{timeFine}', [ProjectTimesController::class, 'updateFine']);
+    Route::get('/project-times/group-classifications', [ProjectTimesController::class, 'groupClassifications']);
+    Route::put('/project-times/group-classifications/{groupClassification}', [ProjectTimesController::class, 'updateGroupClassification']);
+
+    // Project times — store & destroy
+    Route::post('/project-times/samples', [ProjectTimesController::class, 'storeSample']);
+    Route::delete('/project-times/samples/{timeSample}', [ProjectTimesController::class, 'destroySample']);
+    Route::post('/project-times/applications', [ProjectTimesController::class, 'storeApplication']);
+    Route::delete('/project-times/applications/{timeApplication}', [ProjectTimesController::class, 'destroyApplication']);
+    Route::post('/project-times/evaluations', [ProjectTimesController::class, 'storeEvaluation']);
+    Route::delete('/project-times/evaluations/{timeEvaluation}', [ProjectTimesController::class, 'destroyEvaluation']);
+    Route::post('/project-times/marketing', [ProjectTimesController::class, 'storeMarketing']);
+    Route::delete('/project-times/marketing/{timeMarketing}', [ProjectTimesController::class, 'destroyMarketing']);
+    Route::post('/project-times/quality', [ProjectTimesController::class, 'storeQuality']);
+    Route::delete('/project-times/quality/{timeQuality}', [ProjectTimesController::class, 'destroyQuality']);
+    Route::post('/project-times/responses', [ProjectTimesController::class, 'storeResponse']);
+    Route::delete('/project-times/responses/{timeResponse}', [ProjectTimesController::class, 'destroyResponse']);
+    Route::post('/project-times/homologations', [ProjectTimesController::class, 'storeHomologation']);
+    Route::delete('/project-times/homologations/{timeHomologation}', [ProjectTimesController::class, 'destroyHomologation']);
+    Route::post('/project-times/fine', [ProjectTimesController::class, 'storeFine']);
+    Route::delete('/project-times/fine/{timeFine}', [ProjectTimesController::class, 'destroyFine']);
+    Route::post('/project-times/group-classifications', [ProjectTimesController::class, 'storeGroupClassification']);
+    Route::delete('/project-times/group-classifications/{groupClassification}', [ProjectTimesController::class, 'destroyGroupClassification']);
+
+    // Catálogos de proyecto — CRUD completo
+    Route::get('/project-catalogs/product-types', [ProjectCatalogController::class, 'projectProductTypes']);
+    Route::post('/project-catalogs/product-types', [ProjectCatalogController::class, 'storeProductType']);
+    Route::put('/project-catalogs/product-types/{projectProductType}', [ProjectCatalogController::class, 'updateProductType']);
+    Route::delete('/project-catalogs/product-types/{projectProductType}', [ProjectCatalogController::class, 'destroyProductType']);
+
+    Route::get('/project-catalogs/fragrances', [ProjectCatalogController::class, 'fragrances']);
+    Route::post('/project-catalogs/fragrances', [ProjectCatalogController::class, 'storeFragrance']);
+    Route::put('/project-catalogs/fragrances/{fragrance}', [ProjectCatalogController::class, 'updateFragrance']);
+    Route::delete('/project-catalogs/fragrances/{fragrance}', [ProjectCatalogController::class, 'destroyFragrance']);
+
+    Route::get('/project-catalogs/fine-fragrances', [ProjectCatalogController::class, 'fineFragrances']);
+    Route::post('/project-catalogs/fine-fragrances', [ProjectCatalogController::class, 'storeFineFragrance']);
+    Route::put('/project-catalogs/fine-fragrances/{fineFragrance}', [ProjectCatalogController::class, 'updateFineFragrance']);
+    Route::delete('/project-catalogs/fine-fragrances/{fineFragrance}', [ProjectCatalogController::class, 'destroyFineFragrance']);
+
+    Route::get('/project-catalogs/houses', [ProjectCatalogController::class, 'houses']);
+    Route::post('/project-catalogs/houses', [ProjectCatalogController::class, 'storeHouse']);
+    Route::put('/project-catalogs/houses/{house}', [ProjectCatalogController::class, 'updateHouse']);
+    Route::delete('/project-catalogs/houses/{house}', [ProjectCatalogController::class, 'destroyHouse']);
+
+    Route::get('/project-catalogs/families', [ProjectCatalogController::class, 'families']);
+    Route::post('/project-catalogs/families', [ProjectCatalogController::class, 'storeFamily']);
+    Route::put('/project-catalogs/families/{family}', [ProjectCatalogController::class, 'updateFamily']);
+    Route::delete('/project-catalogs/families/{family}', [ProjectCatalogController::class, 'destroyFamily']);
+
+    Route::get('/project-catalogs/finearom-references', [ProjectCatalogController::class, 'finearomReferences']);
+    Route::post('/project-catalogs/finearom-references', [ProjectCatalogController::class, 'storeFinearomReference']);
+    Route::put('/project-catalogs/finearom-references/{finearomReference}', [ProjectCatalogController::class, 'updateFinearomReference']);
+    Route::delete('/project-catalogs/finearom-references/{finearomReference}', [ProjectCatalogController::class, 'destroyFinearomReference']);
+    Route::get('/project-catalogs/finearom-references/{finearomReference}/price-history', [ProjectCatalogController::class, 'finearomPriceHistory']);
+
+    // Notificaciones internas de proyectos
+    Route::get('/project-notifications', [ProjectNotificationController::class, 'index']);
+    Route::get('/project-notifications/unread-count', [ProjectNotificationController::class, 'unreadCount']);
+    Route::patch('/project-notifications/{notification}/read', [ProjectNotificationController::class, 'markRead']);
+    Route::patch('/project-notifications/mark-all-read', [ProjectNotificationController::class, 'markAllRead']);
 });
 
 // Public Pixel Route (no auth)

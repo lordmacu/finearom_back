@@ -6,11 +6,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class SwissaromReference extends Model
+class FinearomReference extends Model
 {
     use HasFactory;
 
-    protected $table = 'swissarom_references';
+    protected $table = 'finearom_references';
 
     protected $fillable = [
         'codigo',
@@ -24,6 +24,11 @@ class SwissaromReference extends Model
 
     public function projectProposals(): HasMany
     {
-        return $this->hasMany(ProjectProposal::class, 'swissarom_reference_id');
+        return $this->hasMany(ProjectProposal::class, 'finearom_reference_id');
+    }
+
+    public function priceHistory(): HasMany
+    {
+        return $this->hasMany(FinearomPriceHistory::class, 'finearom_reference_id');
     }
 }

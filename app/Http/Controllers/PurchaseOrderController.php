@@ -7,6 +7,8 @@ use App\Models\Partial;
 use App\Models\Process;
 use App\Models\PurchaseOrderProduct;
 use App\Rules\UniqueOrderConsecutiveForClient;
+use App\Models\OrderGoogleTaskConfig;
+use App\Services\GoogleTaskService;
 use App\Services\TrmService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -27,11 +29,13 @@ class PurchaseOrderController extends Controller
 {
     protected $trmService;
     protected $emailTrackingService;
+    protected $googleTaskService;
 
-    public function __construct(TrmService $trmService, \App\Services\EmailTrackingService $emailTrackingService)
+    public function __construct(TrmService $trmService, \App\Services\EmailTrackingService $emailTrackingService, GoogleTaskService $googleTaskService)
     {
         $this->trmService = $trmService;
         $this->emailTrackingService = $emailTrackingService;
+        $this->googleTaskService = $googleTaskService;
         $this->middleware('can:purchase_order list')->only(['index']);
     }
 
@@ -310,6 +314,22 @@ class PurchaseOrderController extends Controller
                     'error' => $e->getMessage()
                 ]);
                 // No fallar la creación de la orden si falla el envío de emails
+            }
+
+            // Google Tasks: notificar a equipo de despacho (on_create)
+            try {
+                $config = OrderGoogleTaskConfig::where('trigger', 'on_create')->first();
+                if ($config && !empty($config->user_ids)) {
+                    $clientName = $purchaseOrder->client->client_name ?? 'Cliente';
+                    $this->googleTaskService->createTaskForUsers(
+                        $config->user_ids,
+                        "Agregar fecha estimada y observaciones: {$purchaseOrder->order_consecutive} — {$clientName}",
+                        null,
+                        now()->toDateString()
+                    );
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Google Tasks on_create: ' . $e->getMessage());
             }
 
             return response()->json([
@@ -933,9 +953,28 @@ class PurchaseOrderController extends Controller
                     $validated['observations'] ?? null
                 );
             } else {
-               
+
                 // Para pending, processing, cancelled: enviar email de cambio de estado simple
                 $this->sendSimpleStatusChangeEmail($order);
+            }
+
+            // Google Tasks: notificar cuando se confirma despacho real (on_dispatch)
+            if (in_array($validated['status'], ['completed', 'parcial_status'])) {
+                try {
+                    $config = OrderGoogleTaskConfig::where('trigger', 'on_dispatch')->first();
+                    if ($config && !empty($config->user_ids)) {
+                        $clientName = $order->client->client_name ?? 'Cliente';
+                        $label = $validated['status'] === 'parcial_status' ? 'Despacho parcial confirmado' : 'Despacho completo confirmado';
+                        $this->googleTaskService->createTaskForUsers(
+                            $config->user_ids,
+                            "{$label}: {$order->order_consecutive} — {$clientName}",
+                            null,
+                            now()->addDays(3)->toDateString()
+                        );
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Google Tasks on_dispatch: ' . $e->getMessage());
+                }
             }
 
             return response()->json([
@@ -1418,6 +1457,23 @@ class PurchaseOrderController extends Controller
                     $request
                 );
             }
+
+        // Google Tasks: notificar que hay una nueva observación/fecha estimada (on_observation)
+        try {
+            $config = OrderGoogleTaskConfig::where('trigger', 'on_observation')->first();
+            if ($config && !empty($config->user_ids)) {
+                $order->loadMissing('client');
+                $clientName = $order->client->client_name ?? 'Cliente';
+                $this->googleTaskService->createTaskForUsers(
+                    $config->user_ids,
+                    "Nueva observación/fecha estimada: {$order->order_consecutive} — {$clientName}",
+                    null,
+                    now()->toDateString()
+                );
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Google Tasks on_observation: ' . $e->getMessage());
+        }
 
         return response()->json([
             'success' => true,

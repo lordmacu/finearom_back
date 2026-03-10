@@ -58,4 +58,9 @@ class User extends Authenticatable implements MustVerifyEmail
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
     ];
+
+    public function googleToken(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(UserGoogleToken::class, 'user_id');
+    }
 }

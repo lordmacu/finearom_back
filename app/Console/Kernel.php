@@ -46,7 +46,12 @@ class Kernel extends ConsoleKernel
             });
 
         // Ejecutar dispatch de emails de cartera cada 30 minutos
-            $schedule->command('emails:dispatch')->everyMinute();
+        $schedule->command('emails:dispatch')->everyMinute();
+
+        // Google Tasks: alertas de proyectos próximos a vencer - 8:00 AM
+        $schedule->command('google-tasks:near-deadline')
+            ->dailyAt('08:00')
+            ->timezone('America/Bogota');
 
    
 

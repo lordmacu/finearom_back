@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     git \
     unzip \
     curl \
+    cron \
     libzip-dev \
     libonig-dev \
     libxml2-dev \
@@ -46,10 +47,19 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 RUN git config --global --add safe.directory /var/www/html \
     && composer install --no-dev --optimize-autoloader
 
+# Cron: ejecutar Laravel scheduler cada minuto
+RUN echo "* * * * * www-data php /var/www/html/artisan schedule:run >> /var/log/laravel-cron.log 2>&1" \
+    > /etc/cron.d/laravel-scheduler \
+    && chmod 0644 /etc/cron.d/laravel-scheduler \
+    && crontab /etc/cron.d/laravel-scheduler
+
+# Script de inicio: arranca cron + Apache
+RUN printf '#!/bin/sh\ncron\napache2-foreground\n' > /usr/local/bin/start.sh \
+    && chmod +x /usr/local/bin/start.sh
+
 # Set permissions for Laravel writable dirs
 RUN chown -R www-data:www-data storage bootstrap/cache
-USER www-data
 
 EXPOSE 80
 
-CMD ["apache2-foreground"]
+CMD ["/usr/local/bin/start.sh"]
