@@ -75,6 +75,9 @@ class GoogleAuthController extends Controller
             if ($e->getMessage() === 'user_not_found') {
                 return redirect($frontendUrl . '/login?error=google_user_not_found');
             }
+            if ($e->getMessage() === 'domain_not_allowed') {
+                return redirect($frontendUrl . '/login?error=google_domain_not_allowed');
+            }
             return redirect($frontendUrl . '/settings/google?error=1');
         }
     }

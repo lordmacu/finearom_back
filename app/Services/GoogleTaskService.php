@@ -103,7 +103,14 @@ class GoogleTaskService
 
         if ($mode === 'login') {
             $userInfo = $this->getGoogleUserInfo($tokens['access_token']);
-            $user = User::where('email', $userInfo['email'])->first();
+            $email = $userInfo['email'] ?? '';
+
+            // Solo se permite login con cuentas @finearom.com
+            if (!str_ends_with($email, '@finearom.com')) {
+                throw new \RuntimeException('domain_not_allowed');
+            }
+
+            $user = User::where('email', $email)->first();
 
             if (!$user) {
                 throw new \RuntimeException('user_not_found');
