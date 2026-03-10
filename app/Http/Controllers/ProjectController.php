@@ -244,11 +244,12 @@ class ProjectController extends Controller
 
     public function ejecutivos(): JsonResponse
     {
-        $ejecutivos = \Cache::remember('project_ejecutivos', 300, function () {
-            return User::select(['id', 'name', 'email'])
-                ->orderBy('name')
-                ->get();
-        });
+        // Usar DB::table en lugar de User:: para evitar los $appends (system_permissions/system_roles)
+        // que disparan N*2 queries extra contra model_has_permissions y model_has_roles
+        $ejecutivos = \DB::table('users')
+            ->select('id', 'name', 'email')
+            ->orderBy('name')
+            ->get();
 
         return response()->json(['success' => true, 'data' => $ejecutivos]);
     }
