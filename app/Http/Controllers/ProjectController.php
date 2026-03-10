@@ -244,9 +244,11 @@ class ProjectController extends Controller
 
     public function ejecutivos(): JsonResponse
     {
-        $ejecutivos = User::select(['id', 'name', 'email'])
-            ->orderBy('name')
-            ->get();
+        $ejecutivos = \Cache::remember('project_ejecutivos', 300, function () {
+            return User::select(['id', 'name', 'email'])
+                ->orderBy('name')
+                ->get();
+        });
 
         return response()->json(['success' => true, 'data' => $ejecutivos]);
     }
