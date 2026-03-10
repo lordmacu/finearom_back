@@ -67,6 +67,7 @@ class Client extends Model
         'cedula_representante_file',
         'declaracion_renta_file',
         'estados_financieros_file',
+        'drive_doc_links',
         'user_id',
         'executive_phone',
         'lead_time',
@@ -76,6 +77,10 @@ class Client extends Model
         'purchase_frequency',
         'estimated_monthly_quantity',
         'product_category',
+    ];
+
+    protected $casts = [
+        'drive_doc_links' => 'array',
     ];
 
     public function user()

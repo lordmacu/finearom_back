@@ -18,6 +18,8 @@ class ProjectFile extends Model
         'size',
         'categoria',
         'ejecutivo',
+        'drive_file_id',
+        'drive_link',
     ];
 
     protected $casts = [

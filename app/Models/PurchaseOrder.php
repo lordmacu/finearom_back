@@ -37,6 +37,9 @@ class PurchaseOrder extends Model
         'subject_despacho',
         'subject_dispatch',
         'proforma_generada',
+        'drive_file_id',
+        'drive_link',
+        'drive_attachment_links',
         'project_id',
     ];
 
@@ -49,6 +52,7 @@ class PurchaseOrder extends Model
         'is_muestra'               => 'boolean',
         'proforma_generada'        => 'boolean',
         'attachment'               => 'array',
+        'drive_attachment_links'   => 'array',
     ];
 
     public function client()

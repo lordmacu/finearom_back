@@ -77,7 +77,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Google Tasks — OAuth + crear tareas
     Route::prefix('auth/google')->group(function () {
         Route::get('/url',             [GoogleAuthController::class, 'authUrl']);
+        Route::get('/url-full',        [GoogleAuthController::class, 'authUrlFull']);
         Route::get('/status',          [GoogleAuthController::class, 'status']);
+        Route::get('/status-extended', [GoogleAuthController::class, 'statusExtended']);
         Route::get('/connected-users', [GoogleAuthController::class, 'connectedUsers']);
         Route::delete('/disconnect',   [GoogleAuthController::class, 'disconnect']);
     });

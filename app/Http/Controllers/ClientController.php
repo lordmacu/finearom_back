@@ -28,11 +28,14 @@ use App\Mail\ClientAutoCreationMail;
 use App\Mail\ClientAutofillMail;
 use App\Mail\ClientWelcomeMail;
 use App\Queries\Cartera\CarteraQuery;
+use App\Services\GoogleDriveService;
+use Illuminate\Support\Facades\Log;
 
 class ClientController extends Controller
 {
     public function __construct(
-        private readonly ?CarteraQuery $carteraQuery = null
+        private readonly ?CarteraQuery $carteraQuery = null,
+        private readonly ?GoogleDriveService $driveService = null,
     ) {
         $this->middleware('can:client list')->only(['index', 'exportClients', 'exportOffices', 'branchOffices', 'executives']);
         $this->middleware('can:client create')->only(['store', 'importClients', 'importOffices', 'autocreation']);
@@ -186,6 +189,9 @@ class ClientController extends Controller
         $data['user_id'] = $user->id;
         $client = Client::create($data);
 
+        // Subir documentos legales a Google Drive (silencioso)
+        $this->uploadClientDocsToDrive($client, $request);
+
         // Invalidar caché de clientes
         $this->clearClientsCache();
 
@@ -201,6 +207,9 @@ class ClientController extends Controller
         $client = Client::query()->findOrFail($clientId);
         $data = $this->prepareClientPayload($request->validated(), $request);
         $client->update($data);
+
+        // Subir documentos legales nuevos a Google Drive (silencioso)
+        $this->uploadClientDocsToDrive($client, $request);
 
         // Invalidar caché de clientes
         $this->clearClientsCache();
@@ -1043,12 +1052,63 @@ class ClientController extends Controller
     private function fileFields(): array
     {
         return [
-            'rut_file' => 'clients/rut',
-            'camara_comercio_file' => 'clients/camara',
+            'rut_file'                  => 'clients/rut',
+            'camara_comercio_file'      => 'clients/camara',
             'cedula_representante_file' => 'clients/cedula',
-            'declaracion_renta_file' => 'clients/renta',
-            'estados_financieros_file' => 'clients/financieros',
+            'declaracion_renta_file'    => 'clients/renta',
+            'estados_financieros_file'  => 'clients/financieros',
         ];
+    }
+
+    /**
+     * Sube los documentos legales del cliente a Google Drive.
+     * Solo sube los archivos que vienen en la request actual (nuevos o actualizados).
+     * Guarda los links en drive_doc_links (JSON) del cliente.
+     */
+    private function uploadClientDocsToDrive(Client $client, Request $request): void
+    {
+        if (!$this->driveService) return;
+
+        try {
+            $userId = auth()->id();
+            if (!$this->driveService->hasDriveAccess($userId)) return;
+
+            $docLabels = [
+                'rut_file'                  => 'RUT',
+                'camara_comercio_file'      => 'Camara de Comercio',
+                'cedula_representante_file' => 'Cedula Rep. Legal',
+                'declaracion_renta_file'    => 'Declaracion de Renta',
+                'estados_financieros_file'  => 'Estados Financieros',
+            ];
+
+            $docFolder  = $this->driveService->getOrCreateClientDocFolder($userId, $client);
+            $driveLinks = $client->drive_doc_links ?? [];
+            $updated    = false;
+
+            foreach ($docLabels as $field => $label) {
+                $storagePath = $client->{$field};
+                if (!$storagePath) continue;
+                // Solo subir si hay una nueva ruta que no está ya en los links
+                if (isset($driveLinks[$field])) continue;
+
+                $ext      = pathinfo($storagePath, PATHINFO_EXTENSION);
+                $filename = $label . ($ext ? ".{$ext}" : '');
+
+                $result = $this->driveService->uploadFromStorage($userId, 'public', $storagePath, $filename, $docFolder);
+                if ($result && !empty($result['id'])) {
+                    $this->driveService->makePublic($userId, $result['id']);
+                    $driveLinks[$field] = $result['webViewLink'] ?? null;
+                    $updated = true;
+                }
+            }
+
+            if ($updated) {
+                $client->drive_doc_links = $driveLinks;
+                $client->saveQuietly();
+            }
+        } catch (\Throwable $e) {
+            Log::warning('GoogleDrive: fallo al subir documentos de cliente: ' . $e->getMessage());
+        }
     }
 
     private function collectClientEmails(Client $client): array

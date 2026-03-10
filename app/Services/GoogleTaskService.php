@@ -12,10 +12,15 @@ use Illuminate\Support\Str;
 
 class GoogleTaskService
 {
-    private const AUTH_URL  = 'https://accounts.google.com/o/oauth2/v2/auth';
-    private const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-    private const TASKS_URL = 'https://tasks.googleapis.com/tasks/v1';
-    private const SCOPE     = 'https://www.googleapis.com/auth/tasks';
+    private const AUTH_URL      = 'https://accounts.google.com/o/oauth2/v2/auth';
+    private const TOKEN_URL     = 'https://oauth2.googleapis.com/token';
+    private const TASKS_URL     = 'https://tasks.googleapis.com/tasks/v1';
+    private const SCOPE_TASKS   = 'https://www.googleapis.com/auth/tasks';
+    private const SCOPE_DRIVE   = 'https://www.googleapis.com/auth/drive.file';
+    private const SCOPE_SHEETS  = 'https://www.googleapis.com/auth/spreadsheets';
+
+    /** @deprecated Use SCOPE_TASKS */
+    private const SCOPE = 'https://www.googleapis.com/auth/tasks';
 
     // ─── OAuth ────────────────────────────────────────────────────────────────
 
@@ -23,7 +28,7 @@ class GoogleTaskService
      * Genera la URL de autorización de Google.
      * Guarda el user_id en caché usando un state aleatorio para recuperarlo en el callback.
      */
-    public function getAuthUrl(int $userId, ?string $returnUrl = null): string
+    public function getAuthUrl(int $userId, ?string $returnUrl = null, bool $includeDrive = false, bool $includeSheets = false): string
     {
         $state = Str::random(40);
         Cache::put("google_oauth_state_{$state}", [
@@ -31,13 +36,21 @@ class GoogleTaskService
             'return_url' => $returnUrl,
         ], now()->addMinutes(15));
 
+        $scopes = [self::SCOPE_TASKS];
+        if ($includeDrive) {
+            $scopes[] = self::SCOPE_DRIVE;
+        }
+        if ($includeSheets) {
+            $scopes[] = self::SCOPE_SHEETS;
+        }
+
         return self::AUTH_URL . '?' . http_build_query([
             'client_id'     => config('services.google.client_id'),
             'redirect_uri'  => config('services.google.redirect'),
             'response_type' => 'code',
-            'scope'         => self::SCOPE,
+            'scope'         => implode(' ', $scopes),
             'access_type'   => 'offline',
-            'prompt'        => 'consent',   // fuerza que siempre retorne refresh_token
+            'prompt'        => 'consent',
             'state'         => $state,
         ]);
     }
@@ -76,6 +89,10 @@ class GoogleTaskService
 
         $tokens = $response->json();
 
+        $grantedScopes = isset($tokens['scope'])
+            ? explode(' ', $tokens['scope'])
+            : [self::SCOPE_TASKS];
+
         UserGoogleToken::updateOrCreate(
             ['user_id' => $userId],
             [
@@ -84,6 +101,7 @@ class GoogleTaskService
                     ? encrypt($tokens['refresh_token'])
                     : $this->getExistingRefreshToken($userId),
                 'expires_at'    => now()->addSeconds($tokens['expires_in'] - 60),
+                'scopes'        => $grantedScopes,
             ]
         );
 

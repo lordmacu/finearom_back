@@ -8,6 +8,8 @@ use App\Models\Process;
 use App\Models\PurchaseOrderProduct;
 use App\Rules\UniqueOrderConsecutiveForClient;
 use App\Models\OrderGoogleTaskConfig;
+use App\Services\GoogleDriveService;
+use App\Services\GoogleSheetsService;
 use App\Services\GoogleTaskService;
 use App\Services\TrmService;
 use Illuminate\Support\Facades\Auth;
@@ -30,12 +32,21 @@ class PurchaseOrderController extends Controller
     protected $trmService;
     protected $emailTrackingService;
     protected $googleTaskService;
+    protected $driveService;
+    protected $sheetsService;
 
-    public function __construct(TrmService $trmService, \App\Services\EmailTrackingService $emailTrackingService, GoogleTaskService $googleTaskService)
-    {
+    public function __construct(
+        TrmService $trmService,
+        \App\Services\EmailTrackingService $emailTrackingService,
+        GoogleTaskService $googleTaskService,
+        GoogleDriveService $driveService,
+        GoogleSheetsService $sheetsService,
+    ) {
         $this->trmService = $trmService;
         $this->emailTrackingService = $emailTrackingService;
         $this->googleTaskService = $googleTaskService;
+        $this->driveService = $driveService;
+        $this->sheetsService = $sheetsService;
         $this->middleware('can:purchase_order list')->only(['index']);
     }
 
@@ -316,6 +327,31 @@ class PurchaseOrderController extends Controller
                 // No fallar la creación de la orden si falla el envío de emails
             }
 
+            // Google Drive: subir adjuntos a la carpeta de la orden (silencioso)
+            if (!empty($attachmentPaths)) {
+                try {
+                    $driveUserId = $this->driveService->getAnyUserWithDriveAccess() ?? auth()->id();
+                    if ($this->driveService->hasDriveAccess($driveUserId)) {
+                        $orderFolder = $this->driveService->getOrCreateOrderFolder($driveUserId, $purchaseOrder->client, $purchaseOrder->order_consecutive);
+                        $driveLinks = [];
+                        foreach ($attachmentPaths as $path) {
+                            $filename = basename($path);
+                            $result = $this->driveService->uploadFromStorage($driveUserId, 'public', $path, $filename, $orderFolder);
+                            if ($result && !empty($result['id'])) {
+                                $this->driveService->makePublic($driveUserId, $result['id']);
+                                $driveLinks[] = $result['webViewLink'] ?? null;
+                            }
+                        }
+                        if (!empty($driveLinks)) {
+                            $purchaseOrder->drive_attachment_links = $driveLinks;
+                            $purchaseOrder->save();
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('GoogleDrive: fallo al subir adjuntos en store: ' . $e->getMessage());
+                }
+            }
+
             // Google Tasks: notificar a equipo de despacho (on_create)
             try {
                 $config = OrderGoogleTaskConfig::where('trigger', 'on_create')->first();
@@ -431,9 +467,9 @@ class PurchaseOrderController extends Controller
             $purchaseOrder->trm = $this->normalizeTrm($validated['trm']);
 
             // Adjuntos múltiples - agregar nuevos sin borrar existentes
+            $newAttachmentPaths = [];
             if ($request->hasFile('attachments')) {
                 $existingAttachments = $purchaseOrder->attachment ?? [];
-                $newAttachmentPaths = [];
 
                 foreach ($request->file('attachments') as $file) {
                     $newAttachmentPaths[] = $file->store('attachments', 'public');
@@ -444,6 +480,29 @@ class PurchaseOrderController extends Controller
             }
 
             $purchaseOrder->save();
+
+            // Google Drive: subir nuevos adjuntos a la carpeta de la orden (silencioso)
+            if (!empty($newAttachmentPaths)) {
+                try {
+                    $driveUserId = $this->driveService->getAnyUserWithDriveAccess() ?? auth()->id();
+                    if ($this->driveService->hasDriveAccess($driveUserId)) {
+                        $orderFolder = $this->driveService->getOrCreateOrderFolder($driveUserId, $purchaseOrder->client, $purchaseOrder->order_consecutive);
+                        $existingLinks = $purchaseOrder->drive_attachment_links ?? [];
+                        foreach ($newAttachmentPaths as $path) {
+                            $filename = basename($path);
+                            $result = $this->driveService->uploadFromStorage($driveUserId, 'public', $path, $filename, $orderFolder);
+                            if ($result && !empty($result['id'])) {
+                                $this->driveService->makePublic($driveUserId, $result['id']);
+                                $existingLinks[] = $result['webViewLink'] ?? null;
+                            }
+                        }
+                        $purchaseOrder->drive_attachment_links = $existingLinks;
+                        $purchaseOrder->save();
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('GoogleDrive: fallo al subir adjuntos en update: ' . $e->getMessage());
+                }
+            }
 
             $this->syncProductsForUpdate($purchaseOrder, $validated['products']);
 
@@ -579,11 +638,28 @@ class PurchaseOrderController extends Controller
 
         $pdfContent = $this->generateProformaPdfContent($purchase, $params);
 
+        $filename = ($params['country'] === 'CO' ? 'proforma-nacional-' : 'proforma-export-') . $purchase->order_consecutive . '.pdf';
+
         // Marcar proforma como generada
         $purchase->proforma_generada = true;
-        $purchase->save();
 
-        $filename = ($params['country'] === 'CO' ? 'proforma-nacional-' : 'proforma-export-') . $purchase->order_consecutive . '.pdf';
+        // Subir a Google Drive si el usuario tiene acceso (silencioso, no bloquea)
+        $userId = auth()->id();
+        if ($this->driveService->hasDriveAccess($userId)) {
+            try {
+                $orderFolder = $this->driveService->getOrCreateOrderFolder($userId, $purchase->client, $purchase->order_consecutive);
+                $result = $this->driveService->uploadFile($userId, $pdfContent, $filename, $orderFolder);
+                if ($result && !empty($result['id'])) {
+                    $this->driveService->makePublic($userId, $result['id']);
+                    $purchase->drive_file_id = $result['id'];
+                    $purchase->drive_link    = $result['webViewLink'] ?? null;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('GoogleDrive: fallo silencioso al subir proforma: ' . $e->getMessage());
+            }
+        }
+
+        $purchase->save();
 
         return response($pdfContent)
             ->header('Content-Type', 'application/pdf')
@@ -974,6 +1050,19 @@ class PurchaseOrderController extends Controller
                     }
                 } catch (\Throwable $e) {
                     Log::warning('Google Tasks on_dispatch: ' . $e->getMessage());
+                }
+            }
+
+            // Google Sheets: registrar orden completada en el sheet mensual (silencioso)
+            if ($validated['status'] === 'completed') {
+                try {
+                    $sheetsUserId = $this->sheetsService->getAnyUserWithSheetsAccess();
+                    if ($sheetsUserId) {
+                        $order->load('client', 'products');
+                        $this->sheetsService->appendOrderRow($sheetsUserId, $order);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('GoogleSheets on_completed: ' . $e->getMessage());
                 }
             }
 

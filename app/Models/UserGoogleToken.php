@@ -12,10 +12,12 @@ class UserGoogleToken extends Model
         'access_token',
         'refresh_token',
         'expires_at',
+        'scopes',
     ];
 
     protected $casts = [
         'expires_at' => 'datetime',
+        'scopes'     => 'array',
     ];
 
     public function user(): BelongsTo

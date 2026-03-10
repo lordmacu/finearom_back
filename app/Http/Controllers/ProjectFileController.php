@@ -4,16 +4,19 @@ namespace App\Http\Controllers;
 
 use App\Models\Project;
 use App\Models\ProjectFile;
+use App\Services\GoogleDriveService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ProjectFileController extends Controller
 {
-    public function __construct()
-    {
+    public function __construct(
+        private readonly GoogleDriveService $driveService,
+    ) {
         $this->middleware('can:project list')->only(['index', 'download']);
         $this->middleware('can:project edit')->only(['store', 'destroy']);
     }
@@ -42,6 +45,30 @@ class ProjectFileController extends Controller
         $directorio      = "project-files/{$project->id}";
         $path            = Storage::disk('local')->putFileAs($directorio, $archivo, $nombreStorage);
 
+        $driveFileId = null;
+        $driveLink   = null;
+
+        // Subir a Google Drive en Proyectos/[Proyecto]/[Categoría] (silencioso)
+        try {
+            $userId = auth()->id();
+            if ($this->driveService->hasDriveAccess($userId)) {
+                $projectName = $project->name ?? "Proyecto {$project->id}";
+                $folder = $this->driveService->getOrCreateProjectCategoryFolder(
+                    $userId,
+                    $projectName,
+                    $request->input('categoria')
+                );
+                $result = $this->driveService->uploadFromStorage($userId, 'local', $path, $nombreOriginal, $folder);
+                if ($result && !empty($result['id'])) {
+                    $this->driveService->makePublic($userId, $result['id']);
+                    $driveFileId = $result['id'];
+                    $driveLink   = $result['webViewLink'] ?? null;
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('GoogleDrive: fallo al subir archivo de proyecto: ' . $e->getMessage());
+        }
+
         $file = ProjectFile::create([
             'project_id'      => $project->id,
             'nombre_original' => $nombreOriginal,
@@ -51,6 +78,8 @@ class ProjectFileController extends Controller
             'size'            => $archivo->getSize(),
             'categoria'       => $request->input('categoria'),
             'ejecutivo'       => auth()->user()->name,
+            'drive_file_id'   => $driveFileId,
+            'drive_link'      => $driveLink,
         ]);
 
         return response()->json([
