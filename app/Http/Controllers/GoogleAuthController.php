@@ -52,8 +52,15 @@ class GoogleAuthController extends Controller
     {
         $frontendUrl = config('app.frontend_url');
 
-        if ($request->has('error')) {
-            return redirect($frontendUrl . '/settings/google?error=access_denied');
+        // Si Google envía error (ej: usuario canceló), detectamos si es flujo de login o connect
+        if ($request->has('error') || !$request->query('code') || !$request->query('state')) {
+            \Illuminate\Support\Facades\Log::warning('[GoogleCallback] Parámetros inválidos o error de Google', [
+                'error' => $request->query('error'),
+                'has_code' => $request->has('code'),
+                'has_state' => $request->has('state'),
+            ]);
+            // Intentar detectar si era login por el state en caché
+            return redirect($frontendUrl . '/login?error=google_login_failed');
         }
 
         try {
@@ -71,7 +78,7 @@ class GoogleAuthController extends Controller
             $destination = $result['return_url'] ?? ($frontendUrl . '/settings/google');
             $separator   = str_contains($destination, '?') ? '&' : '?';
             return redirect($destination . $separator . 'connected=1');
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('[GoogleCallback] Excepción en callback', [
                 'message' => $e->getMessage(),
                 'trace'   => $e->getTraceAsString(),
