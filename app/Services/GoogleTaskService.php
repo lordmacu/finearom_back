@@ -50,6 +50,8 @@ class GoogleTaskService
                 self::SCOPE_TASKS,
                 self::SCOPE_DRIVE,
                 self::SCOPE_SHEETS,
+                self::SCOPE_CALENDAR,
+                self::SCOPE_GMAIL,
             ]),
             'access_type'   => 'offline',
             'prompt'        => 'consent',
