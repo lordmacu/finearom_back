@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class MonthlyReportController extends Controller
@@ -41,6 +42,50 @@ class MonthlyReportController extends Controller
             ]);
         } catch (\Throwable $e) {
             Log::error('MonthlyReport error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'Error generando reporte'], 500);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Generar y guardar reporte en disco
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Genera el reporte mensual y lo guarda en storage/app/monthly_report.json
+     * Siempre sobreescribe el archivo anterior.
+     */
+    public function generate(Request $request): JsonResponse
+    {
+        $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date'   => 'nullable|date_format:Y-m-d',
+        ]);
+
+        $startDate = $request->get('start_date') ?? Carbon::now()->startOfMonth()->toDateString();
+        $endDate   = $request->get('end_date')   ?? Carbon::now()->endOfMonth()->toDateString();
+
+        try {
+            $report = [
+                'success'    => true,
+                'generated_at' => now()->toIso8601String(),
+                'period'     => ['start_date' => $startDate, 'end_date' => $endDate],
+                'ordenes'    => $this->buildOrdenes($startDate, $endDate),
+                'stats'      => $this->buildStats($startDate, $endDate),
+            ];
+
+            Storage::disk('local')->put('monthly_report.json', json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+
+            Log::info("[MonthlyReport] Reporte generado y guardado ({$startDate} → {$endDate})");
+
+            return response()->json([
+                'success'      => true,
+                'message'      => 'Reporte generado correctamente',
+                'generated_at' => $report['generated_at'],
+                'period'       => $report['period'],
+                'ordenes_count' => count($report['ordenes']),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('MonthlyReport generate error: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => 'Error generando reporte'], 500);
         }
     }

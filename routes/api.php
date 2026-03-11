@@ -419,6 +419,7 @@ Route::post('/siigo/login', [SiigoSyncController::class, 'login']);
 
 // Reporte mensual JSON y análisis IA — públicos (sin auth)
 Route::get('/dashboard/monthly-report', [\App\Http\Controllers\MonthlyReportController::class, 'index']);
+Route::post('/dashboard/monthly-report/generate', [\App\Http\Controllers\MonthlyReportController::class, 'generate']);
 Route::get('/dashboard/monthly-report/analyze', [\App\Http\Controllers\MonthlyReportController::class, 'analyze']);
 Route::get('/dashboard/monthly-report/analyze/stream', [\App\Http\Controllers\MonthlyReportController::class, 'stream']);
 
