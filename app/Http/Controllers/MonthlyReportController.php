@@ -105,7 +105,7 @@ class MonthlyReportController extends Controller
                   "- NUNCA usar la TRM de hoy para convertir valores de órdenes — cada OC tiene su propia TRM\n" .
                   "- Cumplimiento del período = (total despachado USD) / (total órdenes creadas USD) × 100. Si se pregunta cuánto sería el cumplimiento si todo lo planeado se despacha, sumar el planeado + lo ya despachado y dividir entre el total creado\n" .
                   "- Cuando se pregunte por el producto [NEW WIN] con mayor o menor precio/kg, listar TODOS los productos marcados [NEW WIN] en DETALLE DE ÓRDENES sin excepción (busca todas las ocurrencias de [NEW WIN] en el detalle), compara sus precios unitarios y selecciona el extremo correcto\n" .
-                  "- Cuando se pregunte por el 'valor de una OC' o 'valor de esas órdenes', usar el campo Valor total de la OC (línea 'Valor: \$X USD / \$Y COP'), NO solo sumar las líneas del producto específico preguntado\n\n" .
+                  "- El 'valor de una OC' siempre es el campo 'Valor: X USD / Y COP' en el encabezado de la orden — NUNCA sumes solo las líneas de un producto específico dentro de ella (eso da el valor de ese producto, no de la orden). Ejemplo: si preguntan cuánto valen dos OCs que contienen BOUSCHET III, la respuesta es la suma de los campos Valor de esas dos OCs, no la suma de las líneas de BOUSCHET III\n\n" .
 
                   "REPORTE:\n" . ($md = $this->buildReportMarkdown($report)) . "\n\n" .
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
