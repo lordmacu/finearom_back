@@ -99,21 +99,70 @@
   <table>
     <thead>
       <tr>
-        <th>#</th><th>Fine Fragrance</th><th>Código</th><th>Casa</th><th>Familia</th>
+        <th>#</th>
+        <th>Casa</th>
+        <th>Contratipo</th>
+        <th>Tipo</th>
+        <th>Género</th>
+        <th>Familia Olfativa</th>
+        <th style="text-align:right">Gramos</th>
+        <th style="text-align:right">Factor</th>
+        <th style="text-align:right">Precio COP</th>
       </tr>
     </thead>
     <tbody>
       @foreach($items as $i => $pf)
       <tr>
         <td>{{ $i+1 }}</td>
-        <td>{{ $pf->fineFragrance?->nombre ?? '—' }}</td>
-        <td>{{ $pf->fineFragrance?->codigo ?? '—' }}</td>
-        <td>{{ $pf->fineFragrance?->casa?->nombre ?? '—' }}</td>
-        <td>{{ $pf->fineFragrance?->family?->nombre ?? '—' }}</td>
+        <td>{{ $pf->fineFragrance?->house?->nombre ?? '—' }}</td>
+        <td><strong>{{ $pf->fineFragrance?->contratipo ?? '—' }}</strong>
+          @if($pf->fineFragrance?->nombre)
+            <br><span style="color:#888;font-size:9px">{{ $pf->fineFragrance->nombre }}</span>
+          @endif
+        </td>
+        <td>{{ $pf->fineFragrance?->tipo ? $pf->fineFragrance->tipo.'g' : '—' }}</td>
+        <td>{{ $pf->fineFragrance?->genero ? ucfirst($pf->fineFragrance->genero) : '—' }}</td>
+        <td>{{ $pf->fineFragrance?->familia_olfativa ?? '—' }}</td>
+        <td style="text-align:right">{{ $pf->gramos ?? '—' }}</td>
+        <td style="text-align:right">{{ $pf->margen ?? ($project->factor ?? '—') }}</td>
+        <td style="text-align:right">
+          @if($pf->precio_calculado)
+            ${{ number_format($pf->precio_calculado, 0, ',', '.') }}
+          @else
+            —
+          @endif
+        </td>
+      </tr>
+      @endforeach
+    </tbody>
+    @php
+      $totalCOP = $items->sum(fn($pf) => $pf->precio_calculado ?? 0);
+    @endphp
+    @if($totalCOP > 0)
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="8" style="text-align:right">Total estimado:</td>
+        <td style="text-align:right">${{ number_format($totalCOP, 0, ',', '.') }}</td>
+      </tr>
+    </tfoot>
+    @endif
+  </table>
+  @php
+    $notas = $items->filter(fn($pf) => $pf->notas)->values();
+  @endphp
+  @if($notas->count())
+  <h2>Notas</h2>
+  <table>
+    <tbody>
+      @foreach($notas as $pf)
+      <tr>
+        <td style="width:40%"><strong>{{ $pf->fineFragrance?->contratipo ?? '—' }}</strong></td>
+        <td>{{ $pf->notas }}</td>
       </tr>
       @endforeach
     </tbody>
   </table>
+  @endif
 @else
   <p style="color:#aaa">Sin items para mostrar.</p>
 @endif

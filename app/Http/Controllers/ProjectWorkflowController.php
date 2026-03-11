@@ -8,17 +8,20 @@ use App\Mail\ProjectQuotationMail;
 use App\Models\Project;
 use App\Models\ProjectQuotationLog;
 use App\Models\PurchaseOrder;
+use App\Services\GoogleDriveService;
 use App\Services\ProjectWorkflowService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 class ProjectWorkflowController extends Controller
 {
     public function __construct(
-        private readonly ProjectWorkflowService $workflowService
+        private readonly ProjectWorkflowService $workflowService,
+        private readonly GoogleDriveService $driveService,
     ) {
         $this->middleware('can:project external status')->only(['setExternalStatus']);
         $this->middleware('can:project deliver')->only(['deliver']);
@@ -53,7 +56,7 @@ class ProjectWorkflowController extends Controller
         $items = match ($project->tipo) {
             'Colección'      => $project->requests()->with('fragrance')->get(),
             'Desarrollo'     => $project->variants()->with('proposals.finearomReference')->get(),
-            'Fine Fragances' => $project->fragrances()->with('fineFragrance')->get(),
+            'Fine Fragances' => $project->fragrances()->with('fineFragrance.house')->get(),
             default          => collect(),
         };
 
@@ -73,7 +76,7 @@ class ProjectWorkflowController extends Controller
         $items = match ($project->tipo) {
             'Colección'      => $project->requests()->with('fragrance')->get(),
             'Desarrollo'     => $project->variants()->with('proposals.finearomReference')->get(),
-            'Fine Fragances' => $project->fragrances()->with('fineFragrance')->get(),
+            'Fine Fragances' => $project->fragrances()->with('fineFragrance.house')->get(),
             default          => collect(),
         };
 
@@ -91,7 +94,29 @@ class ProjectWorkflowController extends Controller
             'items'   => $items,
         ])->setPaper('a4', 'portrait');
 
-        return $pdf->download("cotizacion_{$project->id}.pdf");
+        $filename = "cotizacion_{$project->id}_v{$version}.pdf";
+
+        // Subir a Google Drive en modo silencioso
+        try {
+            $userId = auth()->id();
+            if ($this->driveService->hasDriveAccess($userId)) {
+                $projectName = $project->nombre ?? "Proyecto {$project->id}";
+                $folder = $this->driveService->getOrCreateProjectFolder($userId, $projectName);
+                if ($folder) {
+                    $this->driveService->uploadFile(
+                        $userId,
+                        $pdf->output(),
+                        $filename,
+                        $folder,
+                        'application/pdf'
+                    );
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning("GoogleDrive: fallo al subir cotización de proyecto {$project->id}: " . $e->getMessage());
+        }
+
+        return $pdf->download($filename);
     }
 
     public function sendQuotationEmail(Request $request, Project $project): JsonResponse
@@ -116,7 +141,7 @@ class ProjectWorkflowController extends Controller
         $items = match ($project->tipo) {
             'Colección'      => $project->requests()->with('fragrance')->get(),
             'Desarrollo'     => $project->variants()->with('proposals.finearomReference')->get(),
-            'Fine Fragances' => $project->fragrances()->with('fineFragrance')->get(),
+            'Fine Fragances' => $project->fragrances()->with('fineFragrance.house')->get(),
             default          => collect(),
         };
 
