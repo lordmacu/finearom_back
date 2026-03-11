@@ -89,6 +89,7 @@ class MonthlyReportController extends Controller
                   "- stats.executive_stats[].value_usd = valor total de OC CREADAS por la ejecutiva en USD\n" .
                   "- stats.executive_stats[].total_kilos = kilos totales de OC CREADAS por la ejecutiva\n" .
                   "- stats.executive_stats[].total_orders = número de órdenes creadas por la ejecutiva\n" .
+                  "- stats.executive_stats[].dispatched_orders = número de órdenes despachadas por la ejecutiva\n" .
                   "- stats.executive_stats[].dispatched_cop = lo que realmente despachó/facturó la ejecutiva en COP\n" .
                   "- stats.executive_stats[].dispatched_kilos = kilos realmente despachados por la ejecutiva\n" .
                   "- IMPORTANTE: cuando pregunten por OC, valor, kilos o participación de una ejecutiva, SIEMPRE usar stats.executive_stats, NO sumar desde ordenes[]\n" .
@@ -906,6 +907,7 @@ PROMPT;
             ->where('pop.muestra', '=', 0)
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COUNT(DISTINCT po.id) as dispatched_orders,
                 SUM(pt.quantity) as dispatched_kilos,
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
@@ -925,8 +927,9 @@ PROMPT;
             $dispatch  = $dispatchQuery[$exec] ?? null;
             $valueCop  = (float) $row->value_cop;
             $kilos     = (float) $row->total_kilos;
-            $dispCop   = $dispatch ? (float) $dispatch->dispatched_cop   : 0;
-            $dispKilos = $dispatch ? (float) $dispatch->dispatched_kilos : 0;
+            $dispCop    = $dispatch ? (float) $dispatch->dispatched_cop    : 0;
+            $dispKilos  = $dispatch ? (float) $dispatch->dispatched_kilos : 0;
+            $dispOrders = $dispatch ? (int)   $dispatch->dispatched_orders : 0;
 
             $result[] = [
                 'executive'            => $exec,
@@ -934,6 +937,7 @@ PROMPT;
                 'value_usd'            => round((float) $row->value_usd, 2),
                 'value_cop'            => round($valueCop, 0),
                 'total_kilos'          => round($kilos, 2),
+                'dispatched_orders'    => $dispOrders,
                 'dispatched_cop'       => round($dispCop, 0),
                 'dispatched_kilos'     => round($dispKilos, 2),
                 'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0,
