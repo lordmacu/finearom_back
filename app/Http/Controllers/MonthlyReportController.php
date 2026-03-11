@@ -86,54 +86,24 @@ class MonthlyReportController extends Controller
                   "Fecha y hora actual (Colombia): {$now->format('Y-m-d H:i:s')} — úsala como referencia para calcular rangos relativos (hoy, esta semana, hace N días, etc.).\n" .
                   "TRM de hoy ({$today}): \${$trmHoyStr} COP/USD — úsala SOLO para convertir valores de cartera a USD si te lo piden. Las órdenes tienen su propia TRM individual y no deben usar esta.\n\n" .
 
-                  "GLOSARIO DE CAMPOS — lee esto antes de responder cualquier pregunta:\n" .
-                  "- stats.ordenes_creadas.value_usd = TOTAL DE ÓRDENES en USD (valor de todas las OC creadas en el período, sin importar estado)\n" .
-                  "- stats.ordenes_creadas.value_cop = TOTAL DE ÓRDENES en COP\n" .
-                  "- stats.ordenes_creadas.total = número total de órdenes de compra creadas en el período\n" .
-                  "- stats.despachos = lo que se DESPACHÓ/FACTURÓ realmente (dinero ya enviado al cliente)\n" .
-                  "- stats.despachos.value_usd = monto facturado/despachado en USD\n" .
-                  "- stats.despachos.value_cop = monto facturado/despachado en COP\n" .
-                  "- stats.pendiente.value_usd = valor PENDIENTE por facturar en USD (= TOTAL ORDENES - Facturado). Esto es lo que muestra el dashboard como 'Pendiente'\n" .
-                  "- stats.pendiente.value_cop = valor PENDIENTE por facturar en COP\n" .
-                  "- stats.planeado = OC que tienen fecha de despacho programada dentro del período (subconjunto del total)\n" .
-                  "- stats.planeado.value_usd = valor de OC con despacho programado en el período (NO es el total de órdenes)\n" .
-                  "- stats.executive_stats[] = estadísticas por ejecutiva (fuente de verdad para preguntas por ejecutiva)\n" .
-                  "- stats.executive_stats[].value_cop = valor total de OC CREADAS por la ejecutiva en COP\n" .
-                  "- stats.executive_stats[].value_usd = valor total de OC CREADAS por la ejecutiva en USD\n" .
-                  "- stats.executive_stats[].total_kilos = kilos totales de OC CREADAS por la ejecutiva\n" .
-                  "- stats.executive_stats[].total_orders = número de órdenes creadas por la ejecutiva\n" .
-                  "- stats.executive_stats[].dispatched_orders = número de órdenes despachadas por la ejecutiva\n" .
-                  "- stats.executive_stats[].dispatched_cop = lo que realmente despachó/facturó la ejecutiva en COP\n" .
-                  "- stats.executive_stats[].dispatched_kilos = kilos realmente despachados por la ejecutiva\n" .
-                  "- IMPORTANTE: cuando pregunten por OC, valor, kilos o participación de una ejecutiva, SIEMPRE usar stats.executive_stats, NO sumar desde ordenes_mes[]\n" .
-                  "- ordenes_mes[] = TODAS las órdenes de compra creadas en el mes (todos los estados: pendientes, en proceso, despachadas parcial o total)\n" .
-                  "- ordenes_mes[].status = pending (sin despachar aún) | processing (en proceso) | parcial_status (despacho parcial, aún pendiente) | completed (completamente despachada)\n" .
-                  "- ordenes_mes[].total_usd / total_cop = valor de lo despachado en esa orden (solo si tiene partials reales)\n" .
-                  "- Para saber cuáles fueron despachadas/facturadas: filtrar ordenes_mes[] donde status = completed o parcial_status\n" .
-                  "- Para saber cuáles están pendientes: filtrar ordenes_mes[] donde status = pending o processing\n" .
-                  "- muestra=1 en productos = muestra gratis (precio 0, no cuenta como venta)\n" .
-                  "- quantity = kilos (en ordenes[].productos[])\n" .
-                  "- stats.despachos.total_kilos_dispatched = TOTAL de kilos despachados en el período (fuente de verdad para preguntas de kilos totales)\n" .
-                  "- stats.despachos.products_count = número de LÍNEAS de producto despachadas (items distintos), NO es kilos\n" .
-                  "- stats.top_productos[].total_units = KILOS despachados (no es conteo de unidades)\n" .
-                  "- stats.top_productos[].orders_count = número de órdenes en que apareció el producto\n" .
-                  "- Para preguntas sobre qué producto se despachó más: usar stats.top_productos ordenado por total_units (= kilos)\n" .
-                  "- stats.ordenes_creadas.compliance_cop_pct puede superar el 100%: es normal porque los despachos del período pueden incluir órdenes creadas en meses anteriores\n" .
-                  "- stats.cartera = estado de la cartera (deudas de clientes) en COP al momento del snapshot\n" .
-                  "- stats.cartera.snapshot_date = fecha del último corte de cartera cargado\n" .
-                  "- stats.cartera.saldo_bruto_cop = saldo contable bruto total de clientes (COP) — lo que facturaron\n" .
-                  "- stats.cartera.deuda_neta_cop = deuda real = saldo bruto - recaudos históricos (COP) — lo que efectivamente se debe\n" .
-                  "- stats.cartera.deuda_vencida_cop = porción de la deuda neta que ya está vencida (COP)\n" .
-                  "- stats.cartera.coverage_rate_pct = % de la deuda neta cubierto por los recaudos del período analizado\n" .
-                  "- stats.recaudos.total_cop = total de pagos/recaudos recibidos en el período (COP)\n" .
-                  "- TODOS los valores de cartera y recaudos son en PESOS COLOMBIANOS (COP), no en USD\n" .
-                  "- Si piden cartera en USD: dividir el valor COP entre la TRM de hoy indicada al inicio del contexto\n" .
-                  "- NUNCA usar la TRM de hoy para convertir valores de órdenes — cada orden tiene su propia TRM\n" .
-                  "- IMPORTANTE: el campo executive en ordenes_mes[] a veces aparece como email (ej: monica.castano@finearom.com) — para preguntas por ejecutiva usar SIEMPRE stats.executive_stats[] que tiene los nombres consolidados\n\n" .
+                  "NOTAS CLAVE — lee antes de responder:\n" .
+                  "- 'Total órdenes creadas' = valor de TODAS las OC del período, sin importar si se despacharon o no\n" .
+                  "- 'Despachado / Facturado' = dinero ya enviado al cliente. 'Pendiente' = Total − Facturado\n" .
+                  "- 'Planeado' = OC con fecha de despacho programada dentro del período (subconjunto del total, NO igual al total)\n" .
+                  "- Cumplimiento% puede superar el 100%: es normal porque los despachos del período pueden incluir OC creadas en meses anteriores\n" .
+                  "- ESTADÍSTICAS POR EJECUTIVA es la fuente de verdad para preguntas por ejecutiva — NO sumar desde el detalle de órdenes\n" .
+                  "- 'Kilos despachados totales' (en RESUMEN FINANCIERO) = fuente de verdad para kilos totales del período\n" .
+                  "- 'Líneas de producto despachadas' = número de ítems distintos, NO es kilos\n" .
+                  "- En TOP PRODUCTOS, la columna 'Kilos despachados' = kilos reales (no unidades)\n" .
+                  "- Productos marcados como (muestra) tienen precio $0 — no cuentan en totales financieros\n" .
+                  "- En DETALLE DE ÓRDENES: estado pending = sin despachar, processing = en proceso, parcial_status = despacho parcial, completed = despachada totalmente\n" .
+                  "- En DETALLE DE ÓRDENES, el Valor mostrado corresponde a lo despachado real (partials), no al valor total de la orden\n" .
+                  "- CARTERA y RECAUDOS son en PESOS COLOMBIANOS (COP). Para convertir a USD usar la TRM de hoy indicada arriba\n" .
+                  "- NUNCA usar la TRM de hoy para convertir valores de órdenes — cada OC tiene su propia TRM\n\n" .
 
-                  "REPORTE:\n{$reportJson}\n\n" .
+                  "REPORTE:\n" . $this->buildReportMarkdown($report) . "\n\n" .
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
-                  "indicando el período, el total de órdenes creadas (stats.ordenes_creadas.value_usd), y cuánto se despachó/facturó realmente (stats.despachos.value_usd) en USD.";
+                  "indicando el período, el total de órdenes creadas (valor USD), y cuánto se despachó/facturó realmente en USD.";
 
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
@@ -1073,5 +1043,159 @@ PROMPT;
         usort($result, fn ($a, $b) => $b['value_cop'] <=> $a['value_cop']);
 
         return $result;
+    }
+
+    /**
+     * Convierte el reporte JSON a Markdown estructurado para el prompt de IA.
+     * Más legible que JSON crudo, sin perder ningún dato.
+     */
+    private function buildReportMarkdown(array $report): string
+    {
+        $stats  = $report['stats']      ?? [];
+        $period = $report['period']     ?? [];
+        $orders = $report['ordenes_mes'] ?? [];
+
+        $desp  = $stats['despachos']       ?? [];
+        $plan  = $stats['planeado']        ?? [];
+        $oc    = $stats['ordenes_creadas'] ?? [];
+        $pend  = $stats['pendiente']       ?? [];
+        $rec   = $stats['recaudos']        ?? [];
+        $cart  = $stats['cartera']         ?? [];
+        $trm   = $stats['trm']             ?? [];
+        $stale = $stats['stale_orders']    ?? [];
+        $tops  = $stats['top_productos']   ?? [];
+        $execs = $stats['executive_stats'] ?? [];
+
+        $n = fn($v, $d = 0) => number_format((float) $v, $d, '.', ',');
+
+        $md  = "# REPORTE MENSUAL FINEAROM\n";
+        $md .= "**Período:** {$period['start_date']} al {$period['end_date']}\n\n";
+
+        // ── RESUMEN FINANCIERO ──────────────────────────────────────────────
+        $md .= "## RESUMEN FINANCIERO\n";
+        $md .= "| Métrica | USD | COP |\n|---|---:|---:|\n";
+        $md .= "| Total órdenes creadas | \${$n($oc['value_usd'] ?? 0, 2)} | \${$n($oc['value_cop'] ?? 0)} |\n";
+        $md .= "| Despachado / Facturado | \${$n($desp['value_usd'] ?? 0, 2)} | \${$n($desp['value_cop'] ?? 0)} |\n";
+        $md .= "| Pendiente por facturar | \${$n($pend['value_usd'] ?? 0, 2)} | \${$n($pend['value_cop'] ?? 0)} |\n";
+        $md .= "| Planeado en el período | \${$n($plan['value_usd'] ?? 0, 2)} | \${$n($plan['value_cop'] ?? 0)} |\n\n";
+
+        $md .= "**Kilos despachados totales:** {$n($desp['total_kilos_dispatched'] ?? 0, 2)} kg";
+        $md .= " | **Líneas de producto despachadas (≠ kilos):** " . ($desp['products_count'] ?? 0);
+        $md .= " | **Órdenes despachadas:** " . ($desp['orders_count'] ?? 0) . "\n\n";
+
+        // ── ESTADO DE ÓRDENES ───────────────────────────────────────────────
+        $md .= "## ÓRDENES CREADAS EN EL PERÍODO\n";
+        $md .= "| Estado | Cantidad |\n|---|---:|\n";
+        $md .= "| **Total** | " . ($oc['total'] ?? 0) . " |\n";
+        $md .= "| Pendientes (pending) | " . ($oc['pending'] ?? 0) . " |\n";
+        $md .= "| En proceso (processing) | " . ($oc['processing'] ?? 0) . " |\n";
+        $md .= "| Despacho parcial (parcial_status) | " . ($oc['parcial_status'] ?? 0) . " |\n";
+        $md .= "| Completadas (completed) | " . ($oc['completed'] ?? 0) . " |\n";
+        $md .= "| New win | " . ($oc['new_win'] ?? 0) . " |\n\n";
+
+        // ── CARTERA ─────────────────────────────────────────────────────────
+        $md .= "## CARTERA (snapshot: " . ($cart['snapshot_date'] ?? 'N/A') . ") — todos los valores en COP\n";
+        $md .= "| Campo | Valor COP |\n|---|---:|\n";
+        $md .= "| Saldo bruto contable | \${$n($cart['saldo_bruto_cop'] ?? 0)} |\n";
+        $md .= "| Deuda neta (saldo − recaudos históricos) | \${$n($cart['deuda_neta_cop'] ?? 0)} |\n";
+        $md .= "| Deuda vencida | \${$n($cart['deuda_vencida_cop'] ?? 0)} |\n";
+        $cov = $cart['coverage_rate_pct'] !== null ? ($cart['coverage_rate_pct'] . '%') : 'N/A';
+        $md .= "| Cobertura por recaudos del período | {$cov} |\n\n";
+
+        // ── RECAUDOS ────────────────────────────────────────────────────────
+        $md .= "## RECAUDOS DEL PERÍODO\n";
+        $md .= "- **Total recaudado:** \${$n($rec['total_cop'] ?? 0)} COP\n";
+        $md .= "- **Número de recaudos:** " . ($rec['count'] ?? 0) . "\n\n";
+
+        // ── TRM ─────────────────────────────────────────────────────────────
+        $md .= "## TRM\n";
+        $md .= "- **TRM promedio del período:** \${$n($trm['average'] ?? 0, 2)} COP/USD\n";
+        if (($trm['variation'] ?? null) !== null) {
+            $sign = ($trm['variation'] >= 0) ? '+' : '';
+            $md .= "- **Variación vs período anterior:** {$sign}{$n($trm['variation'], 2)} ({$sign}{$trm['variation_pct']}%)\n";
+        }
+        $md .= "\n";
+
+        // ── ÓRDENES ESTANCADAS ──────────────────────────────────────────────
+        if (($stale['count'] ?? 0) > 0) {
+            $md .= "## ÓRDENES ESTANCADAS (en proceso > 7 días)\n";
+            $md .= "- **Cantidad:** " . $stale['count'] . "\n";
+            $md .= "- **Más antigua creada el:** " . ($stale['oldest_date'] ?? 'N/A') . "\n\n";
+        }
+
+        // ── TOP PRODUCTOS ───────────────────────────────────────────────────
+        $md .= "## TOP 10 PRODUCTOS DESPACHADOS (por kilos)\n";
+        $md .= "| # | Producto | Referencia | Kilos despachados | # Órdenes |\n|---|---|---|---:|---:|\n";
+        foreach ($tops as $i => $p) {
+            $p    = (array) $p;
+            $md  .= "| " . ($i + 1) . " | " . ($p['name'] ?? '') . " | " . ($p['reference'] ?? '') .
+                    " | " . $n($p['total_units'] ?? 0, 2) . " | " . ($p['orders_count'] ?? 0) . " |\n";
+        }
+        $md .= "\n";
+
+        // ── ESTADÍSTICAS POR EJECUTIVA ──────────────────────────────────────
+        $md .= "## ESTADÍSTICAS POR EJECUTIVA\n";
+        $md .= "| Ejecutiva | OC | Valor COP | Kilos | Part.% | OC desp. | Desp. COP | Desp. kg | Cump.% |\n";
+        $md .= "|---|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+        foreach ($execs as $e) {
+            $md .= "| {$e['executive']}";
+            $md .= " | {$e['total_orders']}";
+            $md .= " | \${$n($e['value_cop'])}";
+            $md .= " | {$n($e['total_kilos'], 2)}";
+            $md .= " | {$e['participation_pct']}%";
+            $md .= " | {$e['dispatched_orders']}";
+            $md .= " | \${$n($e['dispatched_cop'])}";
+            $md .= " | {$n($e['dispatched_kilos'], 2)}";
+            $md .= " | {$e['compliance_cop_pct']}%";
+            $md .= " |\n";
+        }
+        $md .= "\n";
+
+        // ── DETALLE DE ÓRDENES DEL MES ──────────────────────────────────────
+        $md .= "## DETALLE DE ÓRDENES DEL MES\n\n";
+        foreach ($orders as $o) {
+            $cons    = $o['consecutivo']    ?? '';
+            $estado  = $o['estado']         ?? '';
+            $cliente = $o['cliente']        ?? '';
+            $exec    = $o['ejecutivo']      ?? '';
+            $ciudad  = $o['ciudad_entrega'] ?? '';
+            $fecha   = $o['fecha_despacho'] ?? 'Sin despachar';
+            $usd     = $n($o['total_usd']   ?? 0, 2);
+            $cop     = $n($o['total_cop']   ?? 0);
+            $trm2    = $n($o['trm']         ?? 0, 2);
+            $factura = $o['factura']        ?? '';
+            $guia    = $o['guia']           ?? '';
+            $trans   = $o['transportadora'] ?? '';
+            $tags    = [];
+            if (!empty($o['es_muestra'])) $tags[] = 'MUESTRA';
+            if (!empty($o['new_win']))     $tags[] = 'NEW WIN';
+            $tagStr  = $tags ? ' [' . implode(', ', $tags) . ']' : '';
+
+            $md .= "### OC {$cons}{$tagStr} — {$estado}\n";
+            $md .= "- **Cliente:** {$cliente} | **Ejecutiva:** {$exec} | **Ciudad:** {$ciudad}\n";
+            $md .= "- **Despacho:** {$fecha}";
+            if ($factura) $md .= " | **Factura:** {$factura} | **Guía:** {$guia} | **Trans.:** {$trans}";
+            $md .= "\n";
+            if (($o['total_usd'] ?? 0) > 0) {
+                $md .= "- **Valor:** \${$usd} USD / \${$cop} COP (TRM: {$trm2})\n";
+            }
+
+            $prods = $o['productos'] ?? [];
+            if (!empty($prods)) {
+                $md .= "- **Productos:**\n";
+                foreach ($prods as $p) {
+                    $pname  = $p['producto']     ?? '';
+                    $qty    = $n($p['cantidad']   ?? 0, 2);
+                    $price  = $n($p['precio_usd'] ?? 0, 2);
+                    $ptot   = $n($p['subtotal_usd'] ?? 0, 2);
+                    $muStr  = !empty($p['es_muestra']) ? ' (muestra)' : '';
+                    $nwStr  = !empty($p['new_win'])    ? ' [NEW WIN]' : '';
+                    $md    .= "  - {$pname}{$muStr}{$nwStr}: {$qty} kg @ \${$price} = \${$ptot} USD\n";
+                }
+            }
+            $md .= "\n";
+        }
+
+        return $md;
     }
 }
