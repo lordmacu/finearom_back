@@ -220,7 +220,7 @@ class MonthlyReportController extends Controller
         }
 
         try {
-            $results = DB::select(DB::raw($sql));
+            $results = DB::select($sql);
 
             if (empty($results)) {
                 return response()->json(['success' => true, 'columns' => [], 'rows' => [], 'count' => 0]);
