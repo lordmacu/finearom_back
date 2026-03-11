@@ -61,6 +61,10 @@ class DatabaseSeeder extends Seeder
             'project deliver',
             'project factor edit',
             'project catalog manage',
+            'client visit list',
+            'client visit create',
+            'client visit edit',
+            'client visit delete',
         ];
 
         foreach ($permissions as $permission) {
@@ -85,6 +89,7 @@ class DatabaseSeeder extends Seeder
                     'project list', 'project create', 'project edit', 'project delete',
                     'project external status', 'project deliver', 'project factor edit',
                     'project catalog manage',
+                    'client visit list', 'client visit create', 'client visit edit', 'client visit delete',
                 ]);
             }
         }
@@ -96,6 +101,7 @@ class DatabaseSeeder extends Seeder
             if ($role) {
                 $role->givePermissionTo([
                     'project list', 'project create', 'project edit', 'project external status',
+                    'client visit list', 'client visit create', 'client visit edit',
                 ]);
             }
         }
@@ -105,7 +111,7 @@ class DatabaseSeeder extends Seeder
         foreach ($viewerRoles as $roleName) {
             $role = Role::query()->where('name', $roleName)->where('guard_name', 'web')->first();
             if ($role) {
-                $role->givePermissionTo(['project list']);
+                $role->givePermissionTo(['project list', 'client visit list']);
             }
         }
 
