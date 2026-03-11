@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class MonthlyReportController extends Controller
 {
@@ -154,6 +155,114 @@ class MonthlyReportController extends Controller
             Log::error('[AI-Analyze] ERROR: ' . $e->getMessage() . ' en ' . $e->getFile() . ':' . $e->getLine());
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Análisis IA — Streaming (Server-Sent Events)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Igual que analyze() pero devuelve los resultados en tiempo real via SSE.
+     * El cliente recibe cada respuesta a medida que la IA la procesa.
+     *
+     * Formato de eventos:
+     *   data: {"type":"start","total":8}
+     *   data: {"type":"report_ready","ordenes_count":X}
+     *   data: {"type":"questions_ready","preguntas":[...]}
+     *   data: {"type":"answer","index":1,"total":8,"pregunta":"...","respuesta":"..."}
+     *   data: {"type":"done","thread_id":"...","generado_en":"..."}
+     *   data: {"type":"error","message":"..."}
+     */
+    public function stream(Request $request): StreamedResponse
+    {
+        $startDate = $request->get('start_date') ?? Carbon::now()->startOfMonth()->toDateString();
+        $endDate   = $request->get('end_date')   ?? Carbon::now()->endOfMonth()->toDateString();
+        $aiUrl     = env('AI_SERVER_URL', 'http://localhost:54321');
+        $aiKey     = env('AI_SERVER_KEY', 'finearom-ai-2025');
+
+        return new StreamedResponse(function () use ($startDate, $endDate, $aiUrl, $aiKey) {
+            set_time_limit(0);
+
+            // Helper: enviar un evento SSE
+            $send = function (array $data) {
+                echo 'data: ' . json_encode($data, JSON_UNESCAPED_UNICODE) . "\n\n";
+                if (ob_get_level() > 0) { ob_flush(); }
+                flush();
+            };
+
+            try {
+                $send(['type' => 'start', 'total' => 8, 'periodo' => ['start_date' => $startDate, 'end_date' => $endDate]]);
+
+                // 1. Construir reporte
+                $reportData = [
+                    'periodo' => ['start_date' => $startDate, 'end_date' => $endDate],
+                    'ordenes' => $this->buildOrdenes($startDate, $endDate),
+                    'stats'   => $this->buildStats($startDate, $endDate),
+                ];
+                $send(['type' => 'report_ready', 'ordenes_count' => count($reportData['ordenes'])]);
+
+                // 2. Primer prompt: generar preguntas
+                $send(['type' => 'status', 'message' => 'Analizando reporte con IA...']);
+                $resp1 = Http::withHeaders(['X-Api-Key' => $aiKey])
+                    ->timeout(310)
+                    ->post("{$aiUrl}/v1/chat/completions", [
+                        'model'        => 'gpt-4.1',
+                        'messages'     => [['role' => 'user', 'content' => $this->buildInitialPrompt($reportData, $startDate, $endDate)]],
+                        'extract_json' => true,
+                    ]);
+
+                if (!$resp1->successful()) {
+                    $send(['type' => 'error', 'message' => "AI server error {$resp1->status()}"]);
+                    return;
+                }
+
+                $threadId  = $resp1->json('thread_id');
+                $content1  = $resp1->json('choices.0.message.content', '');
+                $questions = $this->parseQuestions($content1);
+
+                if (empty($questions)) {
+                    $send(['type' => 'error', 'message' => 'No se generaron preguntas válidas. Respuesta: ' . substr($content1, 0, 200)]);
+                    return;
+                }
+
+                $send(['type' => 'questions_ready', 'preguntas' => $questions]);
+
+                // 3. Responder cada pregunta en el mismo hilo
+                $analisis = [];
+                foreach ($questions as $i => $question) {
+                    $index = $i + 1;
+                    $send(['type' => 'status', 'message' => "Respondiendo pregunta {$index} de " . count($questions) . '...']);
+
+                    $respN = Http::withHeaders(['X-Api-Key' => $aiKey])
+                        ->timeout(310)
+                        ->post("{$aiUrl}/v1/chat/completions", [
+                            'model'     => 'gpt-4.1',
+                            'messages'  => [['role' => 'user', 'content' => $this->buildQuestionPrompt($question)]],
+                            'thread_id' => $threadId,
+                        ]);
+
+                    $answer = $respN->successful()
+                        ? trim($respN->json('choices.0.message.content', ''))
+                        : 'No se pudo obtener respuesta.';
+
+                    $item = ['pregunta' => $question, 'respuesta' => $answer];
+                    $analisis[] = $item;
+
+                    $send(['type' => 'answer', 'index' => $index, 'total' => count($questions)] + $item);
+                }
+
+                $send(['type' => 'done', 'thread_id' => $threadId, 'analisis' => $analisis, 'generado_en' => now()->toIso8601String()]);
+
+            } catch (\Throwable $e) {
+                Log::error('[AI-Stream] ERROR: ' . $e->getMessage());
+                $send(['type' => 'error', 'message' => $e->getMessage()]);
+            }
+        }, 200, [
+            'Content-Type'      => 'text/event-stream',
+            'Cache-Control'     => 'no-cache',
+            'X-Accel-Buffering' => 'no', // desactiva buffering en nginx
+            'Connection'        => 'keep-alive',
+        ]);
     }
 
     private function buildInitialPrompt(array $reportData, string $startDate, string $endDate): string

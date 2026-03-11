@@ -420,6 +420,7 @@ Route::post('/siigo/login', [SiigoSyncController::class, 'login']);
 // Reporte mensual JSON y análisis IA — públicos (sin auth)
 Route::get('/dashboard/monthly-report', [\App\Http\Controllers\MonthlyReportController::class, 'index']);
 Route::get('/dashboard/monthly-report/analyze', [\App\Http\Controllers\MonthlyReportController::class, 'analyze']);
+Route::get('/dashboard/monthly-report/analyze/stream', [\App\Http\Controllers\MonthlyReportController::class, 'stream']);
 
 // Webhook (no requiere auth Sanctum - usa HMAC signature)
 Route::post('/siigo/webhook', [SiigoSyncController::class, 'webhook']);
