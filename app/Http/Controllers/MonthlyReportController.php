@@ -87,6 +87,9 @@ class MonthlyReportController extends Controller
         $prompt = "Eres un asistente de análisis comercial para Finearom. " .
                   "Te comparto el reporte mensual del período {$period['start_date']} al {$period['end_date']}. " .
                   "Responde todas las preguntas de forma clara y concisa en español. " .
+                  "IMPORTANTE: Formatea SIEMPRE tus respuestas en HTML limpio (sin ```html ni backticks). " .
+                  "Usa <p>, <strong>, <ul>, <li>, <table>, <tr>, <td>, <th> según corresponda. " .
+                  "Para números destacados usa <strong>. Para listas usa <ul><li>. Para tablas usa <table> con clases inline básicas. " .
                   "Cuando el usuario haga una pregunta, respóndela directamente sin repetir el contexto.\n" .
                   "Fecha y hora actual (Colombia): {$now->format('Y-m-d H:i:s')} — úsala como referencia para calcular rangos relativos (hoy, esta semana, hace N días, etc.).\n" .
                   "TRM de hoy ({$today}): \${$trmHoyStr} COP/USD — úsala SOLO para convertir valores de cartera a USD si te lo piden. Las órdenes tienen su propia TRM individual y no deben usar esta.\n\n" .
