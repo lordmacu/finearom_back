@@ -129,7 +129,7 @@ class GoogleGmailService
             $headers[] = 'To: ' . $to;
         }
 
-        return implode("\r\n", $headers) . "\r\n\r\n" . base64_encode($htmlBody);
+        return implode("\r\n", $headers) . "\r\n\r\n" . chunk_split(base64_encode($htmlBody), 76, "\r\n");
     }
 
     private function getValidToken(int $userId): string
