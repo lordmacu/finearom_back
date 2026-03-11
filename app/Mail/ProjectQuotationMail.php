@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Project;
+use App\Services\EmailTemplateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Attachment;
@@ -14,28 +15,45 @@ class ProjectQuotationMail extends Mailable
 {
     use Queueable, SerializesModels;
 
+    private array $rendered;
+
     public function __construct(
         public readonly Project $project,
         private readonly string $pdfContent,
         public readonly int $version,
-    ) {}
+    ) {
+        $service    = new EmailTemplateService();
+        $clientName = $project->client?->client_name ?? $project->nombre_prospecto ?? 'cliente';
+
+        $projectTable = '
+<table>
+    <tbody>
+        <tr><td><strong>Proyecto</strong></td><td>' . e($project->nombre) . '</td></tr>
+        <tr><td><strong>Tipo</strong></td><td>' . e($project->tipo) . '</td></tr>'
+        . ($project->tipo_producto ? '<tr><td><strong>Tipo de producto</strong></td><td>' . e($project->tipo_producto) . '</td></tr>' : '')
+        . ($project->ejecutivo ? '<tr><td><strong>Ejecutivo</strong></td><td>' . e($project->ejecutivo) . '</td></tr>' : '') . '
+        <tr><td><strong>Versión cotización</strong></td><td>' . $version . '</td></tr>
+    </tbody>
+</table>';
+
+        $this->rendered = $service->renderTemplate('project_quotation', [
+            'client_name'   => $clientName,
+            'project_name'  => $project->nombre,
+            'version'       => (string) $version,
+            'project_table' => $projectTable,
+        ]);
+    }
 
     public function envelope(): Envelope
     {
-        $clientName = $this->project->client?->client_name ?? $this->project->nombre_prospecto ?? 'Cliente';
-        return new Envelope(
-            subject: "Cotización Finearom — {$this->project->nombre} (v{$this->version})",
-        );
+        return new Envelope(subject: $this->rendered['subject']);
     }
 
     public function content(): Content
     {
         return new Content(
-            view: 'emails.project_quotation',
-            with: [
-                'project' => $this->project,
-                'version' => $this->version,
-            ],
+            view: 'emails.template',
+            with: $this->rendered,
         );
     }
 

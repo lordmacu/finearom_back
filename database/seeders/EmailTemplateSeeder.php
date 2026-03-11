@@ -399,6 +399,44 @@ class EmailTemplateSeeder extends Seeder
                 ],
                 'is_active' => true,
             ],
+            [
+                'key'     => 'project_urgency_alert',
+                'name'    => 'Alerta de Proyecto Urgente',
+                'subject' => '⚠️ Proyecto urgente: |project_name| — vence |fecha_requerida|',
+                'title'   => '⚠️ Proyecto Urgente',
+                'header_content' => '<p>Hola,</p>
+<p>El siguiente proyecto tiene su fecha requerida en <strong>2 días hábiles o menos</strong> y aún está en proceso:</p>',
+                'footer_content' => '|project_table|
+<p><a href="|project_url|">Ver proyecto en el sistema →</a></p>',
+                'signature' => '<p>Este mensaje fue generado automáticamente por el sistema Finearom.</p>',
+                'available_variables' => [
+                    'project_name'    => 'Nombre del proyecto',
+                    'fecha_requerida' => 'Fecha requerida formateada',
+                    'project_table'   => 'Tabla HTML con datos del proyecto',
+                    'project_url'     => 'URL directa al proyecto',
+                ],
+                'is_active' => true,
+            ],
+            [
+                'key'     => 'project_quotation',
+                'name'    => 'Cotización de Proyecto',
+                'subject' => 'Cotización Finearom — |project_name| (v|version|)',
+                'title'   => 'Cotización',
+                'header_content' => '<p>Estimado(a) |client_name|,</p>
+<p>Esperamos que se encuentren muy bien.</p>
+<p>Adjunto encontrará la cotización del proyecto <strong>|project_name|</strong> (versión |version|), preparada por nuestro equipo.</p>',
+                'footer_content' => '|project_table|
+<p>Quedamos atentos a cualquier consulta o ajuste que requieran.</p>
+<p>Que tengan un excelente día.</p>',
+                'signature' => '<p><strong>Equipo Finearom</strong></p>',
+                'available_variables' => [
+                    'client_name'   => 'Nombre del cliente o prospecto',
+                    'project_name'  => 'Nombre del proyecto',
+                    'version'       => 'Número de versión de la cotización',
+                    'project_table' => 'Tabla HTML con datos del proyecto',
+                ],
+                'is_active' => true,
+            ],
         ];
 
         foreach ($templates as $template) {
