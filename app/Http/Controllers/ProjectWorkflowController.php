@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\Project\ProjectDeliverRequest;
 use App\Http\Requests\Project\ProjectExternalStatusRequest;
+use App\Mail\ProjectQuotationMail;
 use App\Models\Project;
 use App\Models\ProjectQuotationLog;
 use App\Models\PurchaseOrder;
@@ -12,6 +13,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Mail;
 
 class ProjectWorkflowController extends Controller
 {
@@ -21,7 +23,7 @@ class ProjectWorkflowController extends Controller
         $this->middleware('can:project external status')->only(['setExternalStatus']);
         $this->middleware('can:project deliver')->only(['deliver']);
         $this->middleware('can:project list')->only(['quotation', 'quotationPdf', 'purchaseOrders', 'timeline', 'quotationLogs']);
-        $this->middleware('can:project edit')->only(['linkPurchaseOrder', 'reabrir']);
+        $this->middleware('can:project edit')->only(['linkPurchaseOrder', 'reabrir', 'sendQuotationEmail']);
     }
 
     public function setExternalStatus(ProjectExternalStatusRequest $request, Project $project): JsonResponse
@@ -90,6 +92,55 @@ class ProjectWorkflowController extends Controller
         ])->setPaper('a4', 'portrait');
 
         return $pdf->download("cotizacion_{$project->id}.pdf");
+    }
+
+    public function sendQuotationEmail(Request $request, Project $project): JsonResponse
+    {
+        $request->validate([
+            'email' => 'nullable|email|max:200',
+        ]);
+
+        $project->load('client', 'product');
+
+        $recipientEmail = $request->email
+            ?? $project->client?->email
+            ?? $project->email_prospecto;
+
+        if (!$recipientEmail) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No hay email de destinatario. Ingresa uno manualmente.',
+            ], 422);
+        }
+
+        $items = match ($project->tipo) {
+            'Colección'      => $project->requests()->with('fragrance')->get(),
+            'Desarrollo'     => $project->variants()->with('proposals.finearomReference')->get(),
+            'Fine Fragances' => $project->fragrances()->with('fineFragrance')->get(),
+            default          => collect(),
+        };
+
+        $version = ($project->quotationLogs()->max('version') ?? 0) + 1;
+
+        $pdfContent = Pdf::loadView('pdf.project-quotation', [
+            'project' => $project,
+            'items'   => $items,
+        ])->setPaper('a4', 'portrait')->output();
+
+        Mail::to($recipientEmail)->send(new ProjectQuotationMail($project, $pdfContent, $version));
+
+        ProjectQuotationLog::create([
+            'project_id' => $project->id,
+            'version'    => $version,
+            'enviado_a'  => $recipientEmail,
+            'ejecutivo'  => auth()->user()->name,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Cotización v{$version} enviada a {$recipientEmail}",
+            'data'    => ['version' => $version, 'enviado_a' => $recipientEmail],
+        ]);
     }
 
     public function quotationLogs(Project $project): JsonResponse

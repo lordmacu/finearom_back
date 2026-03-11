@@ -287,6 +287,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/projects/{project}/cotizacion', [ProjectWorkflowController::class, 'quotation']);
     Route::get('/projects/{project}/cotizacion/pdf', [ProjectWorkflowController::class, 'quotationPdf']);
     Route::get('/projects/{project}/cotizacion/logs', [ProjectWorkflowController::class, 'quotationLogs']);
+    Route::post('/projects/{project}/cotizacion/email', [ProjectWorkflowController::class, 'sendQuotationEmail']);
     Route::get('/projects/{project}/purchase-orders', [ProjectWorkflowController::class, 'purchaseOrders']);
     Route::patch('/projects/{project}/link-order', [ProjectWorkflowController::class, 'linkPurchaseOrder']);
     Route::get('/projects/{project}/timeline', [ProjectWorkflowController::class, 'timeline']);
