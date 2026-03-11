@@ -37,7 +37,7 @@ class MonthlyReportController extends Controller
             return response()->json([
                 'success' => true,
                 'period'  => ['start_date' => $startDate, 'end_date' => $endDate],
-                'ordenes' => $this->buildOrdenes($startDate, $endDate),
+                'ordenes_mes' => $this->buildOrdenes($startDate, $endDate),
                 'stats'   => $this->buildStats($startDate, $endDate),
             ]);
         } catch (\Throwable $e) {
@@ -94,10 +94,12 @@ class MonthlyReportController extends Controller
                   "- stats.executive_stats[].dispatched_orders = número de órdenes despachadas por la ejecutiva\n" .
                   "- stats.executive_stats[].dispatched_cop = lo que realmente despachó/facturó la ejecutiva en COP\n" .
                   "- stats.executive_stats[].dispatched_kilos = kilos realmente despachados por la ejecutiva\n" .
-                  "- IMPORTANTE: cuando pregunten por OC, valor, kilos o participación de una ejecutiva, SIEMPRE usar stats.executive_stats, NO sumar desde ordenes[]\n" .
-                  "- ordenes[] = TODAS las OC creadas en el período (todos los estados)\n" .
-                  "- ordenes[].status = pending (sin despachar) | processing (en proceso) | parcial_status (despacho parcial) | completed (despachada completa)\n" .
-                  "- Para saber cuáles fueron despachadas/facturadas: filtrar ordenes[] donde status = completed o parcial_status\n" .
+                  "- IMPORTANTE: cuando pregunten por OC, valor, kilos o participación de una ejecutiva, SIEMPRE usar stats.executive_stats, NO sumar desde ordenes_mes[]\n" .
+                  "- ordenes_mes[] = TODAS las órdenes de compra creadas en el mes (todos los estados: pendientes, en proceso, despachadas parcial o total)\n" .
+                  "- ordenes_mes[].status = pending (sin despachar aún) | processing (en proceso) | parcial_status (despacho parcial, aún pendiente) | completed (completamente despachada)\n" .
+                  "- ordenes_mes[].total_usd / total_cop = valor de lo despachado en esa orden (solo si tiene partials reales)\n" .
+                  "- Para saber cuáles fueron despachadas/facturadas: filtrar ordenes_mes[] donde status = completed o parcial_status\n" .
+                  "- Para saber cuáles están pendientes: filtrar ordenes_mes[] donde status = pending o processing\n" .
                   "- muestra=1 en productos = muestra gratis (precio 0, no cuenta como venta)\n" .
                   "- quantity = kilos (en ordenes[].productos[])\n" .
                   "- stats.top_productos[].total_units = KILOS despachados (no es conteo de unidades)\n" .
@@ -247,7 +249,7 @@ class MonthlyReportController extends Controller
             Log::info('[AI-Analyze] Construyendo reporte (ordenes + stats)...');
             $reportData = [
                 'periodo' => ['start_date' => $startDate, 'end_date' => $endDate],
-                'ordenes' => $this->buildOrdenes($startDate, $endDate),
+                'ordenes_mes' => $this->buildOrdenes($startDate, $endDate),
                 'stats'   => $this->buildStats($startDate, $endDate),
             ];
             $ordersCount = count($reportData['ordenes']);
@@ -366,7 +368,7 @@ class MonthlyReportController extends Controller
                 // 1. Construir reporte
                 $reportData = [
                     'periodo' => ['start_date' => $startDate, 'end_date' => $endDate],
-                    'ordenes' => $this->buildOrdenes($startDate, $endDate),
+                    'ordenes_mes' => $this->buildOrdenes($startDate, $endDate),
                     'stats'   => $this->buildStats($startDate, $endDate),
                 ];
                 $send(['type' => 'report_ready', 'ordenes_count' => count($reportData['ordenes'])]);
