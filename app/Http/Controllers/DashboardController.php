@@ -392,6 +392,7 @@ class DashboardController extends Controller
                 'stale_orders' => $this->calculateStaleOrders(),
                 'collection_coverage' => $this->calculateCollectionCoverage($startDate, $endDate),
                 'trm_variation' => $this->calculateTrmVariation($startDate, $endDate),
+                'executive_stats' => $this->calculateExecutiveStats($startDate, $endDate),
 
                 // Para debug/análisis avanzado (opcional)
                 'stats' => $dailyStats, // Datos día por día para gráficos futuros
@@ -1012,6 +1013,88 @@ class DashboardController extends Controller
         ];
     }
 
+
+    /**
+     * Calcular estadísticas por ejecutiva: participación en OC y cumplimiento
+     */
+    private function calculateExecutiveStats(string $startDate, string $endDate): array
+    {
+        // OC creadas en el período, agrupadas por ejecutiva del cliente (solo comerciales, no muestras)
+        $ordersQuery = DB::table('purchase_orders as po')
+            ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->join('purchase_order_product as pop', 'pop.purchase_order_id', '=', 'po.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
+            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->where('pop.muestra', '=', 0)
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COUNT(DISTINCT po.id) as total_orders,
+                SUM(pop.quantity) as total_kilos,
+                SUM(
+                    CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END * pop.quantity
+                ) as value_usd,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
+                    COALESCE(NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
+                ) as value_cop
+            ")
+            ->groupBy('c.executive')
+            ->get();
+
+        // Despachos reales (partials tipo 'real') en el período, agrupados por ejecutiva
+        $dispatchQuery = DB::table('partials as pt')
+            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
+            ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+            ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
+            ->where('pt.type', 'real')
+            ->whereNotNull('pt.dispatch_date')
+            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
+            ->where('pop.muestra', '=', 0)
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                SUM(pt.quantity) as dispatched_kilos,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
+                    COALESCE(NULLIF(pt.trm, 0), NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
+                ) as dispatched_cop
+            ")
+            ->groupBy('c.executive')
+            ->get()
+            ->keyBy('executive');
+
+        $totalValueCop = $ordersQuery->sum('value_cop');
+        $totalKilos    = $ordersQuery->sum('total_kilos');
+
+        $result = [];
+        foreach ($ordersQuery as $row) {
+            $exec         = $row->executive;
+            $dispatch     = $dispatchQuery[$exec] ?? null;
+            $valueCop     = (float) $row->value_cop;
+            $kilos        = (float) $row->total_kilos;
+            $dispCop      = $dispatch ? (float) $dispatch->dispatched_cop   : 0;
+            $dispKilos    = $dispatch ? (float) $dispatch->dispatched_kilos : 0;
+
+            $result[] = [
+                'executive'             => $exec,
+                'total_orders'          => (int) $row->total_orders,
+                'value_usd'             => round((float) $row->value_usd, 2),
+                'value_cop'             => round($valueCop, 0),
+                'total_kilos'           => round($kilos, 2),
+                'dispatched_cop'        => round($dispCop, 0),
+                'dispatched_kilos'      => round($dispKilos, 2),
+                'participation_pct'     => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0,
+                'compliance_cop_pct'    => $valueCop  > 0 ? round($dispCop   / $valueCop  * 100, 1) : 0,
+                'compliance_kilos_pct'  => $kilos     > 0 ? round($dispKilos / $kilos      * 100, 1) : 0,
+            ];
+        }
+
+        usort($result, fn ($a, $b) => $b['value_cop'] <=> $a['value_cop']);
+
+        return $result;
+    }
 
     /**
      * Calculate planned statistics based on partials with priority: real -> temporal -> calculated
