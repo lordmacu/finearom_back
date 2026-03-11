@@ -72,12 +72,22 @@ class MonthlyReportController extends Controller
 
         $prompt = "Eres un asistente de análisis comercial para Finearom. " .
                   "Te comparto el reporte mensual del período {$period['start_date']} al {$period['end_date']}. " .
-                  "Contiene órdenes de compra y estadísticas comerciales. " .
-                  "Responde todas las preguntas sobre estos datos de forma clara y concisa en español. " .
+                  "Responde todas las preguntas de forma clara y concisa en español. " .
                   "Cuando el usuario haga una pregunta, respóndela directamente sin repetir el contexto.\n\n" .
+
+                  "GLOSARIO DE CAMPOS — lee esto antes de responder cualquier pregunta:\n" .
+                  "- stats.despachos = lo que se DESPACHÓ/FACTURÓ realmente (dinero ya enviado al cliente)\n" .
+                  "- stats.planeado = valor total de las OC CREADAS en el período (pedidos, no necesariamente despachados)\n" .
+                  "- stats.despachos.value_usd = monto facturado/despachado en USD\n" .
+                  "- stats.planeado.value_usd = monto total de órdenes creadas en USD (incluye pendientes)\n" .
+                  "- ordenes[].productos = líneas de producto de cada orden\n" .
+                  "- ordenes[].status = completed (despachada completa) | parcial_status (despacho parcial)\n" .
+                  "- muestra=1 en productos = muestra gratis (precio 0, no cuenta como venta)\n" .
+                  "- quantity = kilos\n\n" .
+
                   "REPORTE:\n{$reportJson}\n\n" .
-                  "Confirma que recibiste el reporte con un mensaje breve de bienvenida (1-2 líneas) " .
-                  "indicando el período y cuántas órdenes contiene.";
+                  "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
+                  "indicando el período, cuántas órdenes contiene, y cuánto se despachó vs cuánto fue planeado en USD.";
 
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
