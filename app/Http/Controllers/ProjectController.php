@@ -99,6 +99,14 @@ class ProjectController extends Controller
                 $data['ejecutivo_id'] = auth()->id();
             }
 
+            // Auto-poblar factor desde el default_factor del cliente si no se envió explícitamente
+            if (!isset($data['factor']) && !empty($data['client_id'])) {
+                $clientForFactor = Client::find($data['client_id']);
+                if ($clientForFactor && $clientForFactor->default_factor) {
+                    $data['factor'] = $clientForFactor->default_factor;
+                }
+            }
+
             $project = Project::create(array_merge(
                 $data,
                 [
@@ -180,6 +188,7 @@ class ProjectController extends Controller
             'client',
             'prospect',
             'product',
+            'productCategory',
             'sample',
             'application',
             'evaluation',

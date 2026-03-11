@@ -78,6 +78,7 @@ class Client extends Model
         'purchase_frequency',
         'estimated_monthly_quantity',
         'product_category',
+        'default_factor',
     ];
 
     protected $casts = [

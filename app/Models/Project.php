@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\ProductCategory;
 
 class Project extends Model
 {
@@ -23,6 +24,7 @@ class Project extends Model
         'nombre_prospecto',
         'email_prospecto',
         'product_id',
+        'product_category_id',
         'tipo',
         'rango_min',
         'rango_max',
@@ -36,6 +38,7 @@ class Project extends Model
         'tipo_producto',
         'trm',
         'factor',
+        'costo_perfumacion_especifico',
         'homologacion',
         'internacional',
         'ejecutivo',
@@ -92,6 +95,7 @@ class Project extends Model
         'volumen' => 'decimal:2',
         'trm' => 'decimal:2',
         'factor' => 'decimal:4',
+        'costo_perfumacion_especifico' => 'decimal:2',
         'fecha_requerida' => 'date',
         'fecha_creacion' => 'date',
         'fecha_calculada' => 'date',
@@ -111,6 +115,11 @@ class Project extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class, 'client_id');
+    }
+
+    public function productCategory(): BelongsTo
+    {
+        return $this->belongsTo(ProductCategory::class, 'product_category_id');
     }
 
     public function prospect(): BelongsTo
