@@ -119,6 +119,15 @@ class MonthlyReportController extends Controller
                   "- NEW WIN DEL PERÍODO = tabla de todos los productos marcados [NEW WIN], ordenados por precio/kg descendente\n\n" .
 
                   "REPORTE:\n" . ($md = $this->buildReportMarkdown($report)) . "\n\n" .
+
+                  "ESQUEMA DE BASE DE DATOS:\n" . $this->getDbSchema() . "\n\n" .
+
+                  "INSTRUCCIONES PARA QUERIES SQL:\n" .
+                  "- Cuando el usuario pida datos que NO están en el reporte precompilado (ej: listar clientes por ciudad, buscar órdenes de un período distinto, historial de un producto, etc.), genera una query SQL MariaDB lista para ejecutar.\n" .
+                  "- Presenta la query en un bloque <pre><code> con formato limpio.\n" .
+                  "- Explica brevemente qué devuelve la query y cómo interpretarla.\n" .
+                  "- Si el dato SÍ está en el reporte, responde directamente desde el reporte sin generar query.\n\n" .
+
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
                   "indicando el período, el total de órdenes creadas (valor USD), y cuánto se despachó/facturó realmente en USD.";
 
@@ -1347,5 +1356,82 @@ PROMPT;
         }
 
         return $md;
+    }
+
+    private function getDbSchema(): string
+    {
+        return <<<'SCHEMA'
+## TABLAS RELEVANTES
+
+### clients — Clientes
+- id PK, client_name, nit (UNIQUE), executive, client_type ('pareto'|'balance'|'none'), status ('active'|'inactive'), city, operation_type ('nacional'|'extranjero')
+
+### branch_offices — Sucursales
+- id PK, client_id FK→clients.id, name, nit, delivery_address, delivery_city
+
+### purchase_orders — Órdenes de compra
+- id PK, client_id FK→clients.id, order_consecutive (ej: '2258-4500302325'), status ('pending'|'processing'|'completed'|'cancelled'|'parcial_status'), order_creation_date (date), dispatch_date (date), required_delivery_date (date), trm, is_new_win (0/1), is_muestra (0/1), observations, created_at
+- NOTA: la ejecutiva se obtiene JOIN clients → clients.executive
+
+### purchase_order_product — Líneas de producto en OCs
+- id PK, purchase_order_id FK→purchase_orders.id, product_id FK→products.id, quantity (kg, decimal), price (USD/kg), new_win (0/1), muestra (0/1), delivery_date, branch_office_id, status
+
+### products — Productos
+- id PK, code, product_name, price (USD/kg actual), client_id FK→clients.id
+
+### partials — Despachos
+- id PK, order_id FK→purchase_orders.id, product_order_id FK→purchase_order_product.id, product_id FK→products.id, quantity (kg), type ('temporal'|'real'), dispatch_date (date), trm, invoice_number, pdf_invoice, tracking_number, transporter, deleted_at (soft delete)
+
+### cartera — Cartera (COP, importada de sistema contable)
+- id PK, nit, nombre_empresa, fecha_cartera (date del snapshot), saldo_contable (string COP), saldo_vencido (string COP), dias (int, + = vencida), vence (date), vendedor
+- NOTA: saldo_contable es string — usar CAST(REPLACE(saldo_contable,',','') AS DECIMAL(15,2)) para operar
+
+### recaudos — Pagos recibidos (COP)
+- id PK, nit (bigint), cliente, fecha_recaudo (datetime), numero_factura, numero_recibo, valor_cancelado (decimal COP), dias
+
+### trm_daily — TRM diaria
+- id PK, date (date), value (decimal COP/USD), is_weekend (0/1), is_holiday (0/1)
+
+## RELACIONES
+- clients (1) → purchase_orders (N) vía client_id
+- purchase_orders (1) → purchase_order_product (N) vía purchase_order_id
+- purchase_order_product (N) → products (1) vía product_id
+- purchase_orders (1) → partials (N) vía order_id
+- partials (N) → purchase_order_product (1) vía product_order_id
+- clients (1) → branch_offices (N) vía client_id
+- clients.nit ↔ cartera.nit (join por NIT, sin FK)
+- clients.nit ↔ recaudos.nit (join por NIT, sin FK)
+
+## QUERIES DE REFERENCIA
+
+Órdenes de un cliente en un período:
+SELECT po.order_consecutive, po.status, po.order_creation_date, c.client_name, c.executive, po.trm, po.is_new_win
+FROM purchase_orders po JOIN clients c ON po.client_id = c.id
+WHERE c.nit = '860001777' AND po.order_creation_date BETWEEN '2026-03-01' AND '2026-03-31';
+
+Productos de una OC:
+SELECT p.product_name, p.code, pop.quantity, pop.price, (pop.quantity * pop.price) total_usd, pop.new_win, pop.muestra
+FROM purchase_order_product pop JOIN products p ON pop.product_id = p.id
+JOIN purchase_orders po ON pop.purchase_order_id = po.id
+WHERE po.order_consecutive = '2258-4500302325';
+
+Despachos del período por ejecutiva:
+SELECT c.executive, COUNT(DISTINCT po.id) ocs, SUM(par.quantity) kilos, SUM(par.quantity * pop.price) valor_usd
+FROM partials par JOIN purchase_order_product pop ON par.product_order_id = pop.id
+JOIN purchase_orders po ON par.order_id = po.id JOIN clients c ON po.client_id = c.id
+WHERE par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31' AND par.deleted_at IS NULL AND pop.muestra = 0
+GROUP BY c.executive ORDER BY valor_usd DESC;
+
+Cartera vencida (último snapshot):
+SELECT nit, nombre_empresa, MAX(fecha_cartera) ultima_fecha,
+SUM(CAST(REPLACE(saldo_contable,',','') AS DECIMAL(15,2))) saldo_cop
+FROM cartera WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+GROUP BY nit, nombre_empresa ORDER BY saldo_cop DESC;
+
+Recaudos del período:
+SELECT nit, cliente, SUM(valor_cancelado) total_cop, COUNT(*) recibos
+FROM recaudos WHERE fecha_recaudo BETWEEN '2026-03-01' AND '2026-03-31'
+GROUP BY nit, cliente ORDER BY total_cop DESC;
+SCHEMA;
     }
 }
