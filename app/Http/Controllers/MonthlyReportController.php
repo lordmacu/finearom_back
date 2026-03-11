@@ -56,8 +56,8 @@ class MonthlyReportController extends Controller
      */
     public function chatStart(): JsonResponse
     {
-        $aiUrl = env('AI_SERVER_URL', 'http://100.24.49.190:54321');
-        $aiKey = env('AI_SERVER_KEY', 'finearom-ai-2025');
+        $aiUrl = config('custom.ai_server_url');
+        $aiKey = config('custom.ai_server_key');
 
         if (!Storage::disk('local')->exists('monthly_report.json')) {
             return response()->json([
@@ -114,8 +114,8 @@ class MonthlyReportController extends Controller
             'message'   => 'required|string|max:2000',
         ]);
 
-        $aiUrl = env('AI_SERVER_URL', 'http://100.24.49.190:54321');
-        $aiKey = env('AI_SERVER_KEY', 'finearom-ai-2025');
+        $aiUrl = config('custom.ai_server_url');
+        $aiKey = config('custom.ai_server_key');
 
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
@@ -208,8 +208,8 @@ class MonthlyReportController extends Controller
         $startDate = $request->get('start_date') ?? Carbon::now()->startOfMonth()->toDateString();
         $endDate   = $request->get('end_date')   ?? Carbon::now()->endOfMonth()->toDateString();
 
-        $aiUrl = env('AI_SERVER_URL', 'http://100.24.49.190:54321');
-        $aiKey = env('AI_SERVER_KEY', 'finearom-ai-2025');
+        $aiUrl = config('custom.ai_server_url');
+        $aiKey = config('custom.ai_server_key');
 
         Log::info("[AI-Analyze] Iniciando análisis período {$startDate} → {$endDate}");
 
@@ -318,8 +318,8 @@ class MonthlyReportController extends Controller
     {
         $startDate = $request->get('start_date') ?? Carbon::now()->startOfMonth()->toDateString();
         $endDate   = $request->get('end_date')   ?? Carbon::now()->endOfMonth()->toDateString();
-        $aiUrl     = env('AI_SERVER_URL', 'http://localhost:54321');
-        $aiKey     = env('AI_SERVER_KEY', 'finearom-ai-2025');
+        $aiUrl     = config('custom.ai_server_url');
+        $aiKey     = config('custom.ai_server_key');
 
         return new StreamedResponse(function () use ($startDate, $endDate, $aiUrl, $aiKey) {
             set_time_limit(0);
