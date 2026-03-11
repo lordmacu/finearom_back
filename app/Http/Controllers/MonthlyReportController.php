@@ -69,11 +69,22 @@ class MonthlyReportController extends Controller
         $reportJson = Storage::disk('local')->get('monthly_report.json');
         $report     = json_decode($reportJson, true);
         $period     = $report['period'] ?? [];
+        $now        = Carbon::now('America/Bogota');
+        $today      = $now->toDateString();
+
+        // TRM de hoy (o la más reciente disponible) — para conversiones de cartera
+        $trmHoy = DB::table('trm_daily')
+            ->where('date', '<=', $today)
+            ->orderByDesc('date')
+            ->value('value');
+        $trmHoyStr = $trmHoy ? number_format((float)$trmHoy, 2) : '4000.00';
 
         $prompt = "Eres un asistente de análisis comercial para Finearom. " .
                   "Te comparto el reporte mensual del período {$period['start_date']} al {$period['end_date']}. " .
                   "Responde todas las preguntas de forma clara y concisa en español. " .
-                  "Cuando el usuario haga una pregunta, respóndela directamente sin repetir el contexto.\n\n" .
+                  "Cuando el usuario haga una pregunta, respóndela directamente sin repetir el contexto.\n" .
+                  "Fecha y hora actual (Colombia): {$now->format('Y-m-d H:i:s')} — úsala como referencia para calcular rangos relativos (hoy, esta semana, hace N días, etc.).\n" .
+                  "TRM de hoy ({$today}): \${$trmHoyStr} COP/USD — úsala SOLO para convertir valores de cartera a USD si te lo piden. Las órdenes tienen su propia TRM individual y no deben usar esta.\n\n" .
 
                   "GLOSARIO DE CAMPOS — lee esto antes de responder cualquier pregunta:\n" .
                   "- stats.ordenes_creadas.value_usd = TOTAL DE ÓRDENES en USD (valor de todas las OC creadas en el período, sin importar estado)\n" .
@@ -104,7 +115,18 @@ class MonthlyReportController extends Controller
                   "- quantity = kilos (en ordenes[].productos[])\n" .
                   "- stats.top_productos[].total_units = KILOS despachados (no es conteo de unidades)\n" .
                   "- stats.top_productos[].orders_count = número de órdenes en que apareció el producto\n" .
-                  "- Para preguntas sobre qué producto se despachó más: usar stats.top_productos ordenado por total_units (= kilos)\n\n" .
+                  "- Para preguntas sobre qué producto se despachó más: usar stats.top_productos ordenado por total_units (= kilos)\n" .
+                  "- stats.cartera = estado de la cartera (deudas de clientes) en COP al momento del snapshot\n" .
+                  "- stats.cartera.snapshot_date = fecha del último corte de cartera cargado\n" .
+                  "- stats.cartera.saldo_bruto_cop = saldo contable bruto total de clientes (COP) — lo que facturaron\n" .
+                  "- stats.cartera.deuda_neta_cop = deuda real = saldo bruto - recaudos históricos (COP) — lo que efectivamente se debe\n" .
+                  "- stats.cartera.deuda_vencida_cop = porción de la deuda neta que ya está vencida (COP)\n" .
+                  "- stats.cartera.coverage_rate_pct = % de la deuda neta cubierto por los recaudos del período analizado\n" .
+                  "- stats.recaudos.total_cop = total de pagos/recaudos recibidos en el período (COP)\n" .
+                  "- TODOS los valores de cartera y recaudos son en PESOS COLOMBIANOS (COP), no en USD\n" .
+                  "- Si piden cartera en USD: dividir el valor COP entre la TRM de hoy indicada al inicio del contexto\n" .
+                  "- NUNCA usar la TRM de hoy para convertir valores de órdenes — cada orden tiene su propia TRM\n" .
+                  "- IMPORTANTE: el campo executive en ordenes_mes[] a veces aparece como email (ej: monica.castano@finearom.com) — para preguntas por ejecutiva usar SIEMPRE stats.executive_stats[] que tiene los nombres consolidados\n\n" .
 
                   "REPORTE:\n{$reportJson}\n\n" .
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
@@ -196,7 +218,7 @@ class MonthlyReportController extends Controller
                 'success'    => true,
                 'generated_at' => now()->toIso8601String(),
                 'period'     => ['start_date' => $startDate, 'end_date' => $endDate],
-                'ordenes'    => $this->buildOrdenes($startDate, $endDate),
+                'ordenes_mes' => $this->buildOrdenes($startDate, $endDate),
                 'stats'      => $this->buildStats($startDate, $endDate),
             ];
 
@@ -209,7 +231,7 @@ class MonthlyReportController extends Controller
                 'message'      => 'Reporte generado correctamente',
                 'generated_at' => $report['generated_at'],
                 'period'       => $report['period'],
-                'ordenes_count' => count($report['ordenes']),
+                'ordenes_count' => count($report['ordenes_mes']),
             ]);
         } catch (\Throwable $e) {
             Log::error('MonthlyReport generate error: ' . $e->getMessage());
@@ -252,7 +274,7 @@ class MonthlyReportController extends Controller
                 'ordenes_mes' => $this->buildOrdenes($startDate, $endDate),
                 'stats'   => $this->buildStats($startDate, $endDate),
             ];
-            $ordersCount = count($reportData['ordenes']);
+            $ordersCount = count($reportData['ordenes_mes']);
             Log::info("[AI-Analyze] Reporte construido: {$ordersCount} órdenes. Enviando al servidor AI...");
 
             // 2. Primer prompt: enviar reporte y obtener 8 preguntas de análisis
@@ -371,7 +393,7 @@ class MonthlyReportController extends Controller
                     'ordenes_mes' => $this->buildOrdenes($startDate, $endDate),
                     'stats'   => $this->buildStats($startDate, $endDate),
                 ];
-                $send(['type' => 'report_ready', 'ordenes_count' => count($reportData['ordenes'])]);
+                $send(['type' => 'report_ready', 'ordenes_count' => count($reportData['ordenes_mes'])]);
 
                 // 2. Primer prompt: generar preguntas
                 $send(['type' => 'status', 'message' => 'Analizando reporte con IA...']);
@@ -801,14 +823,41 @@ PROMPT;
             ->first();
 
         // Collection coverage
-        $latestCarteraDate = DB::table('cartera')->max('fecha_cartera');
-        $saldoCartera = 0;
-        if ($latestCarteraDate) {
-            $saldoCartera = DB::table('cartera')
-                ->where('fecha_cartera', $latestCarteraDate)
-                ->sum('saldo_contable');
-        }
-        $coverageRate = ($saldoCartera > 0) ? round(($recaudos / $saldoCartera) * 100, 2) : null;
+        // Cartera — snapshot más reciente (misma lógica que CarteraQuery)
+        $today = Carbon::now('America/Bogota')->toDateString();
+        $latestCarteraDate = (string) (DB::table('cartera')->max('fecha_cartera') ?? $today);
+
+        $carteraBase = DB::table('cartera as car')
+            ->leftJoin('recaudos as r', 'r.numero_factura', '=', 'car.documento')
+            ->where('car.fecha_cartera', '=', $latestCarteraDate);
+
+        $saldoCartera = (float) DB::table('cartera')
+            ->where('fecha_cartera', $latestCarteraDate)
+            ->sum(DB::raw("CAST(REPLACE(REPLACE(saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2))"));
+
+        // Deuda neta (saldo - recaudos totales por factura, mínimo 0)
+        $netDebt = (float) DB::table('cartera as car')
+            ->leftJoin('recaudos as r', 'r.numero_factura', '=', 'car.documento')
+            ->where('car.fecha_cartera', '=', $latestCarteraDate)
+            ->groupBy('car.documento', 'car.saldo_contable')
+            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
+            ->pluck('net_debt')
+            ->sum();
+
+        // Deuda vencida (vence < hoy)
+        $overdueDebt = (float) DB::table('cartera as car')
+            ->leftJoin('recaudos as r', 'r.numero_factura', '=', 'car.documento')
+            ->where('car.fecha_cartera', '=', $latestCarteraDate)
+            ->where(function ($q) use ($today) {
+                $q->where('car.vence', '<', $today)
+                  ->orWhere(function ($n) { $n->whereNotNull('car.dias')->where('car.dias', '<', 0); });
+            })
+            ->groupBy('car.documento', 'car.saldo_contable')
+            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
+            ->pluck('net_debt')
+            ->sum();
+
+        $coverageRate = ($netDebt > 0) ? round(($recaudos / $netDebt) * 100, 2) : null;
 
         // TRM variation vs prior period
         $start    = Carbon::parse($startDate);
@@ -879,8 +928,11 @@ PROMPT;
                 'count'     => (int) $recaudosCount,
             ],
             'cartera' => [
-                'saldo_total_cop'   => round($saldoCartera, 0),
-                'coverage_rate_pct' => $coverageRate,
+                'snapshot_date'    => $latestCarteraDate,
+                'saldo_bruto_cop'  => round($saldoCartera, 0),   // saldo contable bruto del snapshot (COP)
+                'deuda_neta_cop'   => round($netDebt, 0),        // saldo - recaudos históricos (COP)
+                'deuda_vencida_cop'=> round($overdueDebt, 0),    // porción vencida de la deuda neta (COP)
+                'coverage_rate_pct'=> $coverageRate,             // % cubierto por recaudos del período
             ],
             'trm' => [
                 'average'          => $avgTrm,
