@@ -113,9 +113,11 @@ class MonthlyReportController extends Controller
                   "- Para saber cuáles están pendientes: filtrar ordenes_mes[] donde status = pending o processing\n" .
                   "- muestra=1 en productos = muestra gratis (precio 0, no cuenta como venta)\n" .
                   "- quantity = kilos (en ordenes[].productos[])\n" .
+                  "- stats.despachos.products_count = número de LÍNEAS de producto despachadas (items distintos), NO es kilos\n" .
                   "- stats.top_productos[].total_units = KILOS despachados (no es conteo de unidades)\n" .
                   "- stats.top_productos[].orders_count = número de órdenes en que apareció el producto\n" .
                   "- Para preguntas sobre qué producto se despachó más: usar stats.top_productos ordenado por total_units (= kilos)\n" .
+                  "- stats.ordenes_creadas.compliance_cop_pct puede superar el 100%: es normal porque los despachos del período pueden incluir órdenes creadas en meses anteriores\n" .
                   "- stats.cartera = estado de la cartera (deudas de clientes) en COP al momento del snapshot\n" .
                   "- stats.cartera.snapshot_date = fecha del último corte de cartera cargado\n" .
                   "- stats.cartera.saldo_bruto_cop = saldo contable bruto total de clientes (COP) — lo que facturaron\n" .
@@ -833,14 +835,14 @@ PROMPT;
 
         $saldoCartera = (float) DB::table('cartera')
             ->where('fecha_cartera', $latestCarteraDate)
-            ->sum(DB::raw("CAST(REPLACE(REPLACE(saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2))"));
+            ->sum(DB::raw("CAST(REPLACE(REPLACE(REPLACE(saldo_contable, ' ', ''), '.', ''), ',', '.') AS DECIMAL(20,2))"));
 
         // Deuda neta (saldo - recaudos totales por factura, mínimo 0)
         $netDebt = (float) DB::table('cartera as car')
             ->leftJoin('recaudos as r', 'r.numero_factura', '=', 'car.documento')
             ->where('car.fecha_cartera', '=', $latestCarteraDate)
             ->groupBy('car.documento', 'car.saldo_contable')
-            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
+            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(REPLACE(car.saldo_contable, ' ', ''), '.', ''), ',', '.') AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
             ->pluck('net_debt')
             ->sum();
 
@@ -853,7 +855,7 @@ PROMPT;
                   ->orWhere(function ($n) { $n->whereNotNull('car.dias')->where('car.dias', '<', 0); });
             })
             ->groupBy('car.documento', 'car.saldo_contable')
-            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '$', '') AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
+            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(REPLACE(car.saldo_contable, ' ', ''), '.', ''), ',', '.') AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
             ->pluck('net_debt')
             ->sum();
 
