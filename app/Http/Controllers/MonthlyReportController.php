@@ -1213,7 +1213,9 @@ PROMPT;
                 }
             }
 
-            $md .= "### OC {$cons}{$tagStr} — {$estado} | Ejecutiva: {$exec} | {$n($totalKgOc, 2)} kg\n";
+            $totalUsdOc = (float)($o['total_usd'] ?? 0);
+            $usdHeader  = $totalUsdOc > 0 ? " | \${$n($totalUsdOc, 2)} USD" : '';
+            $md .= "### OC {$cons}{$tagStr} — {$estado} | Ejecutiva: {$exec} | {$n($totalKgOc, 2)} kg{$usdHeader}\n";
             $md .= "- **Cliente:** {$cliente} | **Ciudad:** {$ciudad}\n";
             $md .= "- **Despacho:** {$fecha}";
             if ($factura) $md .= " | **Factura:** {$factura} | **Guía:** {$guia} | **Trans.:** {$trans}";
