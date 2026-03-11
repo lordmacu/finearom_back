@@ -20,9 +20,9 @@ return new class extends Migration
             $table->text('notas')->nullable();
             $table->timestamps();
 
-            $table->unique(['finearom_reference_id', 'raw_material_id']);
-            $table->index('finearom_reference_id');
-            $table->index('raw_material_id');
+            $table->unique(['finearom_reference_id', 'raw_material_id'], 'ref_formula_ref_mat_unique');
+            $table->index('finearom_reference_id', 'ref_formula_ref_id_idx');
+            $table->index('raw_material_id', 'ref_formula_mat_id_idx');
         });
     }
 
