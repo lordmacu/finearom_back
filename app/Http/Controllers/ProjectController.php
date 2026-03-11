@@ -403,6 +403,31 @@ class ProjectController extends Controller
                 return $p->potencial_anual_usd * $peso;
             });
 
+        // Proyectos activos por departamento (estado_interno = 'En proceso', booleano aún en false = pendiente)
+        $enProceso = Project::where('estado_interno', 'En proceso');
+        $byProceso = [
+            'Desarrollo'  => (clone $enProceso)->where('estado_desarrollo', false)->count(),
+            'Laboratorio' => (clone $enProceso)->where('estado_laboratorio', false)->count(),
+            'Mercadeo'    => (clone $enProceso)->where('estado_mercadeo', false)->count(),
+            'Calidad'     => (clone $enProceso)->where('estado_calidad', false)->count(),
+            'Especiales'  => (clone $enProceso)->where('estado_especiales', false)->count(),
+        ];
+
+        // Top clientes por volumen de proyectos
+        $topClientes = Project::query()
+            ->whereNotNull('client_id')
+            ->selectRaw('client_id, COUNT(*) as total')
+            ->groupBy('client_id')
+            ->orderByDesc('total')
+            ->limit(10)
+            ->with('client:id,client_name')
+            ->get()
+            ->map(fn ($r) => [
+                'client_id'   => $r->client_id,
+                'client_name' => $r->client?->client_name ?? '—',
+                'total'       => $r->total,
+            ]);
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -415,6 +440,8 @@ class ProjectController extends Controller
                 'wins_anio'              => $winsAnio,
                 'potencial_probabilidad' => $potencialPorProbabilidad,
                 'pronostico_anual_usd'   => round($pronosticoAnual, 2),
+                'by_proceso'             => $byProceso,
+                'top_clientes'           => $topClientes,
             ],
         ]);
     }
@@ -480,14 +507,31 @@ class ProjectController extends Controller
                 'promedio_dias' => round($row->promedio_dias, 1),
             ]);
 
+        $porTecnico = Project::where('estado_interno', 'Entregado')
+            ->whereNotNull('ejecutivo_laboratorio')
+            ->whereNotNull('dias_diferencia')
+            ->selectRaw('ejecutivo_laboratorio as tecnico, COUNT(*) as total, SUM(CASE WHEN dias_diferencia <= 0 THEN 1 ELSE 0 END) as a_tiempo, AVG(dias_diferencia) as promedio_dias')
+            ->groupBy('ejecutivo_laboratorio')
+            ->orderByDesc('total')
+            ->limit(10)
+            ->get()
+            ->map(fn ($r) => [
+                'tecnico'       => $r->tecnico,
+                'total'         => $r->total,
+                'a_tiempo'      => $r->a_tiempo,
+                'porcentaje'    => $r->total > 0 ? round(($r->a_tiempo / $r->total) * 100, 1) : 0,
+                'promedio_dias' => round($r->promedio_dias, 1),
+            ]);
+
         return response()->json([
             'success' => true,
             'data'    => [
-                'total_entregados'        => $total,
-                'entregados_a_tiempo'     => $aTiempo,
-                'porcentaje_a_tiempo'     => $total > 0 ? round(($aTiempo / $total) * 100, 1) : 0,
+                'total_entregados'         => $total,
+                'entregados_a_tiempo'      => $aTiempo,
+                'porcentaje_a_tiempo'      => $total > 0 ? round(($aTiempo / $total) * 100, 1) : 0,
                 'promedio_dias_diferencia' => $promedio,
-                'por_tipo'                => $porTipo,
+                'por_tipo'                 => $porTipo,
+                'por_tecnico'              => $porTecnico,
             ],
         ]);
     }

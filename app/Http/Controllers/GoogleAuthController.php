@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\GoogleCalendarService;
 use App\Services\GoogleDriveService;
+use App\Services\GoogleGmailService;
 use App\Services\GoogleSheetsService;
 use App\Services\GoogleTaskService;
 use Illuminate\Http\JsonResponse;
@@ -12,9 +14,11 @@ use Illuminate\Http\Request;
 class GoogleAuthController extends Controller
 {
     public function __construct(
-        private readonly GoogleTaskService  $googleService,
-        private readonly GoogleDriveService $driveService,
-        private readonly GoogleSheetsService $sheetsService,
+        private readonly GoogleTaskService     $googleService,
+        private readonly GoogleDriveService    $driveService,
+        private readonly GoogleSheetsService   $sheetsService,
+        private readonly GoogleCalendarService $calendarService,
+        private readonly GoogleGmailService    $gmailService,
     ) {
         $this->middleware('auth:sanctum')->except(['callback', 'loginUrl']);
         $this->middleware('can:project list')->only(['connectedUsers']);
@@ -125,6 +129,8 @@ class GoogleAuthController extends Controller
             $request->query('return_url'),
             includeDrive: true,
             includeSheets: true,
+            includeCalendar: true,
+            includeGmail: true,
         );
 
         return response()->json(['url' => $url]);
@@ -138,9 +144,11 @@ class GoogleAuthController extends Controller
         $userId = $request->user()->id;
 
         return response()->json([
-            'connected'      => $this->googleService->isConnected($userId),
-            'drive_enabled'  => $this->driveService->hasDriveAccess($userId),
-            'sheets_enabled' => $this->sheetsService->hasSheetsAccess($userId),
+            'connected'         => $this->googleService->isConnected($userId),
+            'drive_enabled'     => $this->driveService->hasDriveAccess($userId),
+            'sheets_enabled'    => $this->sheetsService->hasSheetsAccess($userId),
+            'calendar_enabled'  => $this->calendarService->isConnected($userId),
+            'gmail_enabled'     => $this->gmailService->isConnected($userId),
         ]);
     }
 

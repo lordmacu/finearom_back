@@ -90,6 +90,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/order-google-task-config',  [OrderGoogleTaskConfigController::class, 'index']);
     Route::put('/order-google-task-config',  [OrderGoogleTaskConfigController::class, 'update']);
 
+    // Visitas a clientes
+    Route::apiResource('client-visits', \App\Http\Controllers\ClientVisitController::class);
+    Route::post('client-visits/{clientVisit}/commitments',                    [\App\Http\Controllers\ClientVisitController::class, 'addCommitment']);
+    Route::put('client-visits/{clientVisit}/commitments/{commitment}',        [\App\Http\Controllers\ClientVisitController::class, 'updateCommitment']);
+    Route::delete('client-visits/{clientVisit}/commitments/{commitment}',     [\App\Http\Controllers\ClientVisitController::class, 'destroyCommitment']);
+    Route::post('client-visits/{clientVisit}/gmail-draft',                   [\App\Http\Controllers\ClientVisitController::class, 'createGmailDraft']);
+
     // Dashboard Stats
     Route::get('/dashboard/stats', [DashboardController::class, 'getStats']);
     Route::get('/dashboard/export-planned-stats', [DashboardController::class, 'exportPlannedStats']);

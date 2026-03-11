@@ -15,11 +15,13 @@ class GoogleTaskService
     private const AUTH_URL      = 'https://accounts.google.com/o/oauth2/v2/auth';
     private const TOKEN_URL     = 'https://oauth2.googleapis.com/token';
     private const TASKS_URL     = 'https://tasks.googleapis.com/tasks/v1';
-    private const SCOPE_TASKS   = 'https://www.googleapis.com/auth/tasks';
-    private const SCOPE_DRIVE   = 'https://www.googleapis.com/auth/drive.file';
-    private const SCOPE_SHEETS  = 'https://www.googleapis.com/auth/spreadsheets';
-    private const SCOPE_EMAIL   = 'email';
-    private const SCOPE_PROFILE = 'profile';
+    private const SCOPE_TASKS    = 'https://www.googleapis.com/auth/tasks';
+    private const SCOPE_DRIVE    = 'https://www.googleapis.com/auth/drive.file';
+    private const SCOPE_SHEETS   = 'https://www.googleapis.com/auth/spreadsheets';
+    private const SCOPE_CALENDAR = 'https://www.googleapis.com/auth/calendar';
+    private const SCOPE_GMAIL    = 'https://mail.google.com/';
+    private const SCOPE_EMAIL    = 'email';
+    private const SCOPE_PROFILE  = 'profile';
 
     /** @deprecated Use SCOPE_TASKS */
     private const SCOPE = 'https://www.googleapis.com/auth/tasks';
@@ -59,7 +61,7 @@ class GoogleTaskService
      * Genera la URL de autorización de Google.
      * Guarda el user_id en caché usando un state aleatorio para recuperarlo en el callback.
      */
-    public function getAuthUrl(int $userId, ?string $returnUrl = null, bool $includeDrive = false, bool $includeSheets = false): string
+    public function getAuthUrl(int $userId, ?string $returnUrl = null, bool $includeDrive = false, bool $includeSheets = false, bool $includeCalendar = false, bool $includeGmail = false): string
     {
         $state = Str::random(40);
         Cache::put("google_oauth_state_{$state}", [
@@ -73,6 +75,12 @@ class GoogleTaskService
         }
         if ($includeSheets) {
             $scopes[] = self::SCOPE_SHEETS;
+        }
+        if ($includeCalendar) {
+            $scopes[] = self::SCOPE_CALENDAR;
+        }
+        if ($includeGmail) {
+            $scopes[] = self::SCOPE_GMAIL;
         }
 
         return self::AUTH_URL . '?' . http_build_query([
