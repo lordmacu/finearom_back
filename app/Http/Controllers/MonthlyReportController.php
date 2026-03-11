@@ -1428,7 +1428,9 @@ PROMPT;
 
 ### cartera — Cartera (COP, importada de sistema contable)
 - id PK, nit, nombre_empresa, fecha_cartera (date del snapshot), saldo_contable (string COP), saldo_vencido (string COP), dias (int, + = vencida), vence (date), vendedor
-- NOTA: saldo_contable es string — usar CAST(REPLACE(saldo_contable,',','') AS DECIMAL(15,2)) para operar
+- CRÍTICO: saldo_contable y saldo_vencido son STRINGS — para operar numéricamente usar: CAST(REPLACE(campo,',','') AS DECIMAL(15,2))
+- CRÍTICO: NUNCA filtrar con una fecha hardcodeada — el snapshot puede no existir para esa fecha. SIEMPRE usar: fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+- Para ordenar por saldo usar: ORDER BY CAST(REPLACE(saldo_contable,',','') AS DECIMAL(15,2)) DESC
 
 ### recaudos — Pagos recibidos (COP)
 - id PK, nit (bigint), cliente, fecha_recaudo (datetime), numero_factura, numero_recibo, valor_cancelado (decimal COP), dias
