@@ -6,6 +6,7 @@ use App\Models\FineFragrance;
 use App\Models\Fragrance;
 use App\Models\FragranceFamily;
 use App\Models\FragranceHouse;
+use App\Models\ProductCategory;
 use App\Models\ProjectProductType;
 use App\Models\FinearomPriceHistory;
 use App\Models\FinearomReference;
@@ -24,6 +25,7 @@ class ProjectCatalogController extends Controller
         $this->middleware('can:project list')->only([
             'fragrances', 'fineFragrances', 'houses', 'families',
             'finearomReferences', 'projectProductTypes', 'swissaromPriceHistory',
+            'productCategories',
         ]);
         $this->middleware('can:project catalog manage')->only([
             'storeFragrance', 'updateFragrance', 'destroyFragrance',
@@ -33,6 +35,17 @@ class ProjectCatalogController extends Controller
             'storeFinearomReference', 'updateFinearomReference', 'destroyFinearomReference',
             'storeProductType', 'updateProductType', 'destroyProductType',
         ]);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Categorías de producto (accesible con project list)
+    // ─────────────────────────────────────────────────────────────
+
+    public function productCategories(): JsonResponse
+    {
+        $categories = ProductCategory::where('active', true)->orderBy('name')->get();
+
+        return response()->json(['success' => true, 'data' => $categories]);
     }
 
     // ─────────────────────────────────────────────────────────────

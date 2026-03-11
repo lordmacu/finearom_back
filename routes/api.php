@@ -375,6 +375,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/project-times/group-classifications/{groupClassification}', [ProjectTimesController::class, 'destroyGroupClassification']);
 
     // Catálogos de proyecto — CRUD completo
+    Route::get('/project-catalogs/product-categories', [ProjectCatalogController::class, 'productCategories']);
     Route::get('/project-catalogs/product-types', [ProjectCatalogController::class, 'projectProductTypes']);
     Route::post('/project-catalogs/product-types', [ProjectCatalogController::class, 'storeProductType']);
     Route::put('/project-catalogs/product-types/{projectProductType}', [ProjectCatalogController::class, 'updateProductType']);
