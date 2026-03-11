@@ -99,7 +99,10 @@ class MonthlyReportController extends Controller
                   "- ordenes[].status = pending (sin despachar) | processing (en proceso) | parcial_status (despacho parcial) | completed (despachada completa)\n" .
                   "- Para saber cuáles fueron despachadas/facturadas: filtrar ordenes[] donde status = completed o parcial_status\n" .
                   "- muestra=1 en productos = muestra gratis (precio 0, no cuenta como venta)\n" .
-                  "- quantity = kilos\n\n" .
+                  "- quantity = kilos (en ordenes[].productos[])\n" .
+                  "- stats.top_productos[].total_units = KILOS despachados (no es conteo de unidades)\n" .
+                  "- stats.top_productos[].orders_count = número de órdenes en que apareció el producto\n" .
+                  "- Para preguntas sobre qué producto se despachó más: usar stats.top_productos ordenado por total_units (= kilos)\n\n" .
 
                   "REPORTE:\n{$reportJson}\n\n" .
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
