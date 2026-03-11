@@ -1446,6 +1446,21 @@ PROMPT;
 - clients.nit ↔ cartera.nit (join por NIT, sin FK)
 - clients.nit ↔ recaudos.nit (join por NIT, sin FK)
 
+## CONVERSIÓN DE MONEDA — REGLA CRÍTICA
+- price en purchase_order_product es USD/kg
+- trm en purchase_orders y partials es el tipo de cambio COP/USD de esa orden/despacho
+- Para obtener valor en COP: quantity * price * COALESCE(NULLIF(po.trm+0, 0), 4000)
+- Para obtener valor en USD: quantity * price  (sin TRM)
+- NUNCA uses la TRM de hoy para convertir órdenes — cada OC tiene su propia TRM
+- Si el usuario pide "valor en pesos" o "valor COP" → multiplica por TRM de la orden
+- Si el usuario pide "valor en dólares" o "valor USD" → solo quantity * price
+
+## NORMALIZACIÓN DE EJECUTIVA
+- El campo clients.executive puede contener un email (ej: monica.castano@finearom.com)
+- Para mostrarlo como nombre legible usa: REPLACE(SUBSTRING_INDEX(executive,'@',1),'.',' ')
+- Ejemplo en query: CONCAT(UPPER(LEFT(SUBSTRING_INDEX(SUBSTRING_INDEX(executive,'@',1),'.',1),1)), LOWER(SUBSTRING(SUBSTRING_INDEX(SUBSTRING_INDEX(executive,'@',1),'.',1),2)), ' ', UPPER(LEFT(SUBSTRING_INDEX(executive,'.',-1),1)), LOWER(SUBSTRING(SUBSTRING_INDEX(executive,'.',-1),2)))
+- O simplemente muestra el campo executive tal cual y avisa al usuario que algunos son emails
+
 ## QUERIES DE REFERENCIA
 
 Órdenes de un cliente en un período:
@@ -1459,12 +1474,27 @@ FROM purchase_order_product pop JOIN products p ON pop.product_id = p.id
 JOIN purchase_orders po ON pop.purchase_order_id = po.id
 WHERE po.order_consecutive = '2258-4500302325';
 
-Despachos del período por ejecutiva:
-SELECT c.executive, COUNT(DISTINCT po.id) ocs, SUM(par.quantity) kilos, SUM(par.quantity * pop.price) valor_usd
+Participación por ejecutiva en un período (OCs creadas, valor USD y COP):
+SELECT COALESCE(NULLIF(c.executive,''), 'Sin ejecutiva') ejecutiva,
+  COUNT(DISTINCT po.id) ocs,
+  SUM(pop.quantity) kilos,
+  SUM(pop.quantity * pop.price) valor_usd,
+  SUM(pop.quantity * pop.price * COALESCE(NULLIF(po.trm+0, 0), 4000)) valor_cop
+FROM purchase_orders po
+JOIN clients c ON po.client_id = c.id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
+WHERE po.order_creation_date BETWEEN '2026-03-01' AND '2026-03-31' AND pop.muestra = 0
+GROUP BY c.executive ORDER BY valor_cop DESC;
+
+Despachos del período por ejecutiva (valor USD y COP):
+SELECT COALESCE(NULLIF(c.executive,''), 'Sin ejecutiva') ejecutiva,
+  COUNT(DISTINCT po.id) ocs, SUM(par.quantity) kilos,
+  SUM(par.quantity * pop.price) valor_usd,
+  SUM(par.quantity * pop.price * COALESCE(NULLIF(par.trm+0, 0), NULLIF(po.trm+0, 0), 4000)) valor_cop
 FROM partials par JOIN purchase_order_product pop ON par.product_order_id = pop.id
 JOIN purchase_orders po ON par.order_id = po.id JOIN clients c ON po.client_id = c.id
 WHERE par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31' AND par.deleted_at IS NULL AND pop.muestra = 0
-GROUP BY c.executive ORDER BY valor_usd DESC;
+GROUP BY c.executive ORDER BY valor_cop DESC;
 
 Cartera vencida (último snapshot):
 SELECT nit, nombre_empresa, MAX(fecha_cartera) ultima_fecha,
