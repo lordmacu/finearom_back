@@ -69,13 +69,18 @@ class MonthlyReportController extends Controller
         $aiUrl = env('AI_SERVER_URL', 'http://100.24.49.190:54321');
         $aiKey = env('AI_SERVER_KEY', 'finearom-ai-2025');
 
+        Log::info("[AI-Analyze] Iniciando análisis período {$startDate} → {$endDate}");
+
         try {
             // 1. Construir reporte
+            Log::info('[AI-Analyze] Construyendo reporte (ordenes + stats)...');
             $reportData = [
                 'periodo' => ['start_date' => $startDate, 'end_date' => $endDate],
                 'ordenes' => $this->buildOrdenes($startDate, $endDate),
                 'stats'   => $this->buildStats($startDate, $endDate),
             ];
+            $ordersCount = count($reportData['ordenes']);
+            Log::info("[AI-Analyze] Reporte construido: {$ordersCount} órdenes. Enviando al servidor AI...");
 
             // 2. Primer prompt: enviar reporte y obtener 8 preguntas de análisis
             $resp1 = Http::withHeaders(['X-Api-Key' => $aiKey])
@@ -84,24 +89,33 @@ class MonthlyReportController extends Controller
                     'model'        => 'gpt-4.1',
                     'messages'     => [['role' => 'user', 'content' => $this->buildInitialPrompt($reportData, $startDate, $endDate)]],
                     'extract_json' => true,
-                    // sin thread_id → el servidor crea una nueva conversación y devuelve el ID
                 ]);
 
+            Log::info("[AI-Analyze] Prompt inicial → HTTP {$resp1->status()}");
+
             if (!$resp1->successful()) {
+                Log::error('[AI-Analyze] Error en prompt inicial: ' . $resp1->body());
                 throw new \RuntimeException("AI server error {$resp1->status()}: " . $resp1->body());
             }
 
-            $threadId = $resp1->json('thread_id'); // ID del hilo creado — lo reutilizamos en todos los siguientes
+            $threadId = $resp1->json('thread_id');
             $content1 = $resp1->json('choices.0.message.content', '');
+            Log::info("[AI-Analyze] thread_id={$threadId} | Respuesta (primeros 300): " . substr($content1, 0, 300));
+
             $questions = $this->parseQuestions($content1);
+            Log::info('[AI-Analyze] Preguntas parseadas: ' . count($questions));
 
             if (empty($questions)) {
+                Log::error('[AI-Analyze] No se pudieron parsear preguntas. Contenido completo: ' . $content1);
                 throw new \RuntimeException('El servidor AI no generó preguntas válidas. Respuesta: ' . substr($content1, 0, 300));
             }
 
-            // 3. Responder cada pregunta en el mismo hilo (la IA ya tiene el contexto del reporte)
+            // 3. Responder cada pregunta en el mismo hilo
             $analisis = [];
-            foreach ($questions as $question) {
+            foreach ($questions as $i => $question) {
+                $num = $i + 1;
+                Log::info("[AI-Analyze] Pregunta {$num}/".count($questions).": " . substr($question, 0, 100));
+
                 $respN = Http::withHeaders(['X-Api-Key' => $aiKey])
                     ->timeout(310)
                     ->post("{$aiUrl}/v1/chat/completions", [
@@ -110,11 +124,14 @@ class MonthlyReportController extends Controller
                         'thread_id' => $threadId,
                     ]);
 
+                Log::info("[AI-Analyze] Respuesta {$num} → HTTP {$respN->status()}");
+
                 if (!$respN->successful()) {
-                    Log::warning("AI question error (thread={$threadId}): " . $respN->body());
+                    Log::warning("[AI-Analyze] Error en pregunta {$num} (thread={$threadId}): " . $respN->body());
                     $answer = 'No se pudo obtener respuesta para esta pregunta.';
                 } else {
                     $answer = trim($respN->json('choices.0.message.content', ''));
+                    Log::info("[AI-Analyze] Respuesta {$num} OK (" . strlen($answer) . " chars)");
                 }
 
                 $analisis[] = [
@@ -122,6 +139,8 @@ class MonthlyReportController extends Controller
                     'respuesta' => $answer,
                 ];
             }
+
+            Log::info('[AI-Analyze] Análisis completado. ' . count($analisis) . ' respuestas generadas.');
 
             return response()->json([
                 'success'     => true,
@@ -132,7 +151,7 @@ class MonthlyReportController extends Controller
             ]);
 
         } catch (\Throwable $e) {
-            Log::error('MonthlyReport analyze error: ' . $e->getMessage());
+            Log::error('[AI-Analyze] ERROR: ' . $e->getMessage() . ' en ' . $e->getFile() . ':' . $e->getLine());
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
     }
