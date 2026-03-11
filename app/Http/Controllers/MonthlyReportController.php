@@ -82,6 +82,8 @@ class MonthlyReportController extends Controller
                   "- stats.despachos = lo que se DESPACHÓ/FACTURÓ realmente (dinero ya enviado al cliente)\n" .
                   "- stats.despachos.value_usd = monto facturado/despachado en USD\n" .
                   "- stats.despachos.value_cop = monto facturado/despachado en COP\n" .
+                  "- stats.pendiente.value_usd = valor PENDIENTE por facturar en USD (= TOTAL ORDENES - Facturado). Esto es lo que muestra el dashboard como 'Pendiente'\n" .
+                  "- stats.pendiente.value_cop = valor PENDIENTE por facturar en COP\n" .
                   "- stats.planeado = OC que tienen fecha de despacho programada dentro del período (subconjunto del total)\n" .
                   "- stats.planeado.value_usd = valor de OC con despacho programado en el período (NO es el total de órdenes)\n" .
                   "- stats.executive_stats[] = estadísticas por ejecutiva (fuente de verdad para preguntas por ejecutiva)\n" .
@@ -843,6 +845,10 @@ PROMPT;
                 'mixed'          => (int) $ordersMixed,
                 'value_usd'      => round($ordersValueUsd, 2),
                 'value_cop'      => round($ordersValueCop, 0),
+            ],
+            'pendiente' => [
+                'value_usd' => round(max(0, $ordersValueUsd - $totalUsd), 2),
+                'value_cop' => round(max(0, $ordersValueCop - $totalCop), 0),
             ],
             'recaudos' => [
                 'total_cop' => round($recaudos, 0),
