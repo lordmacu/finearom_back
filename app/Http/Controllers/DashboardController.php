@@ -1058,6 +1058,9 @@ class DashboardController extends Controller
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
                 SUM(pt.quantity) as dispatched_kilos,
                 SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity
+                ) as dispatched_usd,
+                SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
                     COALESCE(NULLIF(pt.trm, 0), NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
                 ) as dispatched_cop
@@ -1076,6 +1079,7 @@ class DashboardController extends Controller
             $valueCop     = (float) $row->value_cop;
             $kilos        = (float) $row->total_kilos;
             $dispCop      = $dispatch ? (float) $dispatch->dispatched_cop   : 0;
+            $dispUsd      = $dispatch ? (float) $dispatch->dispatched_usd   : 0;
             $dispKilos    = $dispatch ? (float) $dispatch->dispatched_kilos : 0;
 
             $result[] = [
@@ -1084,6 +1088,7 @@ class DashboardController extends Controller
                 'value_usd'             => round((float) $row->value_usd, 2),
                 'value_cop'             => round($valueCop, 0),
                 'total_kilos'           => round($kilos, 2),
+                'dispatched_usd'        => round($dispUsd, 2),
                 'dispatched_cop'        => round($dispCop, 0),
                 'dispatched_kilos'      => round($dispKilos, 2),
                 'participation_pct'     => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0,
