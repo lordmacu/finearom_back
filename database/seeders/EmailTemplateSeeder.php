@@ -400,6 +400,28 @@ class EmailTemplateSeeder extends Seeder
                 'is_active' => true,
             ],
             [
+                'key'     => 'client_visit_summary',
+                'name'    => 'Resumen de Visita / Reunión',
+                'subject' => 'Resumen de reunión — |visit_title|',
+                'title'   => 'Resumen de reunión',
+                'header_content' => '<p>Estimados <strong>|client_name|</strong>, ¡espero se encuentren bien!</p>
+<p>A continuación, compartimos los puntos tratados y acciones acordadas en nuestra reunión del <strong>|fecha|</strong>:</p>
+|commitments_list|
+|notas_section|
+<p>Quedamos atentos ante cualquier inquietud.</p>',
+                'footer_content' => null,
+                'signature' => '<p>Saludos cordiales,<br><strong>|ejecutivo_name|</strong><br>Finearom</p>',
+                'available_variables' => [
+                    'client_name'      => 'Nombre del cliente',
+                    'visit_title'      => 'Título de la visita',
+                    'fecha'            => 'Fecha de la reunión (dd/mm/yyyy)',
+                    'commitments_list' => 'Lista HTML de compromisos',
+                    'notas_section'    => 'Notas adicionales (HTML)',
+                    'ejecutivo_name'   => 'Nombre del ejecutivo',
+                ],
+                'is_active' => true,
+            ],
+            [
                 'key'     => 'project_urgency_alert',
                 'name'    => 'Alerta de Proyecto Urgente',
                 'subject' => '⚠️ Proyecto urgente: |project_name| — vence |fecha_requerida|',

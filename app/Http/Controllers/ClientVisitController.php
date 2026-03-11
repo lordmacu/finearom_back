@@ -6,6 +6,7 @@ use App\Http\Requests\ClientVisit\ClientVisitStoreRequest;
 use App\Http\Requests\ClientVisit\ClientVisitUpdateRequest;
 use App\Models\ClientVisit;
 use App\Models\ClientVisitCommitment;
+use App\Services\EmailTemplateService;
 use App\Services\GoogleCalendarService;
 use App\Services\GoogleGmailService;
 use Carbon\Carbon;
@@ -17,6 +18,7 @@ class ClientVisitController extends Controller
     public function __construct(
         private readonly GoogleCalendarService $calendarService,
         private readonly GoogleGmailService    $gmailService,
+        private readonly EmailTemplateService  $emailTemplateService,
     ) {
         $this->middleware('can:client visit list')->only(['index', 'show']);
         $this->middleware('can:client visit create')->only(['store']);
@@ -195,12 +197,39 @@ class ClientVisitController extends Controller
 
         $clientVisit->load(['client:id,client_name', 'user:id,name', 'commitments']);
 
-        $subject = $request->input('subject', 'Resumen de reunión — ' . $clientVisit->titulo);
-        $body    = $request->input('body');
-        $to      = $request->input('to');
+        $to = $request->input('to');
+
+        // Construir lista de compromisos en HTML
+        $commitments = $clientVisit->commitments ?? collect();
+        if ($commitments->isEmpty()) {
+            $commitmentsHtml = '<p><em>Sin compromisos registrados.</em></p>';
+        } else {
+            $items = $commitments->map(function ($c, $i) {
+                $extras = [];
+                if ($c->responsable) $extras[] = 'Responsable: ' . e($c->responsable);
+                if ($c->fecha_estimada) $extras[] = 'Fecha estimada: ' . \Carbon\Carbon::parse($c->fecha_estimada)->format('d/m/Y');
+                $extra = $extras ? '<br><small style="color:#666;">' . implode(' | ', $extras) . '</small>' : '';
+                return '<li>' . e($c->descripcion) . $extra . '</li>';
+            })->implode('');
+            $commitmentsHtml = '<ol>' . $items . '</ol>';
+        }
+
+        $notasHtml = $clientVisit->notas
+            ? '<p><strong>Notas adicionales:</strong></p><p>' . nl2br(e($clientVisit->notas)) . '</p>'
+            : '';
+
+        $rendered = $this->emailTemplateService->renderTemplate('client_visit_summary', [
+            'client_name'       => $clientVisit->client?->client_name ?? $clientVisit->nombre_cliente ?? 'equipo',
+            'visit_title'       => $clientVisit->titulo,
+            'fecha'             => \Carbon\Carbon::parse($clientVisit->fecha_inicio)->format('d/m/Y'),
+            'commitments_list'  => $commitmentsHtml,
+            'notas_section'     => $notasHtml,
+            'ejecutivo_name'    => $clientVisit->user?->name ?? '',
+        ]);
 
         try {
-            $draft = $this->gmailService->createDraft($userId, $subject, $body, $to ?: null);
+            $htmlBody = view('emails.template', $rendered)->render();
+            $draft    = $this->gmailService->createHtmlDraft($userId, $rendered['subject'], $htmlBody, $to ?: null);
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 500);
         }

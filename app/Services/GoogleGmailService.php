@@ -13,7 +13,7 @@ class GoogleGmailService
     private const SCOPE_GMAIL = 'https://mail.google.com/';
 
     /**
-     * Crea un borrador en el Gmail del usuario.
+     * Crea un borrador en el Gmail del usuario (texto plano).
      *
      * @param int         $userId  ID del usuario con Gmail conectado
      * @param string      $subject Asunto del correo
@@ -62,6 +62,44 @@ class GoogleGmailService
         return in_array(self::SCOPE_GMAIL, $token->scopes);
     }
 
+    /**
+     * Crea un borrador HTML en el Gmail del usuario.
+     *
+     * @param int         $userId   ID del usuario con Gmail conectado
+     * @param string      $subject  Asunto del correo
+     * @param string      $htmlBody Cuerpo en HTML
+     * @param string|null $to       Destinatario (opcional)
+     * @return array{id: string, webLink: string}
+     */
+    public function createHtmlDraft(int $userId, string $subject, string $htmlBody, ?string $to = null): array
+    {
+        $accessToken = $this->getValidToken($userId);
+
+        $mime = $this->buildHtmlMime($subject, $htmlBody, $to);
+        $raw  = rtrim(strtr(base64_encode($mime), '+/', '-_'), '=');
+
+        $response = Http::withToken($accessToken)
+            ->post(self::GMAIL_URL . '/drafts', [
+                'message' => ['raw' => $raw],
+            ]);
+
+        if ($response->failed()) {
+            Log::warning('[GoogleGmail] Error al crear borrador HTML', [
+                'user_id' => $userId,
+                'status'  => $response->status(),
+                'body'    => $response->body(),
+            ]);
+            throw new \RuntimeException('Error al crear borrador en Gmail: ' . $response->body());
+        }
+
+        $draft = $response->json();
+
+        return [
+            'id'      => $draft['id'],
+            'webLink' => 'https://mail.google.com/mail/u/0/#drafts/' . $draft['id'],
+        ];
+    }
+
     // ─── Privados ─────────────────────────────────────────────────────────────
 
     private function buildMime(string $subject, string $body, ?string $to): string
@@ -77,6 +115,21 @@ class GoogleGmailService
         }
 
         return implode("\r\n", $headers) . "\r\n\r\n" . quoted_printable_encode($body);
+    }
+
+    private function buildHtmlMime(string $subject, string $htmlBody, ?string $to): string
+    {
+        $headers = [];
+        $headers[] = 'MIME-Version: 1.0';
+        $headers[] = 'Content-Type: text/html; charset=UTF-8';
+        $headers[] = 'Content-Transfer-Encoding: base64';
+        $headers[] = 'Subject: =?UTF-8?B?' . base64_encode($subject) . '?=';
+
+        if ($to) {
+            $headers[] = 'To: ' . $to;
+        }
+
+        return implode("\r\n", $headers) . "\r\n\r\n" . base64_encode($htmlBody);
     }
 
     private function getValidToken(int $userId): string
