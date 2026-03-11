@@ -22,17 +22,18 @@ class ProjectUrgencyAlertMail extends Mailable
         $service = new EmailTemplateService();
         $fecha   = $project->fecha_requerida?->format('d/m/Y') ?? '—';
 
-        $projectTable = '
-<table>
-    <tbody>
-        <tr><td><strong>Proyecto</strong></td><td>' . e($project->nombre) . '</td></tr>
-        <tr><td><strong>Cliente</strong></td><td>' . e($project->client?->client_name ?? $project->nombre_prospecto ?? '—') . '</td></tr>
-        <tr><td><strong>Tipo</strong></td><td>' . e($project->tipo) . '</td></tr>
-        <tr><td><strong>Fecha requerida</strong></td><td>' . $fecha . '</td></tr>
-        <tr><td><strong>Estado interno</strong></td><td>' . e($project->estado_interno ?? '—') . '</td></tr>
-        <tr><td><strong>Ejecutivo</strong></td><td>' . e($project->ejecutivo ?? '—') . '</td></tr>
-    </tbody>
-</table>';
+        $td    = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;"';
+        $tdKey = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;background-color:#f8f8f8;font-weight:bold;color:#1F2345;white-space:nowrap;"';
+
+        $projectTable = '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
+            . '<tbody>'
+            . '<tr><td ' . $tdKey . '>Proyecto</td><td ' . $td . '>' . e($project->nombre) . '</td></tr>'
+            . '<tr><td ' . $tdKey . '>Cliente</td><td ' . $td . '>' . e($project->client?->client_name ?? $project->nombre_prospecto ?? '—') . '</td></tr>'
+            . '<tr><td ' . $tdKey . '>Tipo</td><td ' . $td . '>' . e($project->tipo) . '</td></tr>'
+            . '<tr><td ' . $tdKey . '>Fecha requerida</td><td ' . $td . '>' . $fecha . '</td></tr>'
+            . '<tr><td ' . $tdKey . '>Estado interno</td><td ' . $td . '>' . e($project->estado_interno ?? '—') . '</td></tr>'
+            . '<tr><td ' . $tdKey . '>Ejecutivo</td><td ' . $td . '>' . e($project->ejecutivo ?? '—') . '</td></tr>'
+            . '</tbody></table>';
 
         $this->rendered = $service->renderTemplate('project_urgency_alert', [
             'project_name'    => $project->nombre,

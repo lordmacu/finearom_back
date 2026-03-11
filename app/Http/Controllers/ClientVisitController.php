@@ -202,16 +202,18 @@ class ClientVisitController extends Controller
         // Construir lista de compromisos en HTML
         $commitments = $clientVisit->commitments ?? collect();
         if ($commitments->isEmpty()) {
-            $commitmentsHtml = '<p><em>Sin compromisos registrados.</em></p>';
+            $commitmentsHtml = '<p style="color:#666666;font-style:italic;font-size:13px;">Sin compromisos registrados.</p>';
         } else {
-            $items = $commitments->map(function ($c, $i) {
+            $items = $commitments->map(function ($c) {
                 $extras = [];
                 if ($c->responsable) $extras[] = 'Responsable: ' . e($c->responsable);
                 if ($c->fecha_estimada) $extras[] = 'Fecha estimada: ' . \Carbon\Carbon::parse($c->fecha_estimada)->format('d/m/Y');
-                $extra = $extras ? '<br><small style="color:#666;">' . implode(' | ', $extras) . '</small>' : '';
-                return '<li>' . e($c->descripcion) . $extra . '</li>';
+                $extra = $extras
+                    ? '<br><span style="font-size:11px;color:#666666;">' . implode(' &nbsp;|&nbsp; ', $extras) . '</span>'
+                    : '';
+                return '<li style="margin-bottom:6px;font-size:13px;">' . e($c->descripcion) . $extra . '</li>';
             })->implode('');
-            $commitmentsHtml = '<ol>' . $items . '</ol>';
+            $commitmentsHtml = '<ol style="padding-left:20px;margin:8px 0;">' . $items . '</ol>';
         }
 
         $notasHtml = $clientVisit->notas

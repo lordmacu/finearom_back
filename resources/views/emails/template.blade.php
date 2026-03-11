@@ -4,116 +4,68 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $subject }}</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            color: #333;
-            line-height: 1.6;
-            margin: 0;
-            padding: 20px;
-            max-width: 960px;
-            width: 100%;
-            box-sizing: border-box;
-            font-size: 13px;
-        }
-        .content-wrapper {
-            max-width: 900px;
-            margin: 0 auto;
-        }
-        header {
-            text-align: left;
-            margin-bottom: 20px;
-        }
-        .logo {
-            width: 100px;
-            height: auto;
-        }
-        .email-title-container {
-            margin-bottom: 60px;
-            padding: 0;
-            display: block;
-        }
-        .email-title {
-            display: inline-block;
-            font-weight: bold;
-            font-size: 36px;
-            margin: 0;
-            padding: 0 10px 0 0;
-            background: linear-gradient(to top, #ebebeb 40%, transparent 40%);
-            border-radius: 0 5px 5px 0;
-            color: #1F2345;
-            line-height: 1.2;
-        }
-        table {
-            width: 100%;
-            max-width: 900px;
-            border-collapse: collapse;
-            margin: 20px 0;
-            border: 1px solid #ddd;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: center;
-        }
-        th {
-            font-weight: bold;
-            background-color: #f4f4f4;
-        }
-        footer {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #d6d8d8;
-            font-size: 14px;
-        }
-        a {
-            color: #1F2345 !important;
-            text-decoration: underline;
-        }
-        /* Estilos específicos de cartera para colores */
-        strong {
-            color: #1F2345;
-        }
-    </style>
+    <!--[if mso]>
+    <noscript>
+        <xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
+    </noscript>
+    <![endif]-->
 </head>
-<body>
-    <header>
-        <img class="logo" src="https://ordenes.finearom.co/images/logo.png" alt="Finearom Logo">
-    </header>
+<body style="font-family:Arial,sans-serif;color:#333333;line-height:1.6;margin:0;padding:20px;font-size:13px;background-color:#ffffff;">
 
-    <main class="content-wrapper">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:700px;margin:0 auto;">
+        <tr>
+            <td style="padding-bottom:20px;border-bottom:2px solid #1F2345;">
+                <img src="https://ordenes.finearom.co/images/logo.png"
+                     alt="Finearom Logo"
+                     width="100"
+                     height="auto"
+                     style="width:100px;height:auto;display:block;border:0;">
+            </td>
+        </tr>
+
         @if(!empty($title))
-            <div class="email-title-container">
-                <h1 class="email-title">{{ $title }}</h1>
-            </div>
+        <tr>
+            <td style="padding:30px 0 20px 0;">
+                <h1 style="display:inline;font-weight:bold;font-size:32px;margin:0;padding:2px 10px 2px 0;color:#1F2345;line-height:1.2;border-bottom:4px solid #ebebeb;">{{ $title }}</h1>
+            </td>
+        </tr>
         @endif
 
         @if(!empty($plant_observations ?? ''))
-            <div>
+        <tr>
+            <td style="padding:10px 0;">
                 {!! $plant_observations !!}
-            </div>
+            </td>
+        </tr>
         @endif
 
         @if(!empty($header_content))
-            <div>
+        <tr>
+            <td style="padding:10px 0;">
                 {!! $header_content !!}
-            </div>
+            </td>
+        </tr>
         @endif
 
         @if(!empty($footer_content))
-            <div>
+        <tr>
+            <td style="padding:10px 0;">
                 {!! $footer_content !!}
-            </div>
+            </td>
+        </tr>
         @endif
-    </main>
 
-    <footer>
-        @if(!empty($signature))
-            <div>
-                {!! $signature !!}
-            </div>
-        @endif
-        <p><small>&copy; {{ date('Y') }} Finearom. Todos los derechos reservados.</small></p>
-    </footer>
+        <tr>
+            <td style="padding-top:30px;border-top:1px solid #d6d8d8;font-size:13px;">
+                @if(!empty($signature))
+                    <div style="margin-bottom:16px;">
+                        {!! $signature !!}
+                    </div>
+                @endif
+                <p style="margin:0;color:#999999;font-size:11px;">&copy; {{ date('Y') }} Finearom. Todos los derechos reservados.</p>
+            </td>
+        </tr>
+    </table>
+
 </body>
 </html>

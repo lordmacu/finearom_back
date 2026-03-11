@@ -25,16 +25,17 @@ class ProjectQuotationMail extends Mailable
         $service    = new EmailTemplateService();
         $clientName = $project->client?->client_name ?? $project->nombre_prospecto ?? 'cliente';
 
-        $projectTable = '
-<table>
-    <tbody>
-        <tr><td><strong>Proyecto</strong></td><td>' . e($project->nombre) . '</td></tr>
-        <tr><td><strong>Tipo</strong></td><td>' . e($project->tipo) . '</td></tr>'
-        . ($project->tipo_producto ? '<tr><td><strong>Tipo de producto</strong></td><td>' . e($project->tipo_producto) . '</td></tr>' : '')
-        . ($project->ejecutivo ? '<tr><td><strong>Ejecutivo</strong></td><td>' . e($project->ejecutivo) . '</td></tr>' : '') . '
-        <tr><td><strong>Versión cotización</strong></td><td>' . $version . '</td></tr>
-    </tbody>
-</table>';
+        $td    = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;"';
+        $tdKey = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;background-color:#f8f8f8;font-weight:bold;color:#1F2345;white-space:nowrap;"';
+
+        $projectTable = '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
+            . '<tbody>'
+            . '<tr><td ' . $tdKey . '>Proyecto</td><td ' . $td . '>' . e($project->nombre) . '</td></tr>'
+            . '<tr><td ' . $tdKey . '>Tipo</td><td ' . $td . '>' . e($project->tipo) . '</td></tr>'
+            . ($project->tipo_producto ? '<tr><td ' . $tdKey . '>Tipo de producto</td><td ' . $td . '>' . e($project->tipo_producto) . '</td></tr>' : '')
+            . ($project->ejecutivo ? '<tr><td ' . $tdKey . '>Ejecutivo</td><td ' . $td . '>' . e($project->ejecutivo) . '</td></tr>' : '')
+            . '<tr><td ' . $tdKey . '>Versión cotización</td><td ' . $td . '>' . $version . '</td></tr>'
+            . '</tbody></table>';
 
         $this->rendered = $service->renderTemplate('project_quotation', [
             'client_name'   => $clientName,
