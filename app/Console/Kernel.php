@@ -23,9 +23,9 @@ class Kernel extends ConsoleKernel
                 \Log::error('Error al obtener TRM diaria');
             });
 
-        // ⭐ Generar estadísticas de órdenes - 6:00 AM (antes del TRM)
+        // ⭐ Generar estadísticas de órdenes - 10:00 AM (después del TRM que llega a las 9AM)
         $schedule->command('stats:daily-dispatch')
-            ->dailyAt('06:00')
+            ->dailyAt('10:00')
             ->timezone('America/Bogota')
             ->onSuccess(function () {
                 \Log::info('Estadísticas diarias generadas exitosamente');

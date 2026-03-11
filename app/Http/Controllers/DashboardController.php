@@ -349,6 +349,7 @@ class DashboardController extends Controller
                     'new_win' => $additionalMetrics['orders_new_win'],
                     'pending' => $additionalMetrics['orders_pending'],
                     'processing' => $additionalMetrics['orders_processing'],
+                    'parcial_status' => $additionalMetrics['orders_parcial_status'],
                     'completed' => $additionalMetrics['orders_completed'],
                     'value_usd' => $additionalMetrics['total_orders_value_usd'],
                     'value_cop' => $additionalMetrics['total_orders_value_cop'],
@@ -385,6 +386,12 @@ class DashboardController extends Controller
 
                 // ✨ NUEVO: Extended Stats (KPIs avanzados)
                 'extended_stats' => $extendedStatsAggregated,
+
+                // ✨ NUEVO: Métricas adicionales de valor
+                'top_products' => $this->calculateTopProducts($startDate, $endDate),
+                'stale_orders' => $this->calculateStaleOrders(),
+                'collection_coverage' => $this->calculateCollectionCoverage($startDate, $endDate),
+                'trm_variation' => $this->calculateTrmVariation($startDate, $endDate),
 
                 // Para debug/análisis avanzado (opcional)
                 'stats' => $dailyStats, // Datos día por día para gráficos futuros
@@ -459,6 +466,7 @@ class DashboardController extends Controller
             'orders_new_win' => $dailyStats->sum('orders_new_win'),
             'orders_pending' => $dailyStats->sum('orders_pending'),
             'orders_processing' => $dailyStats->sum('orders_processing'),
+            'orders_parcial_status' => $dailyStats->sum('orders_parcial_status'),
             'orders_completed' => $dailyStats->sum('orders_completed'),
             'total_orders_value_usd' => $dailyStats->sum('total_orders_value_usd'),
             'total_orders_value_cop' => $dailyStats->sum('total_orders_value_cop'),
@@ -711,14 +719,16 @@ class DashboardController extends Controller
 
         foreach ($allStats as $stat) {
             $totalCount += $stat['new_accounts']['count'] ?? 0;
-            if (isset($stat['new_accounts']['win_rate_pct']) && $stat['new_accounts']['win_rate_pct'] !== null) {
-                $winRates[] = $stat['new_accounts']['win_rate_pct'];
+            // Compatibilidad: soportar tanto 'new_win_orders_rate' (nuevo) como 'win_rate_pct' (legacy)
+            $rate = $stat['new_accounts']['new_win_orders_rate'] ?? $stat['new_accounts']['win_rate_pct'] ?? null;
+            if ($rate !== null) {
+                $winRates[] = $rate;
             }
         }
 
         return [
             'count' => $totalCount,
-            'win_rate_pct' => !empty($winRates) ? round(array_sum($winRates) / count($winRates), 2) : null,
+            'new_win_orders_rate' => !empty($winRates) ? round(array_sum($winRates) / count($winRates), 2) : null,
         ];
     }
 
@@ -757,20 +767,27 @@ class DashboardController extends Controller
 
     /**
      * Agregar Billing Projection de múltiples días
+     * Toma el ÚLTIMO valor no-nulo del rango (snapshot más reciente del pipeline pendiente).
+     * Sumar los valores de cada día inflaría el número porque el mismo pipeline aparece
+     * en el snapshot de cada día hasta que se despacha.
      */
     private function aggregateBillingProjection(array $allStats): array
     {
-        $totalUsd = 0;
-        $totalCop = 0;
+        $lastUsd = null;
+        $lastCop = null;
 
         foreach ($allStats as $stat) {
-            $totalUsd += $stat['billing_projection']['usd'] ?? 0;
-            $totalCop += $stat['billing_projection']['cop'] ?? 0;
+            if (!empty($stat['billing_projection']['usd'])) {
+                $lastUsd = $stat['billing_projection']['usd'];
+            }
+            if (!empty($stat['billing_projection']['cop'])) {
+                $lastCop = $stat['billing_projection']['cop'];
+            }
         }
 
         return [
-            'usd' => $totalUsd,
-            'cop' => $totalCop,
+            'usd' => $lastUsd,
+            'cop' => $lastCop,
         ];
     }
 
@@ -801,6 +818,133 @@ class DashboardController extends Controller
     }
 
     /**
+     * Top 10 productos más despachados en el período (por unidades, solo comerciales)
+     */
+    private function calculateTopProducts(string $startDate, string $endDate): array
+    {
+        try {
+            return DB::table('partials')
+                ->join('purchase_order_product as pop', 'partials.product_order_id', '=', 'pop.id')
+                ->join('products as p', 'pop.product_id', '=', 'p.id')
+                ->where('partials.type', 'real')
+                ->whereNotNull('partials.dispatch_date')
+                ->whereBetween('partials.dispatch_date', [$startDate, $endDate])
+                ->where('pop.muestra', 0)
+                ->groupBy('p.id', 'p.product_name', 'p.code')
+                ->selectRaw('p.id, p.product_name as name, p.code as reference, SUM(partials.quantity) as total_units, COUNT(DISTINCT pop.purchase_order_id) as orders_count')
+                ->orderByDesc('total_units')
+                ->limit(10)
+                ->get()
+                ->toArray();
+        } catch (\Exception $e) {
+            Log::error('Error calculating top products: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Órdenes atrapadas en "processing" por más de 7 días sin avanzar
+     */
+    private function calculateStaleOrders(): array
+    {
+        try {
+            $cutoff = Carbon::now()->subDays(7)->toDateString();
+
+            $stale = DB::table('purchase_orders')
+                ->where('status', 'processing')
+                ->where('order_creation_date', '<=', $cutoff)
+                ->selectRaw('COUNT(*) as count, MIN(order_creation_date) as oldest_date')
+                ->first();
+
+            return [
+                'count' => (int) ($stale->count ?? 0),
+                'oldest_date' => $stale->oldest_date ?? null,
+            ];
+        } catch (\Exception $e) {
+            Log::error('Error calculating stale orders: ' . $e->getMessage());
+            return ['count' => 0, 'oldest_date' => null];
+        }
+    }
+
+    /**
+     * Tasa de cobertura de cartera: Recaudos del período / Saldo total cartera
+     */
+    private function calculateCollectionCoverage(string $startDate, string $endDate): array
+    {
+        try {
+            $recaudos = DB::table('recaudos')
+                ->whereBetween('fecha_recaudo', [$startDate . ' 00:00:00', $endDate . ' 23:59:59'])
+                ->whereNotNull('fecha_recaudo')
+                ->where('valor_cancelado', '>', 0)
+                ->sum('valor_cancelado');
+
+            // Saldo total de cartera más reciente (última fecha_cartera disponible)
+            $latestDate = DB::table('cartera')->max('fecha_cartera');
+            $saldoTotal = 0;
+            if ($latestDate) {
+                $saldoTotal = DB::table('cartera')
+                    ->where('fecha_cartera', $latestDate)
+                    ->sum('saldo_contable');
+            }
+
+            $coverageRate = ($saldoTotal > 0)
+                ? round(($recaudos / $saldoTotal) * 100, 2)
+                : null;
+
+            return [
+                'recaudos_cop' => round($recaudos, 0),
+                'saldo_cartera_cop' => round($saldoTotal, 0),
+                'coverage_rate_pct' => $coverageRate,
+            ];
+        } catch (\Exception $e) {
+            Log::error('Error calculating collection coverage: ' . $e->getMessage());
+            return ['recaudos_cop' => 0, 'saldo_cartera_cop' => 0, 'coverage_rate_pct' => null];
+        }
+    }
+
+    /**
+     * Variación de TRM: promedio del período actual vs período anterior equivalente
+     */
+    private function calculateTrmVariation(string $startDate, string $endDate): array
+    {
+        try {
+            $start = Carbon::parse($startDate);
+            $end = Carbon::parse($endDate);
+            $days = $start->diffInDays($end) + 1;
+
+            // Período anterior equivalente
+            $prevEnd = $start->copy()->subDay()->toDateString();
+            $prevStart = Carbon::parse($prevEnd)->subDays($days - 1)->toDateString();
+
+            $currentAvg = DB::table('trm_daily')
+                ->whereBetween('date', [$startDate, $endDate])
+                ->avg('value');
+
+            $previousAvg = DB::table('trm_daily')
+                ->whereBetween('date', [$prevStart, $prevEnd])
+                ->avg('value');
+
+            $variation = null;
+            $variationPct = null;
+            if ($currentAvg && $previousAvg && $previousAvg > 0) {
+                $variation = round($currentAvg - $previousAvg, 2);
+                $variationPct = round(($variation / $previousAvg) * 100, 2);
+            }
+
+            return [
+                'current_avg' => $currentAvg ? round($currentAvg, 2) : null,
+                'previous_avg' => $previousAvg ? round($previousAvg, 2) : null,
+                'variation' => $variation,
+                'variation_pct' => $variationPct,
+                'prev_period' => ['start' => $prevStart, 'end' => $prevEnd],
+            ];
+        } catch (\Exception $e) {
+            Log::error('Error calculating TRM variation: ' . $e->getMessage());
+            return ['current_avg' => null, 'previous_avg' => null, 'variation' => null, 'variation_pct' => null, 'prev_period' => null];
+        }
+    }
+
+    /**
      * Return empty extended stats structure
      */
     private function getEmptyExtendedStats(): array
@@ -815,7 +959,7 @@ class DashboardController extends Controller
             ],
             'cartera_vs_despachos' => [],
             'executive_completion' => [],
-            'new_accounts' => ['count' => 0, 'win_rate_pct' => null],
+            'new_accounts' => ['count' => 0, 'new_win_orders_rate' => null],
             'recaudos_vs_dispatch' => [],
             'billing_projection' => ['usd' => null, 'cop' => null],
             'alerts' => [],
@@ -840,6 +984,7 @@ class DashboardController extends Controller
             'orders_new_win' => 0,
             'orders_pending' => 0,
             'orders_processing' => 0,
+            'orders_parcial_status' => 0,
             'orders_completed' => 0,
             'total_orders_value_usd' => 0,
             'total_orders_value_cop' => 0,

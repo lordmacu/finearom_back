@@ -789,6 +789,8 @@ class GenerateOrderStatistics extends Command
             ->having('first_date', '=', $from->toDateString())
             ->get()
             ->count();
+        // new_win_orders_rate: % de órdenes marcadas como "new win" sobre el total de órdenes creadas.
+        // Nota: NO es la tasa de conversión de nuevas cuentas (esa requeriría cruzar con despachos).
         $winRatePct = ($orderStats['total_orders_created'] ?? 0) > 0
             ? round((($orderStats['orders_new_win'] ?? 0) / $orderStats['total_orders_created']) * 100, 2)
             : null;
@@ -920,7 +922,7 @@ class GenerateOrderStatistics extends Command
             'executive_completion' => $execStats,
             'new_accounts' => [
                 'count' => $newAccountsCount,
-                'win_rate_pct' => $winRatePct,
+                'new_win_orders_rate' => $winRatePct, // % de órdenes new_win sobre total creadas
             ],
             'recaudos_vs_dispatch' => $recaudosVsDispatch,
             'billing_projection' => [

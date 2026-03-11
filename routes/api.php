@@ -95,6 +95,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/export-planned-stats', [DashboardController::class, 'exportPlannedStats']);
     Route::get('/dashboard/client-stats', [DashboardController::class, 'clientQuickStats']);
 
+
     // Cuenta del usuario autenticado
     Route::get('/account', [AccountController::class, 'show']);
 
@@ -415,6 +416,10 @@ use App\Http\Controllers\SiigoSyncController;
 
 // Login propio para el middleware (no requiere auth)
 Route::post('/siigo/login', [SiigoSyncController::class, 'login']);
+
+// Reporte mensual JSON y análisis IA — públicos (sin auth)
+Route::get('/dashboard/monthly-report', [\App\Http\Controllers\MonthlyReportController::class, 'index']);
+Route::get('/dashboard/monthly-report/analyze', [\App\Http\Controllers\MonthlyReportController::class, 'analyze']);
 
 // Webhook (no requiere auth Sanctum - usa HMAC signature)
 Route::post('/siigo/webhook', [SiigoSyncController::class, 'webhook']);
