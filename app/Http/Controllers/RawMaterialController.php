@@ -47,7 +47,8 @@ class RawMaterialController extends Controller
               }])
               ->orderBy('nombre');
 
-        $materials = $query->paginate(30);
+        $perPage = min((int) $request->input('per_page', 30), 1000);
+        $materials = $query->paginate($perPage);
 
         return response()->json([
             'data'    => $materials,
