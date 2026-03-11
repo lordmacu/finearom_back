@@ -84,7 +84,15 @@ class MonthlyReportController extends Controller
                   "- stats.despachos.value_cop = monto facturado/despachado en COP\n" .
                   "- stats.planeado = OC que tienen fecha de despacho programada dentro del período (subconjunto del total)\n" .
                   "- stats.planeado.value_usd = valor de OC con despacho programado en el período (NO es el total de órdenes)\n" .
-                  "- ordenes[].productos = líneas de producto de cada orden\n" .
+                  "- stats.executive_stats[] = estadísticas por ejecutiva (fuente de verdad para preguntas por ejecutiva)\n" .
+                  "- stats.executive_stats[].value_cop = valor total de OC CREADAS por la ejecutiva en COP\n" .
+                  "- stats.executive_stats[].value_usd = valor total de OC CREADAS por la ejecutiva en USD\n" .
+                  "- stats.executive_stats[].total_kilos = kilos totales de OC CREADAS por la ejecutiva\n" .
+                  "- stats.executive_stats[].total_orders = número de órdenes creadas por la ejecutiva\n" .
+                  "- stats.executive_stats[].dispatched_cop = lo que realmente despachó/facturó la ejecutiva en COP\n" .
+                  "- stats.executive_stats[].dispatched_kilos = kilos realmente despachados por la ejecutiva\n" .
+                  "- IMPORTANTE: cuando pregunten por OC, valor, kilos o participación de una ejecutiva, SIEMPRE usar stats.executive_stats, NO sumar desde ordenes[]\n" .
+                  "- ordenes[] = solo contiene órdenes ya despachadas (completed/parcial_status), NO todas las OC\n" .
                   "- ordenes[].status = completed (despachada completa) | parcial_status (despacho parcial)\n" .
                   "- muestra=1 en productos = muestra gratis (precio 0, no cuenta como venta)\n" .
                   "- quantity = kilos\n\n" .
@@ -853,7 +861,88 @@ PROMPT;
                 'count'       => (int) ($stale->count ?? 0),
                 'oldest_date' => $stale->oldest_date ?? null,
             ],
-            'top_productos' => $topProducts,
+            'top_productos'  => $topProducts,
+            'executive_stats' => $this->buildExecutiveStats($startDate, $endDate),
         ];
+    }
+
+    /**
+     * Estadísticas por ejecutiva: OC creadas + despachos reales (misma lógica que DashboardController)
+     */
+    private function buildExecutiveStats(string $startDate, string $endDate): array
+    {
+        $ordersQuery = DB::table('purchase_orders as po')
+            ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->join('purchase_order_product as pop', 'pop.purchase_order_id', '=', 'po.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
+            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->where('pop.muestra', '=', 0)
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COUNT(DISTINCT po.id) as total_orders,
+                SUM(pop.quantity) as total_kilos,
+                SUM(
+                    CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END * pop.quantity
+                ) as value_usd,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
+                    COALESCE(NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
+                ) as value_cop
+            ")
+            ->groupBy('c.executive')
+            ->get();
+
+        $dispatchQuery = DB::table('partials as pt')
+            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
+            ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+            ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
+            ->where('pt.type', 'real')
+            ->whereNotNull('pt.dispatch_date')
+            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
+            ->where('pop.muestra', '=', 0)
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                SUM(pt.quantity) as dispatched_kilos,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
+                    COALESCE(NULLIF(pt.trm, 0), NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
+                ) as dispatched_cop
+            ")
+            ->groupBy('c.executive')
+            ->get()
+            ->keyBy('executive');
+
+        $totalValueCop = $ordersQuery->sum('value_cop');
+        $totalKilos    = $ordersQuery->sum('total_kilos');
+
+        $result = [];
+        foreach ($ordersQuery as $row) {
+            $exec      = $row->executive;
+            $dispatch  = $dispatchQuery[$exec] ?? null;
+            $valueCop  = (float) $row->value_cop;
+            $kilos     = (float) $row->total_kilos;
+            $dispCop   = $dispatch ? (float) $dispatch->dispatched_cop   : 0;
+            $dispKilos = $dispatch ? (float) $dispatch->dispatched_kilos : 0;
+
+            $result[] = [
+                'executive'            => $exec,
+                'total_orders'         => (int) $row->total_orders,
+                'value_usd'            => round((float) $row->value_usd, 2),
+                'value_cop'            => round($valueCop, 0),
+                'total_kilos'          => round($kilos, 2),
+                'dispatched_cop'       => round($dispCop, 0),
+                'dispatched_kilos'     => round($dispKilos, 2),
+                'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0,
+                'compliance_cop_pct'   => $valueCop  > 0 ? round($dispCop   / $valueCop  * 100, 1) : 0,
+                'compliance_kilos_pct' => $kilos     > 0 ? round($dispKilos / $kilos      * 100, 1) : 0,
+            ];
+        }
+
+        usort($result, fn ($a, $b) => $b['value_cop'] <=> $a['value_cop']);
+
+        return $result;
     }
 }
