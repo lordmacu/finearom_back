@@ -88,6 +88,15 @@ class ProjectDetailController extends Controller
     // ─── Variantes (Desarrollo) ───────────────────────────────────────────────
     public function storeVariant(ProjectVariantRequest $request, Project $project): JsonResponse
     {
+        if ($project->max_variantes !== null) {
+            $currentCount = $project->variants()->count();
+            if ($currentCount >= $project->max_variantes) {
+                return response()->json([
+                    'message' => "Límite alcanzado: este proyecto permite máximo {$project->max_variantes} variante(s).",
+                ], 422);
+            }
+        }
+
         $variant = $project->variants()->create($request->validated());
 
         return response()->json(['success' => true, 'data' => $variant, 'message' => 'Variante creada'], 201);

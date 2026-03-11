@@ -36,6 +36,7 @@ class ProjectStoreRequest extends FormRequest
             'trm'             => 'nullable|numeric|min:0',
             'factor'                       => 'nullable|numeric|min:0',
             'costo_perfumacion_especifico' => 'nullable|numeric|min:0',
+            'max_variantes'                => 'nullable|integer|min:1|max:50',
             'base_cliente'    => 'nullable|boolean',
             'proactivo'       => 'nullable|boolean',
             'homologacion'    => 'nullable|boolean',
