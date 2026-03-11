@@ -92,8 +92,9 @@ class MonthlyReportController extends Controller
                   "- stats.executive_stats[].dispatched_cop = lo que realmente despachó/facturó la ejecutiva en COP\n" .
                   "- stats.executive_stats[].dispatched_kilos = kilos realmente despachados por la ejecutiva\n" .
                   "- IMPORTANTE: cuando pregunten por OC, valor, kilos o participación de una ejecutiva, SIEMPRE usar stats.executive_stats, NO sumar desde ordenes[]\n" .
-                  "- ordenes[] = solo contiene órdenes ya despachadas (completed/parcial_status), NO todas las OC\n" .
-                  "- ordenes[].status = completed (despachada completa) | parcial_status (despacho parcial)\n" .
+                  "- ordenes[] = TODAS las OC creadas en el período (todos los estados)\n" .
+                  "- ordenes[].status = pending (sin despachar) | processing (en proceso) | parcial_status (despacho parcial) | completed (despachada completa)\n" .
+                  "- Para saber cuáles fueron despachadas/facturadas: filtrar ordenes[] donde status = completed o parcial_status\n" .
                   "- muestra=1 en productos = muestra gratis (precio 0, no cuenta como venta)\n" .
                   "- quantity = kilos\n\n" .
 
@@ -497,15 +498,15 @@ PROMPT;
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Construye el array de órdenes con los productos (partials reales) embebidos.
-     * Misma lógica que GoogleSheetsService::appendOrderRow.
+     * Construye el array de órdenes CREADAS en el período (todos los estados).
+     * Las órdenes despachadas tienen status = completed | parcial_status.
+     * Las no despachadas tienen status = pending | processing.
      */
     private function buildOrdenes(string $startDate, string $endDate): array
     {
         $orders = PurchaseOrder::with(['client', 'branchOffice', 'project'])
-            ->whereIn('status', ['completed', 'parcial_status'])
-            ->whereBetween('dispatch_date', [$startDate, $endDate])
-            ->orderBy('dispatch_date')
+            ->whereBetween('order_creation_date', [$startDate, $endDate])
+            ->orderBy('order_creation_date')
             ->get();
 
         return $orders->map(function (PurchaseOrder $order) {
