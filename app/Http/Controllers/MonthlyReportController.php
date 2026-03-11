@@ -113,6 +113,7 @@ class MonthlyReportController extends Controller
                   "- Para saber cuáles están pendientes: filtrar ordenes_mes[] donde status = pending o processing\n" .
                   "- muestra=1 en productos = muestra gratis (precio 0, no cuenta como venta)\n" .
                   "- quantity = kilos (en ordenes[].productos[])\n" .
+                  "- stats.despachos.total_kilos_dispatched = TOTAL de kilos despachados en el período (fuente de verdad para preguntas de kilos totales)\n" .
                   "- stats.despachos.products_count = número de LÍNEAS de producto despachadas (items distintos), NO es kilos\n" .
                   "- stats.top_productos[].total_units = KILOS despachados (no es conteo de unidades)\n" .
                   "- stats.top_productos[].orders_count = número de órdenes en que apareció el producto\n" .
@@ -693,6 +694,15 @@ PROMPT;
         $totalOrders   = $dailyStats->sum('dispatched_orders_count');
         $daysCount     = $dailyStats->count();
 
+        // Total kilos dispatched (real partials in period, excluding samples)
+        $totalKilosDispatched = (float) DB::table('partials as pt')
+            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
+            ->where('pt.type', 'real')
+            ->whereNotNull('pt.dispatch_date')
+            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
+            ->where('pop.muestra', 0)
+            ->sum('pt.quantity');
+
         // Real-time planned stats
         $plannedUsd = 0;
         $plannedCop = 0;
@@ -896,12 +906,13 @@ PROMPT;
                 'days_count' => $daysCount,
             ],
             'despachos' => [
-                'value_usd'      => round($totalUsd, 2),
-                'value_cop'      => round($totalCop, 0),
-                'products_count' => (int) $totalProducts,
-                'orders_count'   => (int) $totalOrders,
-                'daily_avg_usd'  => $daysCount > 0 ? round($totalUsd / $daysCount, 2) : 0,
-                'daily_avg_cop'  => $daysCount > 0 ? round($totalCop / $daysCount, 0) : 0,
+                'value_usd'              => round($totalUsd, 2),
+                'value_cop'              => round($totalCop, 0),
+                'total_kilos_dispatched' => round($totalKilosDispatched, 2),
+                'products_count'         => (int) $totalProducts,
+                'orders_count'           => (int) $totalOrders,
+                'daily_avg_usd'          => $daysCount > 0 ? round($totalUsd / $daysCount, 2) : 0,
+                'daily_avg_cop'          => $daysCount > 0 ? round($totalCop / $daysCount, 0) : 0,
             ],
             'planeado' => [
                 'value_usd'    => round($plannedUsd, 2),
@@ -957,6 +968,13 @@ PROMPT;
      */
     private function buildExecutiveStats(string $startDate, string $endDate): array
     {
+        // Normalize: if executive is an email, extract readable name
+        $normalizeExec = function (string $exec): string {
+            if (!str_contains($exec, '@')) return $exec;
+            $prefix = explode('@', $exec)[0];
+            return ucwords(str_replace(['.', '_', '-'], ' ', $prefix));
+        };
+
         $ordersQuery = DB::table('purchase_orders as po')
             ->join('clients as c', 'po.client_id', '=', 'c.id')
             ->join('purchase_order_product as pop', 'pop.purchase_order_id', '=', 'po.id')
@@ -999,34 +1017,56 @@ PROMPT;
                 ) as dispatched_cop
             ")
             ->groupBy('c.executive')
-            ->get()
-            ->keyBy('executive');
+            ->get();
 
-        $totalValueCop = $ordersQuery->sum('value_cop');
-        $totalKilos    = $ordersQuery->sum('total_kilos');
+        // Merge orders by normalized executive name
+        $merged = [];
+        foreach ($ordersQuery as $row) {
+            $exec = $normalizeExec($row->executive);
+            if (!isset($merged[$exec])) {
+                $merged[$exec] = ['executive' => $exec, 'total_orders' => 0, 'total_kilos' => 0.0, 'value_usd' => 0.0, 'value_cop' => 0.0];
+            }
+            $merged[$exec]['total_orders'] += (int)   $row->total_orders;
+            $merged[$exec]['total_kilos']  += (float) $row->total_kilos;
+            $merged[$exec]['value_usd']    += (float) $row->value_usd;
+            $merged[$exec]['value_cop']    += (float) $row->value_cop;
+        }
+
+        // Merge dispatches by normalized executive name
+        $dispatchMerged = [];
+        foreach ($dispatchQuery as $row) {
+            $exec = $normalizeExec($row->executive);
+            if (!isset($dispatchMerged[$exec])) {
+                $dispatchMerged[$exec] = ['dispatched_orders' => 0, 'dispatched_kilos' => 0.0, 'dispatched_cop' => 0.0];
+            }
+            $dispatchMerged[$exec]['dispatched_orders'] += (int)   $row->dispatched_orders;
+            $dispatchMerged[$exec]['dispatched_kilos']  += (float) $row->dispatched_kilos;
+            $dispatchMerged[$exec]['dispatched_cop']    += (float) $row->dispatched_cop;
+        }
+
+        $totalValueCop = array_sum(array_column($merged, 'value_cop'));
 
         $result = [];
-        foreach ($ordersQuery as $row) {
-            $exec      = $row->executive;
-            $dispatch  = $dispatchQuery[$exec] ?? null;
-            $valueCop  = (float) $row->value_cop;
-            $kilos     = (float) $row->total_kilos;
-            $dispCop    = $dispatch ? (float) $dispatch->dispatched_cop    : 0;
-            $dispKilos  = $dispatch ? (float) $dispatch->dispatched_kilos : 0;
-            $dispOrders = $dispatch ? (int)   $dispatch->dispatched_orders : 0;
+        foreach ($merged as $exec => $row) {
+            $dispatch  = $dispatchMerged[$exec] ?? null;
+            $valueCop  = $row['value_cop'];
+            $kilos     = $row['total_kilos'];
+            $dispCop    = $dispatch ? $dispatch['dispatched_cop']    : 0;
+            $dispKilos  = $dispatch ? $dispatch['dispatched_kilos']  : 0;
+            $dispOrders = $dispatch ? $dispatch['dispatched_orders'] : 0;
 
             $result[] = [
                 'executive'            => $exec,
-                'total_orders'         => (int) $row->total_orders,
-                'value_usd'            => round((float) $row->value_usd, 2),
+                'total_orders'         => $row['total_orders'],
+                'value_usd'            => round($row['value_usd'], 2),
                 'value_cop'            => round($valueCop, 0),
                 'total_kilos'          => round($kilos, 2),
                 'dispatched_orders'    => $dispOrders,
                 'dispatched_cop'       => round($dispCop, 0),
                 'dispatched_kilos'     => round($dispKilos, 2),
                 'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0,
-                'compliance_cop_pct'   => $valueCop  > 0 ? round($dispCop   / $valueCop  * 100, 1) : 0,
-                'compliance_kilos_pct' => $kilos     > 0 ? round($dispKilos / $kilos      * 100, 1) : 0,
+                'compliance_cop_pct'   => $valueCop > 0 ? round($dispCop   / $valueCop * 100, 1) : 0,
+                'compliance_kilos_pct' => $kilos    > 0 ? round($dispKilos / $kilos    * 100, 1) : 0,
             ];
         }
 
