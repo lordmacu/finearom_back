@@ -16,10 +16,14 @@ class FinearomReference extends Model
         'codigo',
         'nombre',
         'precio',
+        'dosis',
+        'tipo_producto',
+        'descripcion_olfativa',
     ];
 
     protected $casts = [
         'precio' => 'decimal:2',
+        'dosis'  => 'decimal:2',
     ];
 
     public function projectProposals(): HasMany
@@ -30,5 +34,10 @@ class FinearomReference extends Model
     public function priceHistory(): HasMany
     {
         return $this->hasMany(FinearomPriceHistory::class, 'finearom_reference_id');
+    }
+
+    public function evaluations(): HasMany
+    {
+        return $this->hasMany(FinearomEvaluation::class, 'finearom_reference_id');
     }
 }

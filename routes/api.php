@@ -10,6 +10,8 @@ use App\Http\Controllers\CarteraEstadoController;
 use App\Http\Controllers\EmailCampaignController;
 use App\Http\Controllers\EmailTemplateController;
 use App\Http\Controllers\ClientController;
+use App\Http\Controllers\FinearomEvaluationController;
+use App\Http\Controllers\FinearomReferenceController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProcessEmailController;
@@ -413,6 +415,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/project-notifications/unread-count', [ProjectNotificationController::class, 'unreadCount']);
     Route::patch('/project-notifications/{notification}/read', [ProjectNotificationController::class, 'markRead']);
     Route::patch('/project-notifications/mark-all-read', [ProjectNotificationController::class, 'markAllRead']);
+
+    // ============================================================================
+    // FINEAROM REFERENCES — Top Calificadas
+    // ============================================================================
+    Route::apiResource('finearom-references', FinearomReferenceController::class);
+    Route::post('finearom-references/{finearomReference}/update-price', [FinearomReferenceController::class, 'updatePrice']);
+    Route::post('finearom-references/{finearomReference}/evaluations', [FinearomEvaluationController::class, 'store']);
+    Route::put('finearom-references/{finearomReference}/evaluations/{finearomEvaluation}', [FinearomEvaluationController::class, 'update']);
+    Route::delete('finearom-references/{finearomReference}/evaluations/{finearomEvaluation}', [FinearomEvaluationController::class, 'destroy']);
 });
 
 // Public Pixel Route (no auth)
