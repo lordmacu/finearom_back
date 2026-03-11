@@ -98,6 +98,7 @@ class MonthlyReportController extends Controller
                   "- Productos marcados como (muestra) tienen precio $0 — no cuentan en totales financieros\n" .
                   "- En DETALLE DE ÓRDENES: estado pending = sin despachar, processing = en proceso, parcial_status = despacho parcial, completed = despachada totalmente\n" .
                   "- En DETALLE DE ÓRDENES, el Valor mostrado corresponde a lo despachado real (partials), no al valor total de la orden\n" .
+                  "- En DETALLE DE ÓRDENES, el header de cada OC incluye la ejecutiva y los kilos totales (excluyendo muestras). Para verificar kilos de una ejecutiva, suma los kg del header de sus OCs — el resultado debe coincidir con la columna 'Kilos' de ESTADÍSTICAS POR EJECUTIVA\n" .
                   "- CARTERA y RECAUDOS son en PESOS COLOMBIANOS (COP). Para convertir a USD usar la TRM de hoy indicada arriba\n" .
                   "- NUNCA usar la TRM de hoy para convertir valores de órdenes — cada OC tiene su propia TRM\n\n" .
 
@@ -640,7 +641,7 @@ PROMPT;
                 'es_muestra'       => (bool) $order->is_muestra,
                 'new_win'          => (bool) $order->is_new_win,
                 'proyecto'         => $order->project?->name ?? '',
-                'ejecutivo'        => $order->client?->executive ?? '',
+                'ejecutivo'        => $this->normalizeExecutiveName($order->client?->executive ?? ''),
                 'direccion_entrega'=> $order->delivery_address ?? '',
                 'productos'        => $productos,
             ];
@@ -771,12 +772,23 @@ PROMPT;
         $ordersValueUsd      = (float) ($ordersCreatedQuery->value_usd    ?? $dailyStats->sum('total_orders_value_usd'));
         $ordersValueCop      = (float) ($ordersCreatedQuery->value_cop    ?? $dailyStats->sum('total_orders_value_cop'));
 
-        // Status counts — from daily snapshots (secondary, not critical for AI)
-        $ordersPending        = $dailyStats->sum('orders_pending');
-        $ordersProcessing     = $dailyStats->sum('orders_processing');
-        $ordersParcialStatus  = $dailyStats->sum('orders_parcial_status');
-        $ordersCompleted      = $dailyStats->sum('orders_completed');
-        $ordersNewWin         = $dailyStats->sum('orders_new_win');
+        // Status counts — queried directly from purchase_orders for accuracy
+        $statusCounts = DB::table('purchase_orders')
+            ->whereBetween('order_creation_date', [$startDate, $endDate])
+            ->selectRaw("
+                SUM(CASE WHEN status = 'pending'        THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN status = 'processing'     THEN 1 ELSE 0 END) as processing,
+                SUM(CASE WHEN status = 'parcial_status' THEN 1 ELSE 0 END) as parcial_status,
+                SUM(CASE WHEN status = 'completed'      THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN is_new_win = 1            THEN 1 ELSE 0 END) as new_win
+            ")
+            ->first();
+
+        $ordersPending        = (int) ($statusCounts->pending        ?? 0);
+        $ordersProcessing     = (int) ($statusCounts->processing     ?? 0);
+        $ordersParcialStatus  = (int) ($statusCounts->parcial_status ?? 0);
+        $ordersCompleted      = (int) ($statusCounts->completed      ?? 0);
+        $ordersNewWin         = (int) ($statusCounts->new_win        ?? 0);
         $ordersCommercial     = $dailyStats->sum('orders_commercial');
         $ordersSample         = $dailyStats->sum('orders_sample');
         $ordersMixed          = $dailyStats->sum('orders_mixed');
@@ -1051,6 +1063,16 @@ PROMPT;
      * Convierte el reporte JSON a Markdown estructurado para el prompt de IA.
      * Más legible que JSON crudo, sin perder ningún dato.
      */
+    private function normalizeExecutiveName(string $executive): string
+    {
+        if (!str_contains($executive, '@')) {
+            return $executive; // ya es un nombre
+        }
+        $local = explode('@', $executive)[0]; // "monica.castano"
+        $parts = explode('.', $local);
+        return implode(' ', array_map('ucfirst', $parts));
+    }
+
     private function buildReportMarkdown(array $report): string
     {
         $stats  = $report['stats']      ?? [];
@@ -1173,8 +1195,16 @@ PROMPT;
             if (!empty($o['new_win']))     $tags[] = 'NEW WIN';
             $tagStr  = $tags ? ' [' . implode(', ', $tags) . ']' : '';
 
-            $md .= "### OC {$cons}{$tagStr} — {$estado}\n";
-            $md .= "- **Cliente:** {$cliente} | **Ejecutiva:** {$exec} | **Ciudad:** {$ciudad}\n";
+            // Kilos totales de la OC (excluyendo muestras)
+            $totalKgOc = 0;
+            foreach (($o['productos'] ?? []) as $p) {
+                if (empty($p['es_muestra'])) {
+                    $totalKgOc += (float)($p['cantidad'] ?? 0);
+                }
+            }
+
+            $md .= "### OC {$cons}{$tagStr} — {$estado} | Ejecutiva: {$exec} | {$n($totalKgOc, 2)} kg\n";
+            $md .= "- **Cliente:** {$cliente} | **Ciudad:** {$ciudad}\n";
             $md .= "- **Despacho:** {$fecha}";
             if ($factura) $md .= " | **Factura:** {$factura} | **Guía:** {$guia} | **Trans.:** {$trans}";
             $md .= "\n";
