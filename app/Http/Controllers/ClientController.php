@@ -775,7 +775,7 @@ class ClientController extends Controller
             'email' => $data['email'],
             'nit' => $data['nit'] ?? null,
             'executive_email' => $data['executive_email'] ?? null,
-            'executive' => $data['executive_name'] ?? null,
+            'executive' => $data['executive_email'] ?? null,
             'executive_phone' => $data['executive_phone'] ?? null,
             'user_id' => $user->id,
             'client_type' => 'pareto',
@@ -1038,6 +1038,11 @@ class ClientController extends Controller
 
         if (isset($data['logistics_contact_email']) && ! isset($data['logistics_email'])) {
             $data['logistics_email'] = $data['logistics_contact_email'];
+        }
+
+        // Siempre guardar 'executive' como email (fuente de verdad para estadísticas y reportes)
+        if (!empty($data['executive_email'])) {
+            $data['executive'] = $data['executive_email'];
         }
 
         foreach ($this->fileFields() as $field => $path) {
