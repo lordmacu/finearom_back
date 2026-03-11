@@ -11,34 +11,51 @@ class FineFragrance extends Model
 {
     use HasFactory;
 
-    protected $table = 'fine_fragrances';
-
     protected $fillable = [
+        'fine_fragrance_house_id',
+        'contratipo',
+        'ano_lanzamiento',
+        'ano_desarrollo',
+        'genero',
+        'familia_olfativa',
         'nombre',
-        'codigo',
-        'precio',
-        'precio_usd',
-        'casa_id',
-        'family_id',
+        'tipo',
+        'salida',
+        'corazon',
+        'fondo',
+        'precio_coleccion',
+        'costo',
+        'inventario_kg',
+        'precio_oferta',
+        'estado',
+        'foto_url',
+        'observaciones',
+        'activo',
     ];
 
     protected $casts = [
-        'precio' => 'decimal:2',
-        'precio_usd' => 'decimal:2',
+        'activo'           => 'boolean',
+        'estado'           => 'string',
+        'genero'           => 'string',
+        'tipo'             => 'string',
+        'inventario_kg'    => 'float',
+        'precio_coleccion' => 'float',
+        'costo'            => 'float',
+        'precio_oferta'    => 'float',
     ];
 
-    public function casa(): BelongsTo
+    public function house(): BelongsTo
     {
-        return $this->belongsTo(FragranceHouse::class, 'casa_id');
+        return $this->belongsTo(FineFragranceHouse::class, 'fine_fragrance_house_id');
     }
 
-    public function family(): BelongsTo
+    public function priceHistory(): HasMany
     {
-        return $this->belongsTo(FragranceFamily::class, 'family_id');
+        return $this->hasMany(FineFragrancePriceHistory::class);
     }
 
-    public function projectFragrances(): HasMany
+    public function inventoryLogs(): HasMany
     {
-        return $this->hasMany(ProjectFragrance::class, 'fine_fragrance_id');
+        return $this->hasMany(FineFragranceInventoryLog::class);
     }
 }

@@ -12,6 +12,8 @@ use App\Http\Controllers\EmailTemplateController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\FinearomEvaluationController;
 use App\Http\Controllers\FinearomReferenceController;
+use App\Http\Controllers\FineFragranceController;
+use App\Http\Controllers\FineFragranceHouseController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProcessEmailController;
@@ -42,6 +44,7 @@ use App\Http\Controllers\OrderGoogleTaskConfigController;
 use App\Http\Controllers\CorazonFormulaController;
 use App\Http\Controllers\RawMaterialController;
 use App\Http\Controllers\ReferenceFormulaController;
+use App\Http\Controllers\ContributionMarginController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -444,6 +447,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('raw-materials/{rawMaterial}/corazon-formula', [CorazonFormulaController::class, 'index']);
     Route::post('raw-materials/{rawMaterial}/corazon-formula', [CorazonFormulaController::class, 'store']);
     Route::delete('raw-materials/{rawMaterial}/corazon-formula/{corazonFormulaLine}', [CorazonFormulaController::class, 'destroy']);
+
+    // ============================================================================
+    // FINE FRAGRANCES
+    // ============================================================================
+    Route::apiResource('fine-fragrance-houses', FineFragranceHouseController::class);
+    Route::post('fine-fragrances/{fineFragrance}/update-price', [FineFragranceController::class, 'updatePrice']);
+    Route::post('fine-fragrances/{fineFragrance}/add-inventory', [FineFragranceController::class, 'addInventory']);
+    Route::post('fine-fragrances/import', [FineFragranceController::class, 'import']);
+    Route::apiResource('fine-fragrances', FineFragranceController::class);
+
+    // ============================================================================
+    // MARGENES DE CONTRIBUCION
+    // ============================================================================
+    Route::get('contribution-margins/lookup', [ContributionMarginController::class, 'lookup']);
+    Route::apiResource('contribution-margins', ContributionMarginController::class)->except(['show']);
 });
 
 // Public Pixel Route (no auth)

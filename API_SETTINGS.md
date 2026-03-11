@@ -5,6 +5,7 @@ Documentación del API REST para la configuración administrativa del sistema:
 - Configuración de destinatarios por proceso (tabla `processes`)
 - Template HTML del email de pedido (tabla `config_systems`, key `templatePedido`)
 - Backups de base de datos (crear/listar/restaurar)
+- Márgenes de contribución por tipo de cliente y volumen (tabla `contribution_margins`)
 
 ## Información General
 
@@ -20,6 +21,8 @@ Estos endpoints usan middleware `can:*`:
 - `PUT /api/settings/processes` y `PUT /api/settings/template-pedido`: **`config edit`**
 - `POST /api/settings/backups`: **`backup create`**
 - `POST /api/settings/backups/restore`: **`backup restore`**
+- `GET|POST|PUT|DELETE /api/contribution-margins`: **`settings manage`**
+- `GET /api/contribution-margins/lookup`: **`project list`**
 
 ## Headers comunes
 
@@ -181,9 +184,139 @@ Validación de seguridad:
 }
 ```
 
+---
+
+## 7) Listar Márgenes de Contribución
+
+Retorna todos los márgenes agrupados por `tipo_cliente`, ordenados por `volumen_min`.
+
+**Endpoint**: `GET /api/contribution-margins`
+
+**Permiso**: `settings manage`
+
+**Respuesta Exitosa** (200 OK):
+```json
+{
+  "data": {
+    "pareto": [
+      { "id": 1, "tipo_cliente": "pareto", "volumen_min": 0,   "volumen_max": 49,  "factor": 1.6, "descripcion": "Pareto — 0 a 49 Kg/año",           "activo": true },
+      { "id": 2, "tipo_cliente": "pareto", "volumen_min": 50,  "volumen_max": 199, "factor": 1.5, "descripcion": "Pareto — 50 a 199 Kg/año",          "activo": true },
+      { "id": 3, "tipo_cliente": "pareto", "volumen_min": 200, "volumen_max": null,"factor": 1.4, "descripcion": "Pareto — 200 Kg/año en adelante",   "activo": true }
+    ],
+    "balance": [ "..." ],
+    "none":    [ "..." ]
+  }
+}
+```
+
+---
+
+## 8) Crear Margen de Contribución
+
+**Endpoint**: `POST /api/contribution-margins`
+
+**Permiso**: `settings manage`
+
+**Body**:
+```json
+{
+  "tipo_cliente": "pareto",
+  "volumen_min":  300,
+  "volumen_max":  null,
+  "factor":       1.35,
+  "descripcion":  "Pareto premium 300+",
+  "activo":       true
+}
+```
+
+**Validaciones**:
+- `tipo_cliente`: requerido, enum `pareto|balance|none`
+- `volumen_min`: requerido, integer, min:0
+- `volumen_max`: nullable, integer, min:0, debe ser mayor que `volumen_min` si se envía
+- `factor`: requerido, numeric, min:0.1, max:99
+- `descripcion`: nullable, string
+- `activo`: boolean
+
+**Respuesta Exitosa** (201 Created):
+```json
+{
+  "data": { "id": 10, "tipo_cliente": "pareto", "volumen_min": 300, "volumen_max": null, "factor": 1.35, "descripcion": "Pareto premium 300+", "activo": true },
+  "message": "Margen creado"
+}
+```
+
+---
+
+## 9) Actualizar Margen de Contribución
+
+**Endpoint**: `PUT /api/contribution-margins/{id}`
+
+**Permiso**: `settings manage`
+
+**Body** (todos los campos son opcionales en update):
+```json
+{
+  "factor": 1.3,
+  "activo": false
+}
+```
+
+**Respuesta Exitosa** (200 OK):
+```json
+{
+  "data": { "id": 10, "factor": 1.3, "activo": false, "..." : "..." },
+  "message": "Margen actualizado"
+}
+```
+
+---
+
+## 10) Eliminar Margen de Contribución
+
+**Endpoint**: `DELETE /api/contribution-margins/{id}`
+
+**Permiso**: `settings manage`
+
+**Respuesta Exitosa** (200 OK):
+```json
+{
+  "message": "Margen eliminado"
+}
+```
+
+---
+
+## 11) Consultar Factor por Tipo Cliente y Volumen (lookup)
+
+Usado por el frontend de proyectos para auto-rellenar el campo `factor` al crear/editar un proyecto.
+
+**Endpoint**: `GET /api/contribution-margins/lookup`
+
+**Permiso**: `project list`
+
+**Query params**:
+| Param         | Tipo    | Descripción                          |
+|---------------|---------|--------------------------------------|
+| `tipo_cliente`| string  | `pareto`, `balance` o `none`         |
+| `volumen`     | integer | Volumen en Kg/año (>= 0)             |
+
+**Ejemplo**: `GET /api/contribution-margins/lookup?tipo_cliente=pareto&volumen=100`
+
+**Respuesta Exitosa** (200 OK):
+```json
+{ "factor": 1.5 }
+```
+
+**Respuesta cuando no hay rango configurado**:
+```json
+{ "factor": null }
+```
+
+---
+
 ## Errores comunes
 
 - **401 Unauthorized**: falta token o es inválido.
-- **403 Forbidden**: no tienes el permiso `config *` / `backup *`.
-- **422 Unprocessable Entity**: validación (rows mal formadas, process_type inválido, etc.).
+- **403 Forbidden**: no tienes el permiso requerido.
+- **422 Unprocessable Entity**: validación fallida (tipo_cliente inválido, factor fuera de rango, etc.).
 - **500**: fallo en `mysqldump`/`mysql` (revisar que estén en PATH del servidor).
