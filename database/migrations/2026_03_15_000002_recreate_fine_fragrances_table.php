@@ -8,6 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
+        Schema::disableForeignKeyConstraints();
         Schema::dropIfExists('fine_fragrances');
 
         Schema::create('fine_fragrances', function (Blueprint $table) {
@@ -40,6 +41,7 @@ return new class extends Migration
             $table->index('tipo');
             $table->unique(['fine_fragrance_house_id', 'contratipo', 'tipo']);
         });
+        Schema::enableForeignKeyConstraints();
     }
 
     public function down(): void
