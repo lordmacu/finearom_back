@@ -254,11 +254,12 @@ class ProjectController extends Controller
 
     public function ejecutivos(): JsonResponse
     {
-        // Usar DB::table en lugar de User:: para evitar los $appends (system_permissions/system_roles)
-        // que disparan N*2 queries extra contra model_has_permissions y model_has_roles
-        $ejecutivos = \DB::table('users')
-            ->select('id', 'name', 'email')
-            ->orderBy('name')
+        // Solo los ejecutivos comerciales activos, cruzados con users por email para obtener user_id
+        $ejecutivos = \DB::table('executives as e')
+            ->join('users as u', \DB::raw('LOWER(e.email)'), '=', \DB::raw('LOWER(u.email)'))
+            ->where('e.is_active', true)
+            ->select('u.id', 'e.name', 'e.email')
+            ->orderBy('e.name')
             ->get();
 
         return response()->json(['success' => true, 'data' => $ejecutivos]);
