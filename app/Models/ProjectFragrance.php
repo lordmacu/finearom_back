@@ -16,10 +16,15 @@ class ProjectFragrance extends Model
         'project_id',
         'fine_fragrance_id',
         'gramos',
+        'margen',
+        'precio_calculado',
+        'notas',
     ];
 
     protected $casts = [
-        'gramos' => 'decimal:2',
+        'gramos'           => 'decimal:2',
+        'margen'           => 'decimal:4',
+        'precio_calculado' => 'decimal:2',
     ];
 
     public function project(): BelongsTo

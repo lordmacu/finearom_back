@@ -110,17 +110,20 @@ class ProjectCatalogController extends Controller
 
     public function fineFragrances(Request $request): JsonResponse
     {
-        $query = FineFragrance::query()->with(['casa', 'family']);
+        $query = FineFragrance::query()->with('house')->where('activo', true);
         if ($search = $request->query('search')) {
             $query->where(function ($q) use ($search) {
-                $q->where('nombre', 'like', "%{$search}%")
-                  ->orWhere('codigo', 'like', "%{$search}%");
+                $q->where('contratipo', 'like', "%{$search}%")
+                  ->orWhere('nombre', 'like', "%{$search}%");
             });
         }
-        if ($casaId = $request->query('casa_id')) {
-            $query->where('casa_id', $casaId);
+        if ($houseId = $request->query('house_id')) {
+            $query->where('fine_fragrance_house_id', $houseId);
         }
-        $result = $query->orderBy('nombre')->paginate($this->perPage($request, 30));
+        if ($tipo = $request->query('tipo')) {
+            $query->where('tipo', $tipo);
+        }
+        $result = $query->orderBy('contratipo')->paginate($this->perPage($request, 30));
         return response()->json([
             'success' => true,
             'data'    => $result->items(),
@@ -130,36 +133,18 @@ class ProjectCatalogController extends Controller
 
     public function storeFineFragrance(Request $request): JsonResponse
     {
-        $data = $request->validate([
-            'nombre'     => 'required|string|max:300',
-            'codigo'     => 'nullable|string|max:100',
-            'precio'     => 'nullable|numeric|min:0',
-            'precio_usd' => 'nullable|numeric|min:0',
-            'casa_id'    => 'nullable|integer|exists:fragrance_houses,id',
-            'family_id'  => 'nullable|integer|exists:fragrance_families,id',
-        ]);
-        $ff = FineFragrance::create($data);
-        return response()->json(['success' => true, 'data' => $ff->load(['casa', 'family']), 'message' => 'Fine fragrance creada'], 201);
+        // Redirigido al nuevo módulo /fine-fragrances — este endpoint ya no crea fragancias
+        return response()->json(['message' => 'Usa el módulo /fine-fragrances para crear fragancias'], 422);
     }
 
     public function updateFineFragrance(Request $request, FineFragrance $fineFragrance): JsonResponse
     {
-        $data = $request->validate([
-            'nombre'     => 'nullable|string|max:300',
-            'codigo'     => 'nullable|string|max:100',
-            'precio'     => 'nullable|numeric|min:0',
-            'precio_usd' => 'nullable|numeric|min:0',
-            'casa_id'    => 'nullable|integer|exists:fragrance_houses,id',
-            'family_id'  => 'nullable|integer|exists:fragrance_families,id',
-        ]);
-        $fineFragrance->update($data);
-        return response()->json(['success' => true, 'data' => $fineFragrance->fresh(['casa', 'family']), 'message' => 'Fine fragrance actualizada']);
+        return response()->json(['message' => 'Usa el módulo /fine-fragrances para editar fragancias'], 422);
     }
 
     public function destroyFineFragrance(FineFragrance $fineFragrance): JsonResponse
     {
-        $fineFragrance->delete();
-        return response()->json(['success' => true, 'message' => 'Fine fragrance eliminada']);
+        return response()->json(['message' => 'Usa el módulo /fine-fragrances para eliminar fragancias'], 422);
     }
 
     // ─────────────────────────────────────────────────────────────

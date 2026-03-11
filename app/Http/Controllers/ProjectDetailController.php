@@ -228,13 +228,16 @@ class ProjectDetailController extends Controller
         $data = $request->validate([
             'fine_fragrance_id' => 'required|integer|exists:fine_fragrances,id',
             'gramos'            => 'nullable|numeric|min:0',
+            'margen'            => 'nullable|numeric|min:0',
+            'precio_calculado'  => 'nullable|numeric|min:0',
+            'notas'             => 'nullable|string|max:500',
         ]);
 
         $pf = $project->fragrances()->create($data);
 
         return response()->json([
             'success' => true,
-            'data'    => $pf->load('fineFragrance'),
+            'data'    => $pf->load('fineFragrance.house'),
             'message' => 'Fragancia agregada',
         ], 201);
     }
@@ -244,11 +247,14 @@ class ProjectDetailController extends Controller
         $data = $request->validate([
             'fine_fragrance_id' => 'nullable|integer|exists:fine_fragrances,id',
             'gramos'            => 'nullable|numeric|min:0',
+            'margen'            => 'nullable|numeric|min:0',
+            'precio_calculado'  => 'nullable|numeric|min:0',
+            'notas'             => 'nullable|string|max:500',
         ]);
 
         $projectFragrance->update($data);
 
-        return response()->json(['success' => true, 'data' => $projectFragrance->fresh('fineFragrance'), 'message' => 'Fragancia actualizada']);
+        return response()->json(['success' => true, 'data' => $projectFragrance->fresh('fineFragrance.house'), 'message' => 'Fragancia actualizada']);
     }
 
     public function destroyProjectFragrance(Project $project, ProjectFragrance $projectFragrance): JsonResponse
