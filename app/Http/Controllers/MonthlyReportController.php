@@ -626,7 +626,7 @@ PROMPT;
                 'es_muestra'       => (bool) $order->is_muestra,
                 'new_win'          => (bool) $order->is_new_win,
                 'proyecto'         => $order->project?->name ?? '',
-                'ejecutivo'        => $order->contact ?? '',
+                'ejecutivo'        => $order->client?->executive ?? '',
                 'direccion_entrega'=> $order->delivery_address ?? '',
                 'productos'        => $productos,
             ];
