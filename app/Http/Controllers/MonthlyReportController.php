@@ -101,9 +101,11 @@ class MonthlyReportController extends Controller
                   "- CARTERA y RECAUDOS son en PESOS COLOMBIANOS (COP). Para convertir a USD usar la TRM de hoy indicada arriba\n" .
                   "- NUNCA usar la TRM de hoy para convertir valores de órdenes — cada OC tiene su propia TRM\n\n" .
 
-                  "REPORTE:\n" . $this->buildReportMarkdown($report) . "\n\n" .
+                  "REPORTE:\n" . ($md = $this->buildReportMarkdown($report)) . "\n\n" .
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
                   "indicando el período, el total de órdenes creadas (valor USD), y cuánto se despachó/facturó realmente en USD.";
+
+        Storage::disk('local')->put('monthly_report.md', $md);
 
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
