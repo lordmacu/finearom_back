@@ -393,6 +393,7 @@ class DashboardController extends Controller
                 'collection_coverage' => $this->calculateCollectionCoverage($startDate, $endDate),
                 'trm_variation' => $this->calculateTrmVariation($startDate, $endDate),
                 'executive_stats' => $this->calculateExecutiveStats($startDate, $endDate),
+                'lead_time_by_client_type' => $this->calculateLeadTimeByClientType($startDate, $endDate),
 
                 // Para debug/análisis avanzado (opcional)
                 'stats' => $dailyStats, // Datos día por día para gráficos futuros
@@ -1415,6 +1416,58 @@ class DashboardController extends Controller
                 'success' => false,
                 'message' => 'Error al restaurar: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Tiempo de entrega por tipo de cliente (AA, A, B, C).
+     * Compara: fecha ingreso OC → fecha entrega solicitada → fecha real de despacho.
+     */
+    private function calculateLeadTimeByClientType(string $startDate, string $endDate): array
+    {
+        try {
+            $rows = DB::select("
+                SELECT
+                    c.client_type,
+                    COUNT(DISTINCT po.id)                                                          AS total_orders,
+                    COUNT(DISTINCT CASE WHEN p.first_dispatch IS NOT NULL THEN po.id END)          AS dispatched_orders,
+                    ROUND(AVG(CASE WHEN po.required_delivery_date IS NOT NULL
+                        THEN DATEDIFF(po.required_delivery_date, po.order_creation_date) END), 1)  AS avg_days_requested,
+                    ROUND(AVG(CASE WHEN p.first_dispatch IS NOT NULL
+                        THEN DATEDIFF(p.first_dispatch, po.order_creation_date) END), 1)           AS avg_days_real,
+                    ROUND(
+                        100.0 * SUM(CASE WHEN p.first_dispatch IS NOT NULL
+                                          AND po.required_delivery_date IS NOT NULL
+                                          AND p.first_dispatch <= po.required_delivery_date THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(CASE WHEN p.first_dispatch IS NOT NULL
+                                            AND po.required_delivery_date IS NOT NULL THEN 1 END), 0)
+                    , 1)                                                                           AS on_time_pct
+                FROM purchase_orders po
+                JOIN clients c ON po.client_id = c.id
+                LEFT JOIN (
+                    SELECT purchase_order_id, MIN(dispatch_date) AS first_dispatch
+                    FROM partials
+                    WHERE type = 'real' AND dispatch_date IS NOT NULL
+                    GROUP BY purchase_order_id
+                ) p ON p.purchase_order_id = po.id
+                WHERE po.order_creation_date BETWEEN ? AND ?
+                  AND c.client_type IN ('AA', 'A', 'B', 'C')
+                  AND (po.is_muestra = 0 OR po.is_muestra IS NULL)
+                GROUP BY c.client_type
+                ORDER BY FIELD(c.client_type, 'AA', 'A', 'B', 'C')
+            ", [$startDate, $endDate]);
+
+            return array_map(fn($r) => [
+                'client_type'       => $r->client_type,
+                'total_orders'      => (int) $r->total_orders,
+                'dispatched_orders' => (int) $r->dispatched_orders,
+                'avg_days_requested'=> $r->avg_days_requested !== null ? (float) $r->avg_days_requested : null,
+                'avg_days_real'     => $r->avg_days_real     !== null ? (float) $r->avg_days_real     : null,
+                'on_time_pct'       => $r->on_time_pct       !== null ? (float) $r->on_time_pct       : null,
+            ], $rows);
+        } catch (\Exception $e) {
+            Log::error('Error calculating lead_time_by_client_type: ' . $e->getMessage());
+            return [];
         }
     }
 }
