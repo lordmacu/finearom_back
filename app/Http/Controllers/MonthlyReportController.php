@@ -92,6 +92,8 @@ class MonthlyReportController extends Controller
                   "- 'Planeado' = OC con fecha de despacho programada dentro del período (subconjunto del total, NO igual al total)\n" .
                   "- Cumplimiento% puede superar el 100%: es normal porque los despachos del período pueden incluir OC creadas en meses anteriores\n" .
                   "- ESTADÍSTICAS POR EJECUTIVA es la fuente de verdad para preguntas por ejecutiva — NO sumar desde el detalle de órdenes\n" .
+                  "- La columna '$/kg USD' en ESTADÍSTICAS POR EJECUTIVA es el precio promedio ponderado por kilo en USD — úsala directamente, NO calcules sumando órdenes del detalle\n" .
+                  "- La columna 'Valor USD' en ESTADÍSTICAS POR EJECUTIVA es la fuente de verdad para el valor en USD de cada ejecutiva\n" .
                   "- 'Kilos despachados totales' (en RESUMEN FINANCIERO) = fuente de verdad para kilos totales del período\n" .
                   "- 'Líneas de producto despachadas' = número de ítems distintos, NO es kilos\n" .
                   "- En TOP PRODUCTOS, la columna 'Kilos despachados' = kilos reales (no unidades)\n" .
@@ -1160,13 +1162,18 @@ PROMPT;
 
         // ── ESTADÍSTICAS POR EJECUTIVA ──────────────────────────────────────
         $md .= "## ESTADÍSTICAS POR EJECUTIVA\n";
-        $md .= "| Ejecutiva | OC | Valor COP | Kilos | Part.% | OC desp. | Desp. COP | Desp. kg | Cump.% |\n";
-        $md .= "|---|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+        $md .= "| Ejecutiva | OC | Valor USD | Valor COP | $/kg USD | Kilos | Part.% | OC desp. | Desp. COP | Desp. kg | Cump.% |\n";
+        $md .= "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
         foreach ($execs as $e) {
+            $kilos    = (float) $e['total_kilos'];
+            $valueUsd = (float) $e['value_usd'];
+            $pxkg     = $kilos > 0 ? $n($valueUsd / $kilos, 2) : '—';
             $md .= "| {$e['executive']}";
             $md .= " | {$e['total_orders']}";
+            $md .= " | \${$n($valueUsd, 2)}";
             $md .= " | \${$n($e['value_cop'])}";
-            $md .= " | {$n($e['total_kilos'], 2)}";
+            $md .= " | \${$pxkg}";
+            $md .= " | {$n($kilos, 2)}";
             $md .= " | {$e['participation_pct']}%";
             $md .= " | {$e['dispatched_orders']}";
             $md .= " | \${$n($e['dispatched_cop'])}";
