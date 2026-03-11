@@ -741,8 +741,29 @@ PROMPT;
         }
         $plannedOrdersCount = count($ordersSet);
 
-        // Orders created in the period (from daily stats)
-        $totalOrdersCreated   = $dailyStats->sum('total_orders_created');
+        // Orders created in the period — total y valores queried directamente sobre purchase_orders
+        // (los snapshots de order_statistics pueden estar incompletos para el mes en curso)
+        $ordersCreatedQuery = DB::table('purchase_orders as po')
+            ->join('purchase_order_product as pop', 'pop.purchase_order_id', '=', 'po.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
+            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->where('pop.muestra', '=', 0)
+            ->selectRaw("
+                COUNT(DISTINCT po.id) as total_orders,
+                SUM(CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END * pop.quantity) as value_usd,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
+                    COALESCE(NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
+                ) as value_cop
+            ")
+            ->first();
+
+        $totalOrdersCreated  = (int)   ($ordersCreatedQuery->total_orders ?? $dailyStats->sum('total_orders_created'));
+        $ordersValueUsd      = (float) ($ordersCreatedQuery->value_usd    ?? $dailyStats->sum('total_orders_value_usd'));
+        $ordersValueCop      = (float) ($ordersCreatedQuery->value_cop    ?? $dailyStats->sum('total_orders_value_cop'));
+
+        // Status counts — from daily snapshots (secondary, not critical for AI)
         $ordersPending        = $dailyStats->sum('orders_pending');
         $ordersProcessing     = $dailyStats->sum('orders_processing');
         $ordersParcialStatus  = $dailyStats->sum('orders_parcial_status');
@@ -751,8 +772,6 @@ PROMPT;
         $ordersCommercial     = $dailyStats->sum('orders_commercial');
         $ordersSample         = $dailyStats->sum('orders_sample');
         $ordersMixed          = $dailyStats->sum('orders_mixed');
-        $ordersValueUsd       = $dailyStats->sum('total_orders_value_usd');
-        $ordersValueCop       = $dailyStats->sum('total_orders_value_cop');
 
         // Recaudos del período
         $recaudos = DB::table('recaudos')
