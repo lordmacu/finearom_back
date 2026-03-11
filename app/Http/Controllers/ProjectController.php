@@ -256,7 +256,7 @@ class ProjectController extends Controller
     {
         // Solo los ejecutivos comerciales activos, cruzados con users por email para obtener user_id
         $ejecutivos = \DB::table('executives as e')
-            ->join('users as u', \DB::raw('LOWER(e.email)'), '=', \DB::raw('LOWER(u.email)'))
+            ->join('users as u', \DB::raw('LOWER(e.email) COLLATE utf8mb4_general_ci'), '=', \DB::raw('LOWER(u.email) COLLATE utf8mb4_general_ci'))
             ->where('e.is_active', true)
             ->select('u.id', 'e.name', 'e.email')
             ->orderBy('e.name')
