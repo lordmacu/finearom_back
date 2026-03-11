@@ -39,6 +39,9 @@ use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\GoogleTaskController;
 use App\Http\Controllers\ProjectGoogleTaskConfigController;
 use App\Http\Controllers\OrderGoogleTaskConfigController;
+use App\Http\Controllers\CorazonFormulaController;
+use App\Http\Controllers\RawMaterialController;
+use App\Http\Controllers\ReferenceFormulaController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -424,6 +427,23 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('finearom-references/{finearomReference}/evaluations', [FinearomEvaluationController::class, 'store']);
     Route::put('finearom-references/{finearomReference}/evaluations/{finearomEvaluation}', [FinearomEvaluationController::class, 'update']);
     Route::delete('finearom-references/{finearomReference}/evaluations/{finearomEvaluation}', [FinearomEvaluationController::class, 'destroy']);
+
+    // ============================================================================
+    // MATERIAS PRIMAS
+    // ============================================================================
+    Route::apiResource('raw-materials', RawMaterialController::class);
+    Route::post('raw-materials/{rawMaterial}/update-cost', [RawMaterialController::class, 'updateCost']);
+    Route::post('raw-materials/{rawMaterial}/movements', [RawMaterialController::class, 'addMovement']);
+
+    // Formula lines de referencias Finearom
+    Route::get('finearom-references/{finearomReference}/formula', [ReferenceFormulaController::class, 'index']);
+    Route::post('finearom-references/{finearomReference}/formula', [ReferenceFormulaController::class, 'store']);
+    Route::delete('finearom-references/{finearomReference}/formula/{referenceFormulaLine}', [ReferenceFormulaController::class, 'destroy']);
+
+    // Formula interna de corazones (sub-ingredientes)
+    Route::get('raw-materials/{rawMaterial}/corazon-formula', [CorazonFormulaController::class, 'index']);
+    Route::post('raw-materials/{rawMaterial}/corazon-formula', [CorazonFormulaController::class, 'store']);
+    Route::delete('raw-materials/{rawMaterial}/corazon-formula/{corazonFormulaLine}', [CorazonFormulaController::class, 'destroy']);
 });
 
 // Public Pixel Route (no auth)

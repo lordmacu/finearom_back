@@ -40,4 +40,9 @@ class FinearomReference extends Model
     {
         return $this->hasMany(FinearomEvaluation::class, 'finearom_reference_id');
     }
+
+    public function formulaLines(): HasMany
+    {
+        return $this->hasMany(ReferenceFormulaLine::class, 'finearom_reference_id');
+    }
 }
