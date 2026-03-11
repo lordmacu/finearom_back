@@ -422,8 +422,9 @@ Route::get('/dashboard/monthly-report', [\App\Http\Controllers\MonthlyReportCont
 Route::post('/dashboard/monthly-report/generate', [\App\Http\Controllers\MonthlyReportController::class, 'generate']);
 Route::get('/dashboard/monthly-report/analyze', [\App\Http\Controllers\MonthlyReportController::class, 'analyze']);
 Route::get('/dashboard/monthly-report/analyze/stream', [\App\Http\Controllers\MonthlyReportController::class, 'stream']);
-Route::post('/dashboard/chat/start',   [\App\Http\Controllers\MonthlyReportController::class, 'chatStart']);
-Route::post('/dashboard/chat/message', [\App\Http\Controllers\MonthlyReportController::class, 'chatMessage']);
+Route::post('/dashboard/chat/start',     [\App\Http\Controllers\MonthlyReportController::class, 'chatStart']);
+Route::post('/dashboard/chat/message',   [\App\Http\Controllers\MonthlyReportController::class, 'chatMessage']);
+Route::post('/dashboard/chat/run-query', [\App\Http\Controllers\MonthlyReportController::class, 'runQuery'])->middleware('auth:sanctum');
 
 // Webhook (no requiere auth Sanctum - usa HMAC signature)
 Route::post('/siigo/webhook', [SiigoSyncController::class, 'webhook']);

@@ -124,8 +124,8 @@ class MonthlyReportController extends Controller
 
                   "INSTRUCCIONES PARA QUERIES SQL:\n" .
                   "- Cuando el usuario pida datos que NO están en el reporte precompilado (ej: listar clientes por ciudad, buscar órdenes de un período distinto, historial de un producto, etc.), genera una query SQL MariaDB lista para ejecutar.\n" .
-                  "- Presenta la query en un bloque <pre><code> con formato limpio.\n" .
-                  "- Explica brevemente qué devuelve la query y cómo interpretarla.\n" .
+                  "- Presenta SIEMPRE la query dentro de este bloque especial (no uses otro formato): <div class=\"ai-sql-block\"><pre><code>QUERY_SQL_AQUI</code></pre></div>\n" .
+                  "- Fuera del bloque, explica brevemente qué devuelve la query y cómo interpretarla.\n" .
                   "- Si el dato SÍ está en el reporte, responde directamente desde el reporte sin generar query.\n\n" .
 
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
@@ -193,6 +193,50 @@ class MonthlyReportController extends Controller
         } catch (\Throwable $e) {
             Log::error('[Chat] chatMessage exception: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Ejecuta una query SELECT enviada por el frontend (generada por la IA).
+     * Solo permite SELECT — bloquea cualquier otra operación DML/DDL.
+     */
+    public function runQuery(Request $request): JsonResponse
+    {
+        $request->validate(['sql' => 'required|string|max:5000']);
+
+        $sql = trim($request->input('sql'));
+
+        // Solo SELECT permitido
+        if (!preg_match('/^\s*SELECT\s/i', $sql)) {
+            return response()->json(['success' => false, 'message' => 'Solo se permiten consultas SELECT'], 422);
+        }
+
+        // Bloquear patrones peligrosos
+        $forbidden = ['DROP ', 'DELETE ', 'UPDATE ', 'INSERT ', 'ALTER ', 'CREATE ', 'TRUNCATE ', 'EXEC(', 'EXECUTE(', 'LOAD_FILE', 'INTO OUTFILE', 'INTO DUMPFILE'];
+        foreach ($forbidden as $pattern) {
+            if (stripos($sql, $pattern) !== false) {
+                return response()->json(['success' => false, 'message' => 'Query no permitida'], 422);
+            }
+        }
+
+        try {
+            $results = DB::select(DB::raw($sql));
+
+            if (empty($results)) {
+                return response()->json(['success' => true, 'columns' => [], 'rows' => [], 'count' => 0]);
+            }
+
+            $columns = array_keys((array) $results[0]);
+            $rows    = array_map(fn($row) => array_values((array) $row), $results);
+
+            return response()->json([
+                'success' => true,
+                'columns' => $columns,
+                'rows'    => $rows,
+                'count'   => count($rows),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()], 422);
         }
     }
 
