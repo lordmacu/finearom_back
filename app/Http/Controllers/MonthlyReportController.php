@@ -47,6 +47,102 @@ class MonthlyReportController extends Controller
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Chat IA sobre el reporte guardado
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Inicia una nueva conversación con la IA usando el reporte guardado como contexto.
+     * Devuelve el thread_id para continuar la conversación.
+     */
+    public function chatStart(): JsonResponse
+    {
+        $aiUrl = env('AI_SERVER_URL', 'http://100.24.49.190:54321');
+        $aiKey = env('AI_SERVER_KEY', 'finearom-ai-2025');
+
+        if (!Storage::disk('local')->exists('monthly_report.json')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No hay reporte generado. Presiona "Generar reporte IA" primero.',
+            ], 404);
+        }
+
+        $reportJson = Storage::disk('local')->get('monthly_report.json');
+        $report     = json_decode($reportJson, true);
+        $period     = $report['period'] ?? [];
+
+        $prompt = "Eres un asistente de análisis comercial para Finearom. " .
+                  "Te comparto el reporte mensual del período {$period['start_date']} al {$period['end_date']}. " .
+                  "Contiene órdenes de compra y estadísticas comerciales. " .
+                  "Responde todas las preguntas sobre estos datos de forma clara y concisa en español. " .
+                  "Cuando el usuario haga una pregunta, respóndela directamente sin repetir el contexto.\n\n" .
+                  "REPORTE:\n{$reportJson}\n\n" .
+                  "Confirma que recibiste el reporte con un mensaje breve de bienvenida (1-2 líneas) " .
+                  "indicando el período y cuántas órdenes contiene.";
+
+        try {
+            $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
+                ->timeout(60)
+                ->post("{$aiUrl}/v1/chat/completions", [
+                    'model'    => 'gpt-4.1',
+                    'messages' => [['role' => 'user', 'content' => $prompt]],
+                ]);
+
+            if (!$resp->successful()) {
+                Log::error('[Chat] Error en chatStart: ' . $resp->body());
+                return response()->json(['success' => false, 'message' => 'Error conectando con IA'], 500);
+            }
+
+            return response()->json([
+                'success'   => true,
+                'thread_id' => $resp->json('thread_id'),
+                'message'   => trim($resp->json('choices.0.message.content', 'Listo, puedes hacerme preguntas sobre el reporte.')),
+                'period'    => $period,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('[Chat] chatStart exception: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Envía un mensaje del usuario al hilo existente y devuelve la respuesta de la IA.
+     */
+    public function chatMessage(Request $request): JsonResponse
+    {
+        $request->validate([
+            'thread_id' => 'required|string',
+            'message'   => 'required|string|max:2000',
+        ]);
+
+        $aiUrl = env('AI_SERVER_URL', 'http://100.24.49.190:54321');
+        $aiKey = env('AI_SERVER_KEY', 'finearom-ai-2025');
+
+        try {
+            $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
+                ->timeout(120)
+                ->post("{$aiUrl}/v1/chat/completions", [
+                    'model'     => 'gpt-4.1',
+                    'messages'  => [['role' => 'user', 'content' => $request->message]],
+                    'thread_id' => $request->thread_id,
+                ]);
+
+            if (!$resp->successful()) {
+                Log::error('[Chat] Error en chatMessage: ' . $resp->body());
+                return response()->json(['success' => false, 'message' => 'Error en IA'], 500);
+            }
+
+            return response()->json([
+                'success'   => true,
+                'message'   => trim($resp->json('choices.0.message.content', '')),
+                'thread_id' => $resp->json('thread_id'),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('[Chat] chatMessage exception: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Generar y guardar reporte en disco
     // ─────────────────────────────────────────────────────────────────────────
 
