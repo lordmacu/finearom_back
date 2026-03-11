@@ -9,8 +9,42 @@
         <xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
     </noscript>
     <![endif]-->
+    <style>
+        p, li, td, th, div, span, small, strong, h1, h2, h3, h4, h5, h6 {
+            color: #1F2345;
+        }
+        p, li, span, small, strong {
+            font-size: 13px;
+        }
+        table {
+            width: 100%;
+            max-width: 700px;
+            border-collapse: collapse;
+            margin: 16px 0;
+            border: 1px solid #1F2345;
+        }
+        th, td {
+            border: 1px solid #1F2345;
+            padding: 10px 14px;
+            text-align: left;
+            color: #1F2345;
+        }
+        th {
+            font-weight: bold;
+            background-color: #f8f9fa;
+        }
+        a {
+            color: #1F2345;
+            text-decoration: underline;
+        }
+        h4 {
+            margin: 12px 0 6px 0;
+            font-size: 14px;
+            color: #1F2345;
+        }
+    </style>
 </head>
-<body style="font-family:Arial,sans-serif;color:#333333;line-height:1.6;margin:0;padding:20px;font-size:13px;background-color:#ffffff;">
+<body style="font-family:Arial,sans-serif;color:#1F2345;line-height:1.6;margin:0;padding:20px;font-size:13px;background-color:#ffffff;">
 
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:700px;margin:0 auto;">
         <tr>

@@ -135,34 +135,37 @@ class PurchaseOrderMail extends Mailable
             ->get(['id', 'name', 'nit', 'delivery_address', 'delivery_city']);
 
         if ($offices->isEmpty()) {
-            return '<p><em>No hay sucursales registradas.</em></p>';
+            return '<p style="font-family:Arial,sans-serif;font-size:13px;color:#1F2345;"><em>No hay sucursales registradas.</em></p>';
         }
 
-        $html = '<div>
-            <h4>Sucursales de entrega</h4>
-            <table>
-                <thead>
-                    <tr>
-                        <th>NOMBRE</th>
-                        <th>NIT</th>
-                        <th>DIRECCIÓN DE ENTREGA</th>
-                        <th>CIUDAD</th>
-                    </tr>
-                </thead>
-                <tbody>';
+        $tableStyle   = 'width:100%;border-collapse:collapse;margin:12px 0;border:1px solid #1F2345;font-family:Arial,sans-serif;font-size:13px;';
+        $thStyle      = 'border:1px solid #1F2345;padding:8px 12px;text-align:left;background-color:#f8f9fa;font-weight:bold;color:#1F2345;';
+        $tdStyle      = 'border:1px solid #1F2345;padding:8px 12px;text-align:left;color:#1F2345;';
+        $h4Style      = 'font-family:Arial,sans-serif;font-size:14px;font-weight:bold;color:#1F2345;margin:12px 0 6px 0;';
+
+        $html  = '<div>';
+        $html .= '<h4 style="' . $h4Style . '">Sucursales de entrega</h4>';
+        $html .= '<table style="' . $tableStyle . '">';
+        $html .=     '<thead><tr>';
+        $html .=         '<th style="' . $thStyle . '">NOMBRE</th>';
+        $html .=         '<th style="' . $thStyle . '">NIT</th>';
+        $html .=         '<th style="' . $thStyle . '">DIRECCIÓN DE ENTREGA</th>';
+        $html .=         '<th style="' . $thStyle . '">CIUDAD</th>';
+        $html .=     '</tr></thead>';
+        $html .=     '<tbody>';
 
         foreach ($offices as $office) {
-            $html .= '<tr>
-                <td><strong>' . e($office->name) . '</strong></td>
-                <td>' . e($office->nit ?: '-') . '</td>
-                <td>' . e($office->delivery_address) . '</td>
-                <td>' . e($office->delivery_city) . '</td>
-            </tr>';
+            $html .= '<tr>';
+            $html .=     '<td style="' . $tdStyle . '"><strong>' . e($office->name) . '</strong></td>';
+            $html .=     '<td style="' . $tdStyle . '">' . e($office->nit ?: '-') . '</td>';
+            $html .=     '<td style="' . $tdStyle . '">' . e($office->delivery_address) . '</td>';
+            $html .=     '<td style="' . $tdStyle . '">' . e($office->delivery_city) . '</td>';
+            $html .= '</tr>';
         }
 
-        $html .= '</tbody>
-            </table>
-        </div>';
+        $html .=     '</tbody>';
+        $html .= '</table>';
+        $html .= '</div>';
 
         return $html;
     }
