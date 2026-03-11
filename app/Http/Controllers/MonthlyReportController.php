@@ -54,23 +54,28 @@ class MonthlyReportController extends Controller
      * Inicia una nueva conversación con la IA usando el reporte guardado como contexto.
      * Devuelve el thread_id para continuar la conversación.
      */
-    public function chatStart(): JsonResponse
+    public function chatStart(Request $request): JsonResponse
     {
+        $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date'   => 'nullable|date_format:Y-m-d',
+        ]);
+
         $aiUrl = config('custom.ai_server_url');
         $aiKey = config('custom.ai_server_key');
 
-        if (!Storage::disk('local')->exists('monthly_report.json')) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No hay reporte generado. Presiona "Generar reporte IA" primero.',
-            ], 404);
-        }
+        $startDate = $request->get('start_date') ?? Carbon::now()->startOfMonth()->toDateString();
+        $endDate   = $request->get('end_date')   ?? Carbon::now()->endOfMonth()->toDateString();
+        $period    = ['start_date' => $startDate, 'end_date' => $endDate];
 
-        $reportJson = Storage::disk('local')->get('monthly_report.json');
-        $report     = json_decode($reportJson, true);
-        $period     = $report['period'] ?? [];
-        $now        = Carbon::now('America/Bogota');
-        $today      = $now->toDateString();
+        $report = [
+            'period'      => $period,
+            'ordenes_mes' => $this->buildOrdenes($startDate, $endDate),
+            'stats'       => $this->buildStats($startDate, $endDate),
+        ];
+
+        $now   = Carbon::now('America/Bogota');
+        $today = $now->toDateString();
 
         // TRM de hoy (o la más reciente disponible) — para conversiones de cartera
         $trmHoy = DB::table('trm_daily')
@@ -105,7 +110,10 @@ class MonthlyReportController extends Controller
                   "- NUNCA usar la TRM de hoy para convertir valores de órdenes — cada OC tiene su propia TRM\n" .
                   "- Cumplimiento del período = (total despachado USD) / (total órdenes creadas USD) × 100. Si se pregunta cuánto sería el cumplimiento si todo lo planeado se despacha, sumar el planeado + lo ya despachado y dividir entre el total creado\n" .
                   "- Cuando se pregunte por el producto [NEW WIN] con mayor o menor precio/kg, listar TODOS los productos marcados [NEW WIN] en DETALLE DE ÓRDENES sin excepción (busca todas las ocurrencias de [NEW WIN] en el detalle), compara sus precios unitarios y selecciona el extremo correcto\n" .
-                  "- El 'valor de una OC' siempre es el campo 'Valor: X USD / Y COP' en el encabezado de la orden — NUNCA sumes solo las líneas de un producto específico dentro de ella (eso da el valor de ese producto, no de la orden). Ejemplo: si preguntan cuánto valen dos OCs que contienen BOUSCHET III, la respuesta es la suma de los campos Valor de esas dos OCs, no la suma de las líneas de BOUSCHET III\n\n" .
+                  "- El 'valor de una OC' siempre es el campo 'Valor: X USD / Y COP' en el encabezado de la orden — NUNCA sumes solo las líneas de un producto específico dentro de ella (eso da el valor de ese producto, no de la orden). Ejemplo: si preguntan cuánto valen dos OCs que contienen BOUSCHET III, la respuesta es la suma de los campos Valor de esas dos OCs, no la suma de las líneas de BOUSCHET III\n" .
+                  "- RESUMEN POR CLIENTE es la fuente de verdad para totales por cliente (OCs, USD, kilos) — NO sumes desde el detalle\n" .
+                  "- TOP 10 PRODUCTOS PEDIDOS = los productos más demandados en las OCs del período (no despachados)\n" .
+                  "- NEW WIN DEL PERÍODO = tabla de todos los productos marcados [NEW WIN], ordenados por precio/kg descendente\n\n" .
 
                   "REPORTE:\n" . ($md = $this->buildReportMarkdown($report)) . "\n\n" .
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
@@ -181,7 +189,7 @@ class MonthlyReportController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Genera el reporte mensual y lo guarda en storage/app/monthly_report.json
+     * Genera el reporte mensual y lo guarda en storage/app/monthly_report.md
      * Siempre sobreescribe el archivo anterior.
      */
     public function generate(Request $request): JsonResponse
@@ -196,22 +204,21 @@ class MonthlyReportController extends Controller
 
         try {
             $report = [
-                'success'    => true,
-                'generated_at' => now()->toIso8601String(),
-                'period'     => ['start_date' => $startDate, 'end_date' => $endDate],
+                'period'      => ['start_date' => $startDate, 'end_date' => $endDate],
                 'ordenes_mes' => $this->buildOrdenes($startDate, $endDate),
-                'stats'      => $this->buildStats($startDate, $endDate),
+                'stats'       => $this->buildStats($startDate, $endDate),
             ];
 
-            Storage::disk('local')->put('monthly_report.json', json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            $md = $this->buildReportMarkdown($report);
+            Storage::disk('local')->put('monthly_report.md', $md);
 
             Log::info("[MonthlyReport] Reporte generado y guardado ({$startDate} → {$endDate})");
 
             return response()->json([
-                'success'      => true,
-                'message'      => 'Reporte generado correctamente',
-                'generated_at' => $report['generated_at'],
-                'period'       => $report['period'],
+                'success'       => true,
+                'message'       => 'Reporte generado correctamente',
+                'generated_at'  => now()->toIso8601String(),
+                'period'        => $report['period'],
                 'ordenes_count' => count($report['ordenes_mes']),
             ]);
         } catch (\Throwable $e) {
@@ -1137,8 +1144,14 @@ PROMPT;
         $md .= "- **Número de recaudos:** " . ($rec['count'] ?? 0) . "\n\n";
 
         // ── TRM ─────────────────────────────────────────────────────────────
+        $trmValues = array_filter(array_column($orders, 'trm'), fn($v) => (float)$v > 0);
+        $trmMin    = $trmValues ? $n(min($trmValues), 2) : null;
+        $trmMax    = $trmValues ? $n(max($trmValues), 2) : null;
         $md .= "## TRM\n";
         $md .= "- **TRM promedio del período:** \${$n($trm['average'] ?? 0, 2)} COP/USD\n";
+        if ($trmMin && $trmMax) {
+            $md .= "- **TRM mínima / máxima:** \${$trmMin} / \${$trmMax} COP/USD\n";
+        }
         if (($trm['variation'] ?? null) !== null) {
             $sign = ($trm['variation'] >= 0) ? '+' : '';
             $md .= "- **Variación vs período anterior:** {$sign}{$n($trm['variation'], 2)} ({$sign}{$trm['variation_pct']}%)\n";
@@ -1185,14 +1198,102 @@ PROMPT;
         }
         $md .= "\n";
 
+        // ── RESUMEN POR CLIENTE ─────────────────────────────────────────────
+        $clientMap = [];
+        foreach ($orders as $o) {
+            $ckey = ($o['cliente'] ?? '') . '||' . ($o['nit'] ?? '');
+            if (!isset($clientMap[$ckey])) {
+                $clientMap[$ckey] = [
+                    'cliente'    => $o['cliente']   ?? '',
+                    'nit'        => $o['nit']        ?? '',
+                    'ejecutiva'  => $o['ejecutivo']  ?? '',
+                    'ocs'        => 0,
+                    'value_usd'  => 0.0,
+                    'value_cop'  => 0.0,
+                    'kilos'      => 0.0,
+                ];
+            }
+            $clientMap[$ckey]['ocs']++;
+            $clientMap[$ckey]['value_usd'] += (float)($o['total_usd'] ?? 0);
+            $clientMap[$ckey]['value_cop'] += (float)($o['total_cop'] ?? 0);
+            foreach ($o['productos'] ?? [] as $p) {
+                if (empty($p['es_muestra'])) {
+                    $clientMap[$ckey]['kilos'] += (float)($p['cantidad'] ?? 0);
+                }
+            }
+        }
+        usort($clientMap, fn($a, $b) => $b['value_usd'] <=> $a['value_usd']);
+        $md .= "## RESUMEN POR CLIENTE\n";
+        $md .= "| Cliente | NIT | OCs | Valor USD | Valor COP | Kilos | Ejecutiva |\n";
+        $md .= "|---|---|---:|---:|---:|---:|---|\n";
+        foreach ($clientMap as $c) {
+            $md .= "| {$c['cliente']} | {$c['nit']} | {$c['ocs']} | \${$n($c['value_usd'], 2)} | \${$n($c['value_cop'])} | {$n($c['kilos'], 2)} | {$c['ejecutiva']} |\n";
+        }
+        $md .= "\n";
+
+        // ── TOP 10 PRODUCTOS PEDIDOS ─────────────────────────────────────────
+        $pedidosMap = [];
+        foreach ($orders as $o) {
+            $cons = $o['consecutivo'] ?? '';
+            foreach ($o['productos'] ?? [] as $p) {
+                if (!empty($p['es_muestra'])) continue;
+                $pname = $p['producto'] ?? '';
+                if (!isset($pedidosMap[$pname])) {
+                    $pedidosMap[$pname] = ['producto' => $pname, 'kilos' => 0.0, 'ocs' => []];
+                }
+                $pedidosMap[$pname]['kilos'] += (float)($p['cantidad'] ?? 0);
+                $pedidosMap[$pname]['ocs'][$cons] = true;
+            }
+        }
+        usort($pedidosMap, fn($a, $b) => $b['kilos'] <=> $a['kilos']);
+        $top10ped = array_slice($pedidosMap, 0, 10);
+        $md .= "## TOP 10 PRODUCTOS PEDIDOS (por kilos en OCs del período)\n";
+        $md .= "| # | Producto | Kilos pedidos | # OCs |\n|---|---|---:|---:|\n";
+        foreach ($top10ped as $i => $p) {
+            $md .= "| " . ($i + 1) . " | {$p['producto']} | {$n($p['kilos'], 2)} | " . count($p['ocs']) . " |\n";
+        }
+        $md .= "\n";
+
+        // ── NEW WIN CONSOLIDADO ──────────────────────────────────────────────
+        $newWinRows = [];
+        foreach ($orders as $o) {
+            $cons    = $o['consecutivo'] ?? '';
+            $exec    = $o['ejecutivo']   ?? '';
+            $cliente = $o['cliente']     ?? '';
+            foreach ($o['productos'] ?? [] as $p) {
+                if (!empty($p['new_win'])) {
+                    $newWinRows[] = [
+                        'oc'          => $cons,
+                        'producto'    => $p['producto']    ?? '',
+                        'kilos'       => (float)($p['cantidad']   ?? 0),
+                        'precio_usd'  => (float)($p['precio_usd'] ?? 0),
+                        'ejecutiva'   => $exec,
+                        'cliente'     => $cliente,
+                    ];
+                }
+            }
+        }
+        usort($newWinRows, fn($a, $b) => $b['precio_usd'] <=> $a['precio_usd']);
+        if (!empty($newWinRows)) {
+            $md .= "## NEW WIN DEL PERÍODO\n";
+            $md .= "| OC | Producto | Kilos | $/kg USD | Ejecutiva | Cliente |\n";
+            $md .= "|---|---|---:|---:|---|---|\n";
+            foreach ($newWinRows as $nw) {
+                $md .= "| {$nw['oc']} | {$nw['producto']} | {$n($nw['kilos'], 2)} | \${$n($nw['precio_usd'], 2)} | {$nw['ejecutiva']} | {$nw['cliente']} |\n";
+            }
+            $md .= "\n";
+        }
+
         // ── DETALLE DE ÓRDENES DEL MES ──────────────────────────────────────
         $md .= "## DETALLE DE ÓRDENES DEL MES\n\n";
         foreach ($orders as $o) {
             $cons    = $o['consecutivo']    ?? '';
             $estado  = $o['estado']         ?? '';
-            $cliente = $o['cliente']        ?? '';
-            $exec    = $o['ejecutivo']      ?? '';
-            $ciudad  = $o['ciudad_entrega'] ?? '';
+            $cliente   = $o['cliente']        ?? '';
+            $nit       = $o['nit']            ?? '';
+            $sucursal  = $o['sucursal']       ?? '';
+            $exec      = $o['ejecutivo']      ?? '';
+            $ciudad    = $o['ciudad_entrega'] ?? '';
             $fecha   = $o['fecha_despacho'] ?? 'Sin despachar';
             $usd     = $n($o['total_usd']   ?? 0, 2);
             $cop     = $n($o['total_cop']   ?? 0);
@@ -1216,7 +1317,9 @@ PROMPT;
             $totalUsdOc = (float)($o['total_usd'] ?? 0);
             $usdHeader  = $totalUsdOc > 0 ? " | \${$n($totalUsdOc, 2)} USD" : '';
             $md .= "### OC {$cons}{$tagStr} — {$estado} | Ejecutiva: {$exec} | {$n($totalKgOc, 2)} kg{$usdHeader}\n";
-            $md .= "- **Cliente:** {$cliente} | **Ciudad:** {$ciudad}\n";
+            $nitStr      = $nit      ? " | **NIT:** {$nit}"           : '';
+            $sucursalStr = $sucursal ? " | **Sucursal:** {$sucursal}" : '';
+            $md .= "- **Cliente:** {$cliente}{$nitStr}{$sucursalStr} | **Ciudad:** {$ciudad}\n";
             $md .= "- **Despacho:** {$fecha}";
             if ($factura) $md .= " | **Factura:** {$factura} | **Guía:** {$guia} | **Trans.:** {$trans}";
             $md .= "\n";
