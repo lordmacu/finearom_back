@@ -18,11 +18,25 @@ class ProjectMarketing extends Model
         'calidad',
         'obs_marketing',
         'obs_calidad',
+        'marca',
+        'tipo_aplicacion',
+        'packaging',
+        'claims',
+        'fecha_entrega_marketing',
+        'cert_alergenos',
+        'cert_biodegradabilidad',
+        'cert_animal_testing',
+        'cert_coa',
     ];
 
     protected $casts = [
-        'marketing' => 'array',
-        'calidad' => 'array',
+        'marketing'               => 'array',
+        'calidad'                 => 'array',
+        'fecha_entrega_marketing' => 'date',
+        'cert_alergenos'          => 'boolean',
+        'cert_biodegradabilidad'  => 'boolean',
+        'cert_animal_testing'     => 'boolean',
+        'cert_coa'                => 'boolean',
     ];
 
     public function project(): BelongsTo
