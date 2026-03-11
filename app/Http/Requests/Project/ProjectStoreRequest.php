@@ -43,6 +43,11 @@ class ProjectStoreRequest extends FormRequest
             'tipo_producto'   => 'nullable|string|max:200',
             'ejecutivo_id'    => 'nullable|integer|exists:users,id',
             'ejecutivo'       => 'nullable|string|max:200',
+            'fecha_cierre_estimada'      => 'nullable|date',
+            'potencial_anual_usd'        => 'nullable|numeric|min:0',
+            'potencial_anual_kg'         => 'nullable|numeric|min:0',
+            'probabilidad_cierre'        => 'nullable|in:alto,medio,bajo',
+            'frecuencia_compra_estimada' => 'nullable|integer|min:1|max:999',
         ];
     }
 }

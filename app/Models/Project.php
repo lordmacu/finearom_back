@@ -69,6 +69,11 @@ class Project extends Model
         'actualizado',
         'razon_perdida',
         'dias_diferencia',
+        'fecha_cierre_estimada',
+        'potencial_anual_usd',
+        'potencial_anual_kg',
+        'probabilidad_cierre',
+        'frecuencia_compra_estimada',
     ];
 
     protected $casts = [
@@ -97,6 +102,10 @@ class Project extends Model
         'fecha_mercadeo' => 'date',
         'fecha_calidad' => 'date',
         'fecha_especiales' => 'date',
+        'fecha_cierre_estimada'       => 'date',
+        'potencial_anual_usd'         => 'decimal:2',
+        'potencial_anual_kg'          => 'decimal:2',
+        'frecuencia_compra_estimada'  => 'integer',
     ];
 
     public function client(): BelongsTo

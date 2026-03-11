@@ -377,15 +377,44 @@ class ProjectController extends Controller
             'en_proceso' => Project::where('estado_interno', 'En proceso')->count(),
         ];
 
+        $winsAnio = Project::where('estado_externo', 'Ganado')
+            ->whereYear('updated_at', now()->year)
+            ->count();
+
+        $potencialPorProbabilidad = Project::query()
+            ->where('estado_externo', 'En espera')
+            ->whereNotNull('probabilidad_cierre')
+            ->selectRaw('probabilidad_cierre, SUM(potencial_anual_usd) as total_usd, COUNT(*) as cantidad')
+            ->groupBy('probabilidad_cierre')
+            ->get()
+            ->keyBy('probabilidad_cierre');
+
+        $pronosticoAnual = Project::where('estado_externo', 'En espera')
+            ->whereNotNull('probabilidad_cierre')
+            ->whereNotNull('potencial_anual_usd')
+            ->get(['probabilidad_cierre', 'potencial_anual_usd'])
+            ->sum(function ($p) {
+                $peso = match($p->probabilidad_cierre) {
+                    'alto'  => 0.8,
+                    'medio' => 0.5,
+                    'bajo'  => 0.2,
+                    default => 0,
+                };
+                return $p->potencial_anual_usd * $peso;
+            });
+
         return response()->json([
             'success' => true,
             'data' => [
-                'totals'           => $totals,
-                'by_tipo'          => $byTipo,
-                'by_estado_externo' => $byEstadoExterno,
-                'by_estado_interno' => $byEstadoInterno,
-                'by_ejecutivo'     => $byEjecutivo,
-                'by_month'         => $byMonth,
+                'totals'                 => $totals,
+                'by_tipo'                => $byTipo,
+                'by_estado_externo'      => $byEstadoExterno,
+                'by_estado_interno'      => $byEstadoInterno,
+                'by_ejecutivo'           => $byEjecutivo,
+                'by_month'               => $byMonth,
+                'wins_anio'              => $winsAnio,
+                'potencial_probabilidad' => $potencialPorProbabilidad,
+                'pronostico_anual_usd'   => round($pronosticoAnual, 2),
             ],
         ]);
     }
