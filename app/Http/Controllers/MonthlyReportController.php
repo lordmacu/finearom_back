@@ -76,10 +76,14 @@ class MonthlyReportController extends Controller
                   "Cuando el usuario haga una pregunta, respóndela directamente sin repetir el contexto.\n\n" .
 
                   "GLOSARIO DE CAMPOS — lee esto antes de responder cualquier pregunta:\n" .
+                  "- stats.ordenes_creadas.value_usd = TOTAL DE ÓRDENES en USD (valor de todas las OC creadas en el período, sin importar estado)\n" .
+                  "- stats.ordenes_creadas.value_cop = TOTAL DE ÓRDENES en COP\n" .
+                  "- stats.ordenes_creadas.total = número total de órdenes de compra creadas en el período\n" .
                   "- stats.despachos = lo que se DESPACHÓ/FACTURÓ realmente (dinero ya enviado al cliente)\n" .
-                  "- stats.planeado = valor total de las OC CREADAS en el período (pedidos, no necesariamente despachados)\n" .
                   "- stats.despachos.value_usd = monto facturado/despachado en USD\n" .
-                  "- stats.planeado.value_usd = monto total de órdenes creadas en USD (incluye pendientes)\n" .
+                  "- stats.despachos.value_cop = monto facturado/despachado en COP\n" .
+                  "- stats.planeado = OC que tienen fecha de despacho programada dentro del período (subconjunto del total)\n" .
+                  "- stats.planeado.value_usd = valor de OC con despacho programado en el período (NO es el total de órdenes)\n" .
                   "- ordenes[].productos = líneas de producto de cada orden\n" .
                   "- ordenes[].status = completed (despachada completa) | parcial_status (despacho parcial)\n" .
                   "- muestra=1 en productos = muestra gratis (precio 0, no cuenta como venta)\n" .
@@ -87,7 +91,7 @@ class MonthlyReportController extends Controller
 
                   "REPORTE:\n{$reportJson}\n\n" .
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
-                  "indicando el período, cuántas órdenes contiene, y cuánto se despachó vs cuánto fue planeado en USD.";
+                  "indicando el período, el total de órdenes creadas (stats.ordenes_creadas.value_usd), y cuánto se despachó/facturó realmente (stats.despachos.value_usd) en USD.";
 
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
