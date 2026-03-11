@@ -1445,11 +1445,11 @@ class DashboardController extends Controller
                 FROM purchase_orders po
                 JOIN clients c ON po.client_id = c.id
                 LEFT JOIN (
-                    SELECT purchase_order_id, MIN(dispatch_date) AS first_dispatch
+                    SELECT order_id, MIN(dispatch_date) AS first_dispatch
                     FROM partials
                     WHERE type = 'real' AND dispatch_date IS NOT NULL
-                    GROUP BY purchase_order_id
-                ) p ON p.purchase_order_id = po.id
+                    GROUP BY order_id
+                ) p ON p.order_id = po.id
                 WHERE po.order_creation_date BETWEEN ? AND ?
                   AND c.client_type IN ('AA', 'A', 'B', 'C')
                   AND (po.is_muestra = 0 OR po.is_muestra IS NULL)
