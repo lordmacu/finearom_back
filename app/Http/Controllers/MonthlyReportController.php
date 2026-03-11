@@ -100,7 +100,8 @@ class MonthlyReportController extends Controller
                   "- En DETALLE DE ÓRDENES, el Valor mostrado corresponde a lo despachado real (partials), no al valor total de la orden\n" .
                   "- En DETALLE DE ÓRDENES, el header de cada OC incluye la ejecutiva y los kilos totales (excluyendo muestras). Para verificar kilos de una ejecutiva, suma los kg del header de sus OCs — el resultado debe coincidir con la columna 'Kilos' de ESTADÍSTICAS POR EJECUTIVA\n" .
                   "- CARTERA y RECAUDOS son en PESOS COLOMBIANOS (COP). Para convertir a USD usar la TRM de hoy indicada arriba\n" .
-                  "- NUNCA usar la TRM de hoy para convertir valores de órdenes — cada OC tiene su propia TRM\n\n" .
+                  "- NUNCA usar la TRM de hoy para convertir valores de órdenes — cada OC tiene su propia TRM\n" .
+                  "- Cumplimiento del período = (total despachado USD) / (total órdenes creadas USD) × 100. Si se pregunta cuánto sería el cumplimiento si todo lo planeado se despacha, sumar el planeado + lo ya despachado y dividir entre el total creado\n\n" .
 
                   "REPORTE:\n" . ($md = $this->buildReportMarkdown($report)) . "\n\n" .
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
