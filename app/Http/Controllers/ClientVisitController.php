@@ -59,6 +59,16 @@ class ClientVisitController extends Controller
             $query->where('fecha_inicio', '<=', $request->input('fecha_hasta'));
         }
 
+        if ($request->filled('search')) {
+            $search = '%' . $request->input('search') . '%';
+            $query->where(function ($q) use ($search) {
+                $q->where('titulo', 'like', $search)
+                  ->orWhere('nombre_cliente', 'like', $search)
+                  ->orWhere('lugar', 'like', $search)
+                  ->orWhereHas('client', fn($c) => $c->where('client_name', 'like', $search));
+            });
+        }
+
         $visits = $query->orderBy('fecha_inicio', 'desc')->paginate(20);
 
         return response()->json($visits);
