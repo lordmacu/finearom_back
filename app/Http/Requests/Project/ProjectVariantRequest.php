@@ -14,8 +14,9 @@ class ProjectVariantRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'nombre'        => ['required', 'string', 'max:255'],
-            'observaciones' => ['nullable', 'string', 'max:2000'],
+            'nombre'                 => ['required', 'string', 'max:255'],
+            'observaciones'          => ['nullable', 'string', 'max:2000'],
+            'benchmark_reference_id' => ['nullable', 'integer', 'exists:finearom_references,id'],
         ];
     }
 }

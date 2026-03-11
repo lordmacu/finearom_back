@@ -15,6 +15,7 @@ class ProjectEvaluation extends Model
     protected $fillable = [
         'project_id',
         'tipos',
+        'metodologia',
         'observacion',
     ];
 

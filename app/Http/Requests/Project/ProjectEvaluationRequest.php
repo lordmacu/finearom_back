@@ -14,9 +14,10 @@ class ProjectEvaluationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'tipos'          => ['nullable', 'array'],
-            'tipos.*'        => ['nullable', 'string', 'max:255'],
-            'observacion'    => ['nullable', 'string', 'max:2000'],
+            'tipos'       => ['nullable', 'array'],
+            'tipos.*'     => ['nullable', 'string', 'max:255'],
+            'metodologia' => ['nullable', 'in:olfativa,instrumental,mixta'],
+            'observacion' => ['nullable', 'string', 'max:2000'],
         ];
     }
 }

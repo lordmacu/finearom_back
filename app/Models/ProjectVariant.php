@@ -17,6 +17,7 @@ class ProjectVariant extends Model
         'project_id',
         'nombre',
         'observaciones',
+        'benchmark_reference_id',
     ];
 
     public function project(): BelongsTo
@@ -27,5 +28,10 @@ class ProjectVariant extends Model
     public function proposals(): HasMany
     {
         return $this->hasMany(ProjectProposal::class, 'variant_id');
+    }
+
+    public function benchmarkReference(): BelongsTo
+    {
+        return $this->belongsTo(FinearomReference::class, 'benchmark_reference_id');
     }
 }

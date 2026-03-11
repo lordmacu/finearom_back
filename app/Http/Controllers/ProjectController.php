@@ -194,6 +194,7 @@ class ProjectController extends Controller
             'evaluation',
             'marketingYCalidad',
             'variants.proposals.finearomReference',
+            'variants.benchmarkReference',
             'requests.fragrance',
             'fragrances.fineFragrance',
         ]);
