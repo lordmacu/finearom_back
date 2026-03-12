@@ -322,8 +322,9 @@ class MonthlyReportController extends Controller
             "  * Clasificación portafolio (legado): 'pareto' (estratégico), 'balance', 'none'\n" .
             "- clients.lead_time (INT, días) = tiempo de entrega estándar del cliente (AA/A = 9 días, C = 12 días)\n" .
             "- Lead time real de una OC = DATEDIFF(fecha_primer_despacho_real, po.order_creation_date)\n" .
-            "- On-time = el despacho real ocurrió en o antes de la fecha requerida\n" .
-            "  → usar po.required_delivery_date (campo en purchase_orders) O pop.delivery_date (campo en purchase_order_product, por línea de producto)\n" .
+            "- On-time = el despacho real ocurrió en o antes de la fecha acordada de entrega\n" .
+            "  → SIEMPRE usar pop.delivery_date (en purchase_order_product) — es la fecha acordada por línea, la más precisa para on-time\n" .
+            "  → po.required_delivery_date es la fecha que pidió originalmente el cliente, suele ser anterior al despacho real, NO usar para on-time\n" .
             "  → ⚠ NUNCA uses pop.required_delivery_date — ese campo NO EXISTE en purchase_order_product\n" .
             "- Para análisis de lead time usar: JOIN con c.client_type IN ('AA','A','B','C')\n\n" .
             "CARTERA — FORMATO Y LÓGICA:\n" .
