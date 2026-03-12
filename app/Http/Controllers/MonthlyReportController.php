@@ -489,7 +489,9 @@ class MonthlyReportController extends Controller
             "CRÍTICO de cartera: saldo_contable ya es decimal normal con punto ('26857379.12'). Usar: CAST(saldo_contable AS DECIMAL(15,2)). NUNCA uses REPLACE para quitar puntos — destruyes el decimal. " .
             "CARTERA POR EJECUTIVA: NO filtres por cartera.vendedor — usa JOIN cartera ca ON ca.nit = clients.nit y filtra por clients.executive. " .
             "CARTERA GROUP BY: cartera tiene UNA FILA POR FACTURA. Si agrupas por nit/cliente → usa SUM(CAST(saldo_contable AS DECIMAL(15,2))). Si listas facturas individuales → sin GROUP BY, usa CAST directo. NUNCA mezcles saldo_contable sin agregar en un SELECT con GROUP BY. " .
-            "FILL RATE: SUM(par.quantity)/SUM(pop.quantity)*100 — mide % de kilos pedidos que se despacharon. " .
+            "FILL RATE: siempre partir desde partials (dispatch_date en período), NO desde order_creation_date. " .
+            "Query correcta: FROM partials par JOIN purchase_order_product pop ON par.product_order_id=pop.id AND pop.muestra=0 WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN X AND Y. " .
+            "Fill rate = SUM(par.quantity)/SUM(pop.quantity)*100. " .
             "TENDENCIAS DIARIAS: usa tabla order_statistics (date, commercial_dispatched_value_usd, dispatched_orders_count, total_orders_created, dispatch_fulfillment_rate_usd, pending_dispatch_value_usd, extended_stats JSON) — es un snapshot pre-calculado por día, más eficiente que agregar partials. " .
             "CRÍTICO GROUP BY (MariaDB ONLY_FULL_GROUP_BY): TODOS los campos no-agregados del SELECT deben estar en el GROUP BY. " .
             "Si el SELECT tiene c.client_name, c.executive → el GROUP BY DEBE tener c.id, c.client_name, c.executive. " .
@@ -2112,17 +2114,17 @@ FROM order_statistics
 WHERE date BETWEEN '2026-03-01' AND '2026-03-31'
 ORDER BY date;
 
-Fill rate del período (% de kilos pedidos que se despacharon):
+Fill rate del período (% de kilos pedidos que se despacharon en el período):
+-- CORRECTO: partir desde partials con dispatch_date en el período, no desde order_creation_date
 SELECT
   SUM(pop.quantity) kilos_pedidos,
-  COALESCE(SUM(par.quantity),0) kilos_despachados,
-  ROUND(COALESCE(SUM(par.quantity),0) / NULLIF(SUM(pop.quantity),0) * 100, 1) fill_rate_pct
-FROM purchase_orders po
-JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
-LEFT JOIN partials par ON par.product_order_id = pop.id AND par.type='real' AND par.deleted_at IS NULL
-  AND par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31'
-WHERE po.order_creation_date BETWEEN '2026-03-01' AND '2026-03-31'
-  AND pop.muestra = 0;
+  SUM(par.quantity) kilos_despachados,
+  ROUND(SUM(par.quantity) / NULLIF(SUM(pop.quantity),0) * 100, 1) fill_rate_pct
+FROM partials par
+JOIN purchase_order_product pop ON par.product_order_id = pop.id AND pop.muestra = 0
+JOIN purchase_orders po ON po.id = par.order_id
+WHERE par.type='real' AND par.deleted_at IS NULL
+  AND par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31';
 
 Historial de precios de un producto:
 SELECT p.product_name, ph.price precio_usd_kg, ph.effective_date vigente_desde
