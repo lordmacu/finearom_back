@@ -468,6 +468,7 @@ class MonthlyReportController extends Controller
 
         // Recordatorio compacto para que la IA no pierda contexto entre turnos
         $schemaHint = "Recuerda: eres el asistente de análisis de Finearom. " .
+            "Base de datos: MariaDB 11.4 — soporta CTEs (WITH), window functions (SUM/ROW_NUMBER OVER), y FIELD() para ordenamiento personalizado. Úsalos cuando aporten claridad (ej: Pareto con pct acumulado, rankings). " .
             "Período activo de esta sesión: {$periodStart} al {$periodEnd}. " .
             "REGLA DE FECHAS: usa SIEMPRE {$periodStart} y {$periodEnd} como filtro por defecto en todas las queries. " .
             "EXCEPCIÓN 1: si el usuario menciona fechas distintas en su mensaje, esas fechas SOBREESCRIBEN el período activo. " .
