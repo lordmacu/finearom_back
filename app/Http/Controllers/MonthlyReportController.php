@@ -322,7 +322,9 @@ class MonthlyReportController extends Controller
             "  * Clasificación portafolio (legado): 'pareto' (estratégico), 'balance', 'none'\n" .
             "- clients.lead_time (INT, días) = tiempo de entrega estándar del cliente (AA/A = 9 días, C = 12 días)\n" .
             "- Lead time real de una OC = DATEDIFF(fecha_primer_despacho_real, po.order_creation_date)\n" .
-            "- On-time = el despacho real ocurrió en o antes de po.required_delivery_date\n" .
+            "- On-time = el despacho real ocurrió en o antes de la fecha requerida\n" .
+            "  → usar po.required_delivery_date (campo en purchase_orders) O pop.delivery_date (campo en purchase_order_product, por línea de producto)\n" .
+            "  → ⚠ NUNCA uses pop.required_delivery_date — ese campo NO EXISTE en purchase_order_product\n" .
             "- Para análisis de lead time usar: JOIN con c.client_type IN ('AA','A','B','C')\n\n" .
             "CARTERA — FORMATO Y LÓGICA:\n" .
             "- saldo_contable y saldo_vencido son strings con PUNTO como separador decimal (ej: '26857379.12', '-256309.65'). Ya son decimales normales.\n" .
@@ -1882,11 +1884,12 @@ PROMPT;
 - id PK, client_id FK→clients.id, order_consecutive (ej: '2258-4500302325'), status ('pending'|'processing'|'completed'|'cancelled'|'parcial_status'), order_creation_date (date), dispatch_date (date — fecha estimada puesta por Marlon), required_delivery_date (date — fecha solicitada por el cliente), trm, is_new_win (0/1), is_muestra (0/1), observations, created_at
 - pending = Francy creó, esperando Marlon | processing = Marlon revisó, en preparación | parcial_status = Alexa despachó parcialmente | completed = Alexa despachó todo
 - LEAD TIME por OC = DATEDIFF(fecha_real_despacho, order_creation_date). Comparar con clients.lead_time para saber si fue en tiempo.
-- ON TIME = dispatch real <= required_delivery_date
+- ON TIME = dispatch real <= required_delivery_date (campo en purchase_orders, NO en purchase_order_product)
 - NOTA: la ejecutiva se obtiene JOIN clients → clients.executive
 
 ### purchase_order_product — Líneas de producto en OCs
-- id PK, purchase_order_id FK→purchase_orders.id, product_id FK→products.id, quantity (kg pedidos), price (USD/kg negociado — puede ser NULL en OCs antiguas), new_win (0/1), muestra (0/1), delivery_date, branch_office_id FK→branch_offices.id (sucursal de entrega), status
+- id PK, purchase_order_id FK→purchase_orders.id, product_id FK→products.id, quantity (kg pedidos), price (USD/kg negociado — puede ser NULL en OCs antiguas), new_win (0/1), muestra (0/1), delivery_date (date — fecha de entrega por línea), branch_office_id FK→branch_offices.id (sucursal de entrega), status
+- ⚠ required_delivery_date NO existe en purchase_order_product — está en purchase_orders. Para on-time usar po.required_delivery_date o pop.delivery_date
 - cierre_cartera (DATETIME) — fecha esperada de cierre/pago de esta línea
 - Para precio real usar siempre: COALESCE(NULLIF(pop.price,0), p.price, 0)
 
