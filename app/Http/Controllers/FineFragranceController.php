@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Services\GoogleDriveService;
 use Illuminate\Support\Facades\Storage;
 
 class FineFragranceController extends Controller
@@ -244,13 +245,43 @@ class FineFragranceController extends Controller
             'photo' => ['required', 'image', 'mimes:jpeg,jpg,png,webp', 'max:5120'],
         ]);
 
-        if ($fineFragrance->foto_url && str_starts_with($fineFragrance->foto_url, '/storage/')) {
-            Storage::disk('public')->delete(
-                substr($fineFragrance->foto_url, strlen('/storage/'))
-            );
+        $file      = $request->file('photo');
+        $fineFragrance->loadMissing('house');
+        $houseName = $fineFragrance->house?->nombre ?? 'Sin Casa';
+        $filename  = $fineFragrance->contratipo . '_' . $fineFragrance->tipo . '.' . $file->getClientOriginalExtension();
+
+        /** @var GoogleDriveService $drive */
+        $drive  = app(GoogleDriveService::class);
+        $userId = $drive->getAnyUserWithDriveAccess();
+
+        if ($userId) {
+            $folderId = $drive->getOrCreateFineFragrancesPhotoFolder($userId, $houseName);
+            $result   = $drive->uploadFile($userId, $file->get(), $filename, $folderId, $file->getMimeType());
+
+            if ($result) {
+                $drive->makePublic($userId, $result['id']);
+                $url = $result['webViewLink'];
+
+                // Delete old local file if it was stored locally
+                if ($fineFragrance->foto_url && str_starts_with($fineFragrance->foto_url, '/storage/')) {
+                    Storage::disk('public')->delete(substr($fineFragrance->foto_url, strlen('/storage/')));
+                }
+
+                $fineFragrance->update(['foto_url' => $url]);
+
+                return response()->json([
+                    'data'    => $fineFragrance->fresh()->load('house'),
+                    'message' => 'Foto subida a Google Drive correctamente',
+                ]);
+            }
         }
 
-        $path = $request->file('photo')->store('fine-fragrances', 'public');
+        // Fallback: local storage
+        if ($fineFragrance->foto_url && str_starts_with($fineFragrance->foto_url, '/storage/')) {
+            Storage::disk('public')->delete(substr($fineFragrance->foto_url, strlen('/storage/')));
+        }
+
+        $path = $file->store('fine-fragrances', 'public');
         $url  = '/storage/' . $path;
 
         $fineFragrance->update(['foto_url' => $url]);

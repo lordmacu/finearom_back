@@ -191,6 +191,23 @@ class GoogleDriveService
     }
 
     /**
+     * Carpeta de fragancia fina: [Raíz] / "Fine Fragrances" / "Fotos" / "NombreCasa"
+     */
+    public function getOrCreateFineFragrancesPhotoFolder(int $userId, string $houseName): ?string
+    {
+        $rootId = $this->getRootFolder($userId);
+        if (!$rootId) return null;
+
+        $ffId = $this->getOrCreate($userId, 'Fine Fragrances', $rootId);
+        if (!$ffId) return null;
+
+        $fotosId = $this->getOrCreate($userId, 'Fotos', $ffId);
+        if (!$fotosId) return null;
+
+        return $this->getOrCreate($userId, $houseName, $fotosId);
+    }
+
+    /**
      * Carpeta de categoría dentro de un proyecto: [Raíz] / "Proyectos" / "Proyecto" / "Categoría"
      * categorias: ficha_tecnica → "Ficha Técnica", formulacion → "Formulación", etc.
      */
