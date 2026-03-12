@@ -14,6 +14,7 @@ class FineFragrance extends Model
     protected $fillable = [
         'fine_fragrance_house_id',
         'contratipo',
+        'inspiracion',
         'ano_lanzamiento',
         'ano_desarrollo',
         'genero',

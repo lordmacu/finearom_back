@@ -455,6 +455,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('fine-fragrance-houses', FineFragranceHouseController::class);
     Route::post('fine-fragrances/{fineFragrance}/update-price', [FineFragranceController::class, 'updatePrice']);
     Route::post('fine-fragrances/{fineFragrance}/add-inventory', [FineFragranceController::class, 'addInventory']);
+    Route::post('fine-fragrances/{fineFragrance}/upload-photo', [FineFragranceController::class, 'uploadPhoto']);
     Route::post('fine-fragrances/import', [FineFragranceController::class, 'import']);
     Route::apiResource('fine-fragrances', FineFragranceController::class);
 

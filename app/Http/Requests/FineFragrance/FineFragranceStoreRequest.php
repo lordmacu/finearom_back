@@ -16,6 +16,7 @@ class FineFragranceStoreRequest extends FormRequest
         return [
             'fine_fragrance_house_id' => ['required', 'integer', 'exists:fine_fragrance_houses,id'],
             'contratipo'              => ['required', 'string', 'max:255'],
+            'inspiracion'             => ['nullable', 'string', 'max:255'],
             'tipo'                    => ['required', 'string', 'in:305,310,350'],
             'ano_lanzamiento'         => ['nullable', 'integer', 'min:1900', 'max:2100'],
             'ano_desarrollo'          => ['nullable', 'integer', 'min:1900', 'max:2100'],

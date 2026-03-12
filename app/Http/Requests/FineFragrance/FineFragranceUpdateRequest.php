@@ -16,6 +16,7 @@ class FineFragranceUpdateRequest extends FormRequest
         return [
             'fine_fragrance_house_id' => ['sometimes', 'integer', 'exists:fine_fragrance_houses,id'],
             'contratipo'              => ['sometimes', 'string', 'max:255'],
+            'inspiracion'             => ['sometimes', 'nullable', 'string', 'max:255'],
             'tipo'                    => ['sometimes', 'string', 'in:305,310,350'],
             'ano_lanzamiento'         => ['sometimes', 'nullable', 'integer', 'min:1900', 'max:2100'],
             'ano_desarrollo'          => ['sometimes', 'nullable', 'integer', 'min:1900', 'max:2100'],

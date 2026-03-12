@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class FineFragranceController extends Controller
 {
@@ -18,7 +19,7 @@ class FineFragranceController extends Controller
     {
         $this->middleware('can:fine fragrance list')->only(['index', 'show']);
         $this->middleware('can:fine fragrance create')->only(['store', 'import']);
-        $this->middleware('can:fine fragrance edit')->only(['update', 'updatePrice', 'addInventory']);
+        $this->middleware('can:fine fragrance edit')->only(['update', 'updatePrice', 'addInventory', 'uploadPhoto']);
         $this->middleware('can:fine fragrance delete')->only(['destroy']);
     }
 
@@ -235,5 +236,28 @@ class FineFragranceController extends Controller
             'upserted' => $upserted,
             'errors'   => $errors,
         ], 200);
+    }
+
+    public function uploadPhoto(Request $request, FineFragrance $fineFragrance): JsonResponse
+    {
+        $request->validate([
+            'photo' => ['required', 'image', 'mimes:jpeg,jpg,png,webp', 'max:5120'],
+        ]);
+
+        if ($fineFragrance->foto_url && str_starts_with($fineFragrance->foto_url, '/storage/')) {
+            Storage::disk('public')->delete(
+                substr($fineFragrance->foto_url, strlen('/storage/'))
+            );
+        }
+
+        $path = $request->file('photo')->store('fine-fragrances', 'public');
+        $url  = '/storage/' . $path;
+
+        $fineFragrance->update(['foto_url' => $url]);
+
+        return response()->json([
+            'data'    => $fineFragrance->fresh()->load('house'),
+            'message' => 'Foto actualizada correctamente',
+        ]);
     }
 }
