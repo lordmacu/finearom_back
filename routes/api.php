@@ -487,7 +487,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/dashboard/chat/message',           [\App\Http\Controllers\MonthlyReportController::class, 'chatMessage']);
     Route::post('/dashboard/chat/run-query',         [\App\Http\Controllers\MonthlyReportController::class, 'runQuery']);
     Route::get('/dashboard/chat/sessions',           [\App\Http\Controllers\MonthlyReportController::class, 'chatSessions']);
-    Route::get('/dashboard/chat/sessions/{session}', [\App\Http\Controllers\MonthlyReportController::class, 'chatSessionMessages']);
+    Route::get('/dashboard/chat/sessions/{session}',    [\App\Http\Controllers\MonthlyReportController::class, 'chatSessionMessages']);
+    Route::delete('/dashboard/chat/sessions/{session}', [\App\Http\Controllers\MonthlyReportController::class, 'chatSessionDelete']);
 });
 
 // Webhook (no requiere auth Sanctum - usa HMAC signature)

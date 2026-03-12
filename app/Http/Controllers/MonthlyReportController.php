@@ -294,6 +294,16 @@ class MonthlyReportController extends Controller
     }
 
     /**
+     * Elimina una sesión de chat del usuario autenticado.
+     */
+    public function chatSessionDelete(ChatSession $session): JsonResponse
+    {
+        abort_if($session->user_id !== auth()->id(), 403);
+        $session->delete();
+        return response()->json(['success' => true]);
+    }
+
+    /**
      * Ejecuta una query SELECT enviada por el frontend (generada por la IA).
      * Solo permite SELECT — bloquea cualquier otra operación DML/DDL.
      */
