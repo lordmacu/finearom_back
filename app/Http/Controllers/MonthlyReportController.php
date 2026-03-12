@@ -264,10 +264,13 @@ class MonthlyReportController extends Controller
             "- 'completada', 'completa', 'entregada', 'despachada' → 'completed'\n" .
             "- 'cancelada', 'cancelado', 'anulada' → 'cancelled'\n\n" .
             "CUÁNDO NO FILTRAR POR FECHA DE CREACIÓN (regla crítica):\n" .
-            "El filtro order_creation_date BETWEEN solo aplica cuando el usuario pregunta por órdenes CREADAS en un período.\n" .
-            "Para estas preguntas NO uses BETWEEN sobre order_creation_date — las órdenes pueden ser de cualquier fecha:\n" .
+            "El filtro order_creation_date BETWEEN solo aplica cuando el usuario pregunta por órdenes CREADAS en un período específico.\n" .
+            "⚠ NUNCA uses order_creation_date BETWEEN cuando el filtro principal es por STATUS — las órdenes activas pueden ser de cualquier fecha:\n" .
+            "- WHERE po.status = 'processing' → SIN filtro de fecha de creación\n" .
+            "- WHERE po.status = 'parcial_status' → SIN filtro de fecha de creación\n" .
+            "- WHERE po.status IN ('processing','parcial_status') → SIN filtro de fecha de creación\n" .
+            "- WHERE po.status = 'pending' → SIN filtro de fecha de creación\n" .
             "- Órdenes 'estancadas', 'sin despacho', 'sin movimiento' → filtra por status + DATEDIFF(CURDATE(), po.order_creation_date) > X\n" .
-            "- Kilos pendientes / órdenes en parcial_status → todas las parcial_status activas sin importar fecha de creación\n" .
             "- Pipeline (órdenes pending o processing sin completar) → sin filtro de fecha de creación\n" .
             "  → Ejemplo estancadas: WHERE po.status='processing' AND par.id IS NULL AND DATEDIFF(CURDATE(), po.order_creation_date) > 15\n" .
             "  → Ejemplo kilos pendientes: WHERE po.status='parcial_status' (sin BETWEEN)\n\n" .
@@ -480,11 +483,12 @@ class MonthlyReportController extends Controller
             "branch_offices (id, client_id, name, nit, delivery_address, delivery_city — sucursal de entrega por línea), " .
             "products (id, code, product_name, price USD/kg — precio catálogo fallback), " .
             "partials (id, order_id, product_order_id, quantity kg despachados, type 'temporal'=Marlon estimó|'real'=Alexa despachó, dispatch_date, trm, invoice_number, tracking_number, transporter, deleted_at SOFT DELETE), " .
-            "cartera (nit, nombre_empresa, saldo_contable STRING formato colombiano '1.234.567,89', saldo_vencido STRING, fecha_cartera), " .
+            "cartera (nit, nombre_empresa, saldo_contable VARCHAR decimal '26857379.12' — CAST directo sin REPLACE, saldo_vencido VARCHAR mismo formato — CAST(saldo_vencido AS DECIMAL(15,2)), dias INT negativo=vencido, fecha_cartera — filtrar siempre por MAX(fecha_cartera)), " .
             "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP), " .
             "trm_daily (date, value COP/USD). " .
             "REGLA de filtro por período: si la pregunta es sobre órdenes DESPACHADAS/FACTURADAS → usa partials: par.type='real' AND par.dispatch_date BETWEEN '{$periodStart}' AND '{$periodEnd}' AND par.deleted_at IS NULL AND pop.muestra=0. " .
             "Si la pregunta es sobre órdenes CREADAS → usa purchase_orders directo: po.order_creation_date BETWEEN '{$periodStart}' AND '{$periodEnd}' (sin JOIN a partials). " .
+            "Si la pregunta es sobre órdenes ACTIVAS por STATUS (processing, parcial_status, pending) → NO uses order_creation_date BETWEEN — las órdenes activas pueden ser de cualquier fecha. Solo filtra por el status. " .
             "Para mostrar ejecutiva como nombre (no email): GROUP BY c.executive, SELECT REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva. " .
             "CRÍTICO de cantidades: usa SIEMPRE par.quantity (kilos despachados), NO pop.quantity (kilos pedidos). " .
             "CRÍTICO de precio: pop.price puede ser NULL en órdenes antiguas. SIEMPRE usa COALESCE(NULLIF(pop.price,0), p.price, 0) y haz JOIN products p ON pop.product_id=p.id. " .
