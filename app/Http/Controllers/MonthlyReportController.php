@@ -328,7 +328,8 @@ class MonthlyReportController extends Controller
             "- NUNCA uses REPLACE para quitar puntos — destruyes el separador decimal y multiplicas el valor por 10.\n" .
             "- Para ordenar: ORDER BY CAST(saldo_contable AS DECIMAL(15,2)) DESC\n" .
             "- dias: POSITIVO = factura por vencer, NEGATIVO = factura VENCIDA hace |dias| días\n" .
-            "- Facturas vencidas: WHERE dias < 0 OR vence < CURDATE()\n" .
+            "- Facturas vencidas: WHERE dias < 0 — para días de mora usar ABS(ca.dias). NUNCA DATEDIFF(CURDATE(), fecha_cartera).\n" .
+            "- ⚠ SIEMPRE filtrar: fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera) — sin esto traes todos los snapshots históricos y repites miles de filas.\n" .
             "- cartera.documento = número de factura → se cruza con recaudos.numero_factura para ver pagos\n" .
             "- Deuda neta real = saldo_contable MENOS lo pagado: MAX(saldo - SUM(recaudos.valor_cancelado), 0)\n" .
             "- catera_type: 'nacional' | 'internacional' (para filtrar cartera de exportación vs local)\n" .
@@ -1908,6 +1909,7 @@ PROMPT;
 - fecha (DATE) — fecha de emisión de la factura
 - vence (DATE) — fecha de vencimiento de la factura
 - dias (INT) — días de cartera: POSITIVO = factura AÚN no vencida (días restantes), NEGATIVO = factura VENCIDA hace N días
+  → Para días de mora usar: ABS(ca.dias) WHERE ca.dias < 0. NUNCA usar DATEDIFF(CURDATE(), fecha_cartera) — eso es la antigüedad del snapshot, no los días de mora.
 - saldo_contable (STRING COP) — saldo total de la factura
 - saldo_vencido (STRING COP) — porción ya vencida del saldo
 - vendedor, nombre_vendedor — vendedor en SIIGO (puede diferir de clients.executive)
