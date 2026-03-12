@@ -31,6 +31,6 @@ class ReferenceFormulaLine extends Model
     public function rawMaterial(): BelongsTo
     {
         return $this->belongsTo(RawMaterial::class, 'raw_material_id')
-                    ->select(['id', 'nombre', 'unidad', 'costo_unitario', 'stock_disponible', 'activo']);
+                    ->select(['id', 'nombre', 'tipo', 'unidad', 'costo_unitario', 'stock_disponible', 'activo']);
     }
 }

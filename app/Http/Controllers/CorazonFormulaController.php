@@ -94,6 +94,8 @@ class CorazonFormulaController extends Controller
 
         $line->load('rawMaterial');
 
+        $this->updateCorazonCosto($rawMaterial);
+
         return response()->json([
             'data'    => $line,
             'message' => $line->wasRecentlyCreated
@@ -115,6 +117,28 @@ class CorazonFormulaController extends Controller
 
         $corazonFormulaLine->delete();
 
+        $this->updateCorazonCosto($rawMaterial);
+
         return response()->json(['message' => 'Ingrediente eliminado correctamente.']);
+    }
+
+    /**
+     * Recalculates and persists the costo_unitario of the corazon based on its current formula.
+     */
+    private function updateCorazonCosto(RawMaterial $corazon): void
+    {
+        $lines = $corazon->corazonComponents()->with('rawMaterial')->get();
+
+        $costoTotal = 0.0;
+        foreach ($lines as $line) {
+            $rm = $line->rawMaterial;
+            if (!$rm) {
+                continue;
+            }
+            $factor      = $this->toKgFactor($rm->unidad);
+            $costoTotal += ((float) $line->porcentaje / 100) * ((float) $rm->costo_unitario / $factor);
+        }
+
+        $corazon->update(['costo_unitario' => round($costoTotal, 4)]);
     }
 }

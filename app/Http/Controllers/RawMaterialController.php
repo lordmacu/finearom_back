@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\RawMaterial\RawMaterialStoreRequest;
 use App\Http\Requests\RawMaterial\RawMaterialUpdateRequest;
+use App\Models\CorazonFormulaLine;
 use App\Models\FinearomPriceHistory;
 use App\Models\FinearomReference;
 use App\Models\RawMaterial;
@@ -146,7 +147,17 @@ class RawMaterialController extends Controller
 
         $rawMaterial->update(['costo_unitario' => $costoNuevo]);
 
-        $updatedCount = $this->recalculateReferencePrices($rawMaterial);
+        // Cascade: update corazones that use this material, then their dependent references
+        $updatedCorazonIds = $this->recalculateCorazonCosts($rawMaterial);
+        $updatedCount      = $this->recalculateReferencePrices($rawMaterial);
+
+        // Also recalculate references that use the updated corazones
+        foreach ($updatedCorazonIds as $corazonId) {
+            $corazonMaterial = RawMaterial::find($corazonId);
+            if ($corazonMaterial) {
+                $updatedCount += $this->recalculateReferencePrices($corazonMaterial);
+            }
+        }
 
         $message = 'Costo actualizado correctamente.';
         if ($updatedCount > 0) {
@@ -159,6 +170,49 @@ class RawMaterialController extends Controller
             }]),
             'message' => $message,
         ]);
+    }
+
+    /**
+     * Recalculates the costo_unitario of all corazones that use the given raw material.
+     * Returns the IDs of corazones whose cost changed.
+     */
+    private function recalculateCorazonCosts(RawMaterial $rawMaterial): array
+    {
+        $affectedCorazonIds = CorazonFormulaLine::where('raw_material_id', $rawMaterial->id)
+            ->pluck('corazon_id')
+            ->unique();
+
+        $updatedIds = [];
+
+        foreach ($affectedCorazonIds as $corazonId) {
+            $corazon = RawMaterial::find($corazonId);
+            if (!$corazon || $corazon->tipo !== 'corazon') {
+                continue;
+            }
+
+            $lines = CorazonFormulaLine::where('corazon_id', $corazonId)
+                ->with('rawMaterial')
+                ->get();
+
+            $costoTotal = 0.0;
+            foreach ($lines as $line) {
+                $rm = $line->rawMaterial;
+                if (!$rm) {
+                    continue;
+                }
+                $factor      = $this->toKgFactor($rm->unidad);
+                $costoTotal += ((float) $line->porcentaje / 100) * ((float) $rm->costo_unitario / $factor);
+            }
+
+            $costoTotal = round($costoTotal, 4);
+
+            if (abs((float) $corazon->costo_unitario - $costoTotal) >= 0.0001) {
+                $corazon->update(['costo_unitario' => $costoTotal]);
+                $updatedIds[] = $corazonId;
+            }
+        }
+
+        return $updatedIds;
     }
 
     private function recalculateReferencePrices(RawMaterial $rawMaterial): int
