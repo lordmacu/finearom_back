@@ -226,9 +226,9 @@ class MonthlyReportController extends Controller
             "MÉTRICAS CLAVE DEL DASHBOARD (cómo calcularlas con SQL):\n" .
             "- \"Órdenes DESPACHADAS en el período\" = OCs con AL MENOS UN partial type='real' y dispatch_date en el período → filtrar por partials.dispatch_date\n" .
             "- \"Órdenes CREADAS en el período\" = OCs donde order_creation_date BETWEEN fechas → NO usar partials, filtrar directo en purchase_orders\n" .
-            "- \"Valor total OC\" = SUM(pop.quantity * pop.price) de las líneas de esas OCs (sin muestras)\n" .
-            "- \"Despachado/Facturado\" = SUM(par.quantity * pop.price) usando par.quantity de partials reales del período\n" .
-            "- \"Valor COP\" = usar COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000) como TRM por línea\n" .
+            "- \"Valor total OC\" = SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) de las líneas de esas OCs (sin muestras)\n" .
+            "- \"Despachado/Facturado\" = SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) — requiere JOIN products p ON pop.product_id=p.id\n" .
+            "- \"Valor COP\" = valor_usd * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000) por línea\n" .
             "- \"Kilos despachados\" = SUM(par.quantity) de partials reales del período (sin muestras)\n" .
             "- \"New Win (órdenes creadas)\" = COUNT DISTINCT po.id WHERE po.is_new_win=1 AND po.order_creation_date BETWEEN fechas\n" .
             "- \"New Win (líneas de producto)\" = líneas donde pop.new_win=1, independiente del estado de la orden\n" .
@@ -336,15 +336,18 @@ class MonthlyReportController extends Controller
             "purchase_orders (id, client_id, order_consecutive, status, dispatch_date, trm, is_new_win, is_muestra), " .
             "clients (id, client_name, nit, executive, client_type, city), " .
             "purchase_order_product (id, purchase_order_id, product_id, quantity kg, price USD/kg, new_win, muestra), " .
-            "products (id, code, product_name), " .
+            "products (id, code, product_name, price USD/kg — precio catálogo), " .
             "partials (id, order_id, product_order_id, quantity, type 'temporal'|'real', dispatch_date, trm, invoice_number, deleted_at), " .
             "cartera (nit, nombre_empresa, saldo_contable STRING COP, saldo_vencido STRING COP, fecha_cartera), " .
             "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP). " .
             "REGLA de filtro por período: si la pregunta es sobre órdenes DESPACHADAS/FACTURADAS → usa partials: par.type='real' AND par.dispatch_date BETWEEN '{$periodStart}' AND '{$periodEnd}' AND par.deleted_at IS NULL AND pop.muestra=0. " .
             "Si la pregunta es sobre órdenes CREADAS → usa purchase_orders directo: po.order_creation_date BETWEEN '{$periodStart}' AND '{$periodEnd}' (sin JOIN a partials). " .
             "Para mostrar ejecutiva como nombre (no email): GROUP BY c.executive, SELECT REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva. " .
-            "CRÍTICO de cantidades: cuando haces JOIN partials par → purchase_order_product pop, usa SIEMPRE par.quantity (kilos despachados) para calcular valor, NO pop.quantity (kilos pedidos). " .
-            "Valor USD despachado = par.quantity * pop.price. Valor COP despachado = par.quantity * pop.price * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000). " .
+            "CRÍTICO de cantidades: usa SIEMPRE par.quantity (kilos despachados), NO pop.quantity (kilos pedidos). " .
+            "CRÍTICO de precio: pop.price puede ser NULL en órdenes antiguas. SIEMPRE usa COALESCE(NULLIF(pop.price,0), p.price, 0) y haz JOIN products p ON pop.product_id=p.id. " .
+            "Precio efectivo = COALESCE(NULLIF(pop.price,0), p.price, 0). " .
+            "Valor USD despachado = par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0). " .
+            "Valor COP despachado = par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000). " .
             "CRÍTICO de formato: NO generes tablas HTML — el sistema renderiza los resultados del SQL automáticamente. Escribe solo un párrafo corto explicativo + el bloque SQL. NO uses LaTeX ni markdown (no \\times, no **texto**). " .
             "Para cualquier lista/ranking/tabla SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
             "Después del SQL agrega siempre en español legible (NUNCA nombres de columna BD): '<p><small>Mostrando: número de OC, cliente. Puedes pedirme que también muestre: ejecutiva, kilos, valor USD, factura, ciudad.</small></p>'.\n\nMensaje del usuario: ";
