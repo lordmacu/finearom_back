@@ -250,12 +250,24 @@ class MonthlyReportController extends Controller
             "1. Ejecutiva negocia con cliente → Francy crea OC (pending)\n" .
             "2. Marlon revisa, pone observaciones y fecha estimada → OC pasa a processing\n" .
             "3. Alexa despacha físicamente → crea partial(s) type='real' → OC pasa a parcial_status o completed\n\n" .
-            "ESTADOS DE ÓRDENES:\n" .
-            "- pending: creada por Francy, esperando revisión de Marlon\n" .
-            "- processing: revisada por Marlon, mercancía en preparación para despacho\n" .
-            "- parcial_status: Alexa despachó PARTE de la OC, queda pendiente el resto\n" .
-            "- completed: Alexa despachó TODO, OC finalizada\n" .
-            "- cancelled: cancelada (excluir de métricas comerciales normalmente)\n\n" .
+            "ESTADOS DE ÓRDENES Y TRANSICIONES:\n" .
+            "- pending → Francy crea la OC. Puede ser cancelada por Francy o Marlon.\n" .
+            "- processing → Marlon la mueve aquí al agregar observaciones y fechas estimadas de despacho. Puede ser cancelada por Marlon.\n" .
+            "- parcial_status → Alexa despachó PARTE de la OC. Queda mercancía pendiente.\n" .
+            "- completed → Alexa despachó TODO. Estado final de la OC.\n" .
+            "- cancelled → Solo Francy o Marlon cancelan. Alexa NO cancela ni cambia a processing. Excluir de métricas.\n\n" .
+            "CÓMO SABER QUÉ QUEDA PENDIENTE EN UNA OC (parcial_status):\n" .
+            "- Kilos pedidos = SUM(pop.quantity) de purchase_order_product WHERE muestra=0\n" .
+            "- Kilos despachados = SUM(par.quantity) de partials WHERE type='real' AND deleted_at IS NULL\n" .
+            "- Kilos pendientes = kilos_pedidos - kilos_despachados (si > 0 hay mercancía sin despachar)\n" .
+            "- Una OC pasa a 'completed' cuando Alexa despacha el resto y no quedan kilos pendientes\n\n" .
+            "COMPORTAMIENTO CRÍTICO DE PARTIALS — SIEMPRE SOFT DELETE + REEMPLAZO:\n" .
+            "- Cuando Alexa registra o actualiza un despacho: el sistema BORRA (soft delete) TODOS los partials type='real' existentes de esa OC y crea los nuevos desde cero.\n" .
+            "  → Los partials anteriores quedan con deleted_at != NULL (son historial, no despachos vigentes)\n" .
+            "  → Sin el filtro deleted_at IS NULL estarías contando despachos duplicados/obsoletos\n" .
+            "- Cuando Marlon actualiza fechas estimadas: el sistema BORRA (soft delete) TODOS los partials type='temporal' y crea los nuevos.\n" .
+            "  → Mismo patrón exacto que los reales\n" .
+            "- REGLA ABSOLUTA: en CUALQUIER query sobre partials SIEMPRE incluir: AND par.deleted_at IS NULL\n\n" .
             "MÉTRICAS CLAVE DEL DASHBOARD (cómo calcularlas con SQL):\n" .
             "- \"Órdenes DESPACHADAS en el período\" = OCs con AL MENOS UN partial type='real' y dispatch_date en el período → usar EXISTS o JOIN por partials.dispatch_date\n" .
             "  → SIEMPRE incluir: par.type='real' AND par.dispatch_date BETWEEN fechas AND par.deleted_at IS NULL AND pop.muestra=0\n" .
@@ -2123,18 +2135,23 @@ WHERE par.type = 'real' AND par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-
   AND par.deleted_at IS NULL AND pop.muestra = 0
 ORDER BY par.dispatch_date DESC;
 
-OC con despacho parcial que Alexa aún debe completar (parcial_status):
+OC con despacho parcial — qué queda pendiente para Alexa (parcial_status):
+-- Muestra kilos pedidos, kilos ya despachados y kilos pendientes por OC
 SELECT po.order_consecutive, c.client_name, po.order_creation_date,
   SUM(pop.quantity) kilos_pedidos,
-  COALESCE((SELECT SUM(par2.quantity) FROM partials par2 WHERE par2.order_id = po.id AND par2.type='real' AND par2.deleted_at IS NULL AND pop.muestra=0), 0) kilos_despachados,
-  SUM(pop.quantity) - COALESCE((SELECT SUM(par2.quantity) FROM partials par2 WHERE par2.order_id = po.id AND par2.type='real' AND par2.deleted_at IS NULL), 0) kilos_pendientes,
-  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_total_usd
+  COALESCE(SUM(par.quantity), 0) kilos_despachados,
+  SUM(pop.quantity) - COALESCE(SUM(par.quantity), 0) kilos_pendientes,
+  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_total_usd,
+  SUM(COALESCE(par.quantity,0) * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_despachado_usd
 FROM purchase_orders po
 JOIN clients c ON po.client_id = c.id
 JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
 JOIN products p ON pop.product_id = p.id
+LEFT JOIN partials par ON par.order_id = po.id AND par.product_order_id = pop.id
+  AND par.type = 'real' AND par.deleted_at IS NULL
 WHERE po.status = 'parcial_status' AND pop.muestra = 0
 GROUP BY po.id, c.client_name, po.order_creation_date
+HAVING kilos_pendientes > 0
 ORDER BY po.order_creation_date;
 SCHEMA;
     }
