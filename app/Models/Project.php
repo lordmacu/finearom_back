@@ -71,6 +71,7 @@ class Project extends Model
         'obs_esp',
         'obs_ext',
         'actualizado',
+        'drive_folder_link',
         'razon_perdida',
         'dias_diferencia',
         'fecha_cierre_estimada',

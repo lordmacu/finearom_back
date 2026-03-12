@@ -52,7 +52,8 @@ class ProjectFileController extends Controller
         try {
             $userId = auth()->id();
             if ($this->driveService->hasDriveAccess($userId)) {
-                $projectName = $project->name ?? "Proyecto {$project->id}";
+                $projectName = $project->nombre ?? "Proyecto {$project->id}";
+                $projectFolder = $this->driveService->getOrCreateProjectFolder($userId, $projectName);
                 $folder = $this->driveService->getOrCreateProjectCategoryFolder(
                     $userId,
                     $projectName,
@@ -63,6 +64,11 @@ class ProjectFileController extends Controller
                     $this->driveService->makePublic($userId, $result['id']);
                     $driveFileId = $result['id'];
                     $driveLink   = $result['webViewLink'] ?? null;
+                }
+                // Guardar link de la carpeta del proyecto si aún no lo tiene
+                if ($projectFolder && !$project->drive_folder_link) {
+                    $project->drive_folder_link = "https://drive.google.com/drive/folders/{$projectFolder}";
+                    $project->saveQuietly();
                 }
             }
         } catch (\Throwable $e) {
