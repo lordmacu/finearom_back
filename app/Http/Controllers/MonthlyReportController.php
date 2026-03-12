@@ -619,8 +619,8 @@ class MonthlyReportController extends Controller
 
         $sql = trim($request->input('sql'));
 
-        // Solo SELECT permitido
-        if (!preg_match('/^\s*SELECT\s/i', $sql)) {
+        // Solo SELECT y CTEs (WITH ... SELECT) permitidos
+        if (!preg_match('/^\s*(SELECT|WITH)\s/i', $sql)) {
             return response()->json(['success' => false, 'message' => 'Solo se permiten consultas SELECT'], 422);
         }
 
