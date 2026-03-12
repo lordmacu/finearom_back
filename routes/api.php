@@ -487,7 +487,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/dashboard/chat/start-v2',          [\App\Http\Controllers\MonthlyReportController::class, 'chatStartV2']);
     Route::post('/dashboard/chat/message',           [\App\Http\Controllers\MonthlyReportController::class, 'chatMessage']);
     Route::post('/dashboard/chat/run-query',         [\App\Http\Controllers\MonthlyReportController::class, 'runQuery']);
-    Route::get('/dashboard/chat/sessions',           [\App\Http\Controllers\MonthlyReportController::class, 'chatSessions']);
+    Route::get('/dashboard/chat/sessions',              [\App\Http\Controllers\MonthlyReportController::class, 'chatSessions']);
+    Route::delete('/dashboard/chat/sessions',           [\App\Http\Controllers\MonthlyReportController::class, 'chatSessionDeleteAll']);
     Route::get('/dashboard/chat/sessions/{session}',    [\App\Http\Controllers\MonthlyReportController::class, 'chatSessionMessages']);
     Route::delete('/dashboard/chat/sessions/{session}', [\App\Http\Controllers\MonthlyReportController::class, 'chatSessionDelete']);
 });

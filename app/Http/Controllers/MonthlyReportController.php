@@ -190,6 +190,7 @@ class MonthlyReportController extends Controller
         $request->validate([
             'start_date' => 'nullable|date_format:Y-m-d',
             'end_date'   => 'nullable|date_format:Y-m-d',
+            'model'      => 'nullable|string|in:gpt-4.1,gpt-4.1-mini,gpt-4o,o4-mini',
         ]);
 
         $aiUrl = config('custom.ai_server_url');
@@ -402,11 +403,13 @@ class MonthlyReportController extends Controller
 
         $periodLabel = Carbon::parse($startDate)->locale('es')->isoFormat('MMMM YYYY');
 
+        $model = $request->get('model', 'gpt-4.1');
+
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
                 ->timeout(60)
                 ->post("{$aiUrl}/v1/chat/completions", [
-                    'model'    => 'gpt-4.1',
+                    'model'    => $model,
                     'messages' => [['role' => 'user', 'content' => $prompt]],
                 ]);
 
@@ -452,6 +455,7 @@ class MonthlyReportController extends Controller
             'thread_id'  => 'required|string',
             'message'    => 'required|string|max:2000',
             'session_id' => 'nullable|integer',
+            'model'      => 'nullable|string|in:gpt-4.1,gpt-4.1-mini,gpt-4o,o4-mini',
         ]);
 
         $aiUrl = config('custom.ai_server_url');
@@ -502,7 +506,8 @@ class MonthlyReportController extends Controller
             "CRÍTICO de cartera: saldo_contable ya es decimal normal con punto ('26857379.12'). Usar: CAST(saldo_contable AS DECIMAL(15,2)). NUNCA uses REPLACE para quitar puntos — destruyes el decimal. " .
             "CARTERA POR EJECUTIVA: NO filtres por cartera.vendedor — usa JOIN cartera ca ON ca.nit = clients.nit y filtra por clients.executive. " .
             "CARTERA GROUP BY: cartera tiene UNA FILA POR FACTURA. Si agrupas por nit/cliente → usa SUM(CAST(saldo_contable AS DECIMAL(15,2))). Si listas facturas individuales → sin GROUP BY, usa CAST directo. NUNCA mezcles saldo_contable sin agregar en un SELECT con GROUP BY. " .
-            "ON-TIME: usa SIEMPRE pop.delivery_date (en purchase_order_product). NUNCA po.required_delivery_date para on-time — es la fecha original del cliente, siempre está en el pasado y da 0%. pop.required_delivery_date NO EXISTE. " .
+            "ON-TIME: usa SIEMPRE pop.delivery_date (en purchase_order_product). NUNCA po.required_delivery_date — da 0%. pop.required_delivery_date NO EXISTE. " .
+            "⚠ ON-TIME numerador y denominador deben medir la misma unidad: por LÍNEA → SUM(CASE WHEN par.dispatch_date<=pop.delivery_date THEN 1 ELSE 0 END)/COUNT(par.id); por OC → COUNT(DISTINCT CASE WHEN...po.id)/COUNT(DISTINCT po.id). NUNCA mezcles líneas con órdenes — da >100%. " .
             "FILL RATE: siempre partir desde partials (dispatch_date en período), NO desde order_creation_date. " .
             "Query correcta: FROM partials par JOIN purchase_order_product pop ON par.product_order_id=pop.id AND pop.muestra=0 WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN X AND Y. " .
             "Fill rate = SUM(par.quantity)/SUM(pop.quantity)*100. " .
@@ -523,11 +528,13 @@ class MonthlyReportController extends Controller
             "ESTADOS (mapeo español → BD): 'pendiente/pendientes/creada' → 'pending'; 'procesando/en proceso/procesado/en procesamiento' → 'processing'; 'parcial/despacho parcial' → 'parcial_status'; 'completada/completa/entregada/despachada' → 'completed'; 'cancelada/anulada' → 'cancelled'. " .
             "Después del SQL agrega siempre en español legible (NUNCA nombres de columna BD): '<p><small>Mostrando: X, Y, Z. Puedes pedirme que también muestre: ...</small></p>'.\n\nMensaje del usuario: ";
 
+        $model = $request->get('model', 'gpt-4.1');
+
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
                 ->timeout(120)
                 ->post("{$aiUrl}/v1/chat/completions", [
-                    'model'     => 'gpt-4.1',
+                    'model'     => $model,
                     'messages'  => [['role' => 'user', 'content' => $schemaHint . $request->message]],
                     'thread_id' => $request->thread_id,
                 ]);
@@ -608,6 +615,15 @@ class MonthlyReportController extends Controller
     {
         abort_if($session->user_id !== auth()->id(), 403);
         $session->delete();
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Elimina todas las sesiones de chat del usuario autenticado.
+     */
+    public function chatSessionDeleteAll(): JsonResponse
+    {
+        ChatSession::where('user_id', auth()->id())->delete();
         return response()->json(['success' => true]);
     }
 
@@ -1897,12 +1913,14 @@ PROMPT;
 - id PK, client_id FK→clients.id, order_consecutive (ej: '2258-4500302325'), status ('pending'|'processing'|'completed'|'cancelled'|'parcial_status'), order_creation_date (date), dispatch_date (date — fecha estimada puesta por Marlon), required_delivery_date (date — fecha solicitada por el cliente), trm, is_new_win (0/1), is_muestra (0/1), observations, created_at
 - pending = Francy creó, esperando Marlon | processing = Marlon revisó, en preparación | parcial_status = Alexa despachó parcialmente | completed = Alexa despachó todo
 - LEAD TIME por OC = DATEDIFF(fecha_real_despacho, order_creation_date). Comparar con clients.lead_time para saber si fue en tiempo.
-- ON TIME = dispatch real <= required_delivery_date (campo en purchase_orders, NO en purchase_order_product)
+- ON TIME (por línea) = par.dispatch_date <= pop.delivery_date. Numerador y denominador deben ser LÍNEAS: SUM(CASE WHEN par.dispatch_date <= pop.delivery_date THEN 1 ELSE 0 END) / COUNT(par.id)
+- ON TIME (por OC) = la OC se considera a tiempo si TODAS sus líneas fueron despachadas a tiempo. Usar COUNT(DISTINCT CASE WHEN...) / COUNT(DISTINCT po.id)
+- ⚠ NUNCA mezcles numerador de líneas con denominador de órdenes — da porcentajes >100%
 - NOTA: la ejecutiva se obtiene JOIN clients → clients.executive
 
 ### purchase_order_product — Líneas de producto en OCs
 - id PK, purchase_order_id FK→purchase_orders.id, product_id FK→products.id, quantity (kg pedidos), price (USD/kg negociado — puede ser NULL en OCs antiguas), new_win (0/1), muestra (0/1), delivery_date (date — fecha de entrega por línea), branch_office_id FK→branch_offices.id (sucursal de entrega), status
-- ⚠ required_delivery_date NO existe en purchase_order_product — está en purchase_orders. Para on-time usar po.required_delivery_date o pop.delivery_date
+- ⚠ required_delivery_date NO existe en purchase_order_product. Para on-time usar SIEMPRE pop.delivery_date (fecha acordada por línea)
 - cierre_cartera (DATETIME) — fecha esperada de cierre/pago de esta línea
 - Para precio real usar siempre: COALESCE(NULLIF(pop.price,0), p.price, 0)
 
