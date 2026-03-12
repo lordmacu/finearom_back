@@ -128,7 +128,9 @@ class MonthlyReportController extends Controller
                   "- Solo responde sin query cuando la pregunta es un cálculo simple (ej: '¿cuánto es el cumplimiento?') o una explicación conceptual.\n" .
                   "- Presenta SIEMPRE la query así (HTML exacto, sin variaciones): <pre><code class=\"language-sql\">QUERY_SQL_AQUI</code></pre>\n" .
                   "- Antes del bloque SQL, escribe una línea breve diciendo qué muestra la consulta.\n" .
-                  "- Las queries deben usar las tablas del ESQUEMA DE BASE DE DATOS proporcionado. Usa el período {$period['start_date']} a {$period['end_date']} como filtro cuando sea relevante.\n\n" .
+                  "- Las queries deben usar las tablas del ESQUEMA DE BASE DE DATOS proporcionado. Usa el período {$period['start_date']} a {$period['end_date']} como filtro cuando sea relevante.\n" .
+                  "- PUEDES y DEBES usar CTEs (WITH ... AS (...) SELECT ...) para queries complejas con múltiples pasos — el sistema las acepta y ejecuta correctamente.\n" .
+                  "- PUEDES usar window functions (SUM OVER, ROW_NUMBER OVER PARTITION BY) para rankings y acumulados.\n\n" .
 
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
                   "indicando el período, el total de órdenes creadas (valor USD), y cuánto se despachó/facturó realmente en USD.";
