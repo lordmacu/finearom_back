@@ -276,11 +276,23 @@ class MonthlyReportController extends Controller
             "- \"Órdenes rezagadas\" = po.status='processing' AND order_creation_date <= CURDATE() - 7 días → estas son órdenes aprobadas por Marlon pero sin despachar\n" .
             "REGLA: si el usuario dice 'creadas', 'del período', 'de este mes' → usa order_creation_date en purchase_orders.\n" .
             "Si dice 'despachadas', 'facturadas', 'enviadas' → usa partials.dispatch_date con type='real' AND deleted_at IS NULL.\n\n" .
-            "CARTERA — FORMATO COLOMBIANO:\n" .
-            "Los campos saldo_contable y saldo_vencido son strings con formato '1.234.567,89' (punto=miles, coma=decimal).\n" .
-            "Para convertir a número: CAST(REPLACE(REPLACE(campo,'.',''),',','.') AS DECIMAL(15,2))\n" .
-            "Para ordenar: ORDER BY CAST(REPLACE(REPLACE(saldo_contable,'.',''),',','.') AS DECIMAL(15,2)) DESC\n" .
-            "NUNCA uses: CAST(REPLACE(campo,',','') AS DECIMAL) — eso da valores incorrectos para montos > 999,999\n\n" .
+            "LEAD TIME Y TIPOS DE CLIENTE:\n" .
+            "- client_type tiene DOS clasificaciones distintas:\n" .
+            "  * Clasificación comercial: 'AA' (mayor prioridad) > 'A' > 'B' > 'C' (menor prioridad) — se usa para lead time\n" .
+            "  * Clasificación portafolio (legado): 'pareto' (estratégico), 'balance', 'none'\n" .
+            "- clients.lead_time (INT, días) = tiempo de entrega estándar del cliente (AA/A = 9 días, C = 12 días)\n" .
+            "- Lead time real de una OC = DATEDIFF(fecha_primer_despacho_real, po.order_creation_date)\n" .
+            "- On-time = el despacho real ocurrió en o antes de po.required_delivery_date\n" .
+            "- Para análisis de lead time usar: JOIN con c.client_type IN ('AA','A','B','C')\n\n" .
+            "CARTERA — FORMATO COLOMBIANO Y LÓGICA:\n" .
+            "- saldo_contable y saldo_vencido son strings con formato '1.234.567,89' (punto=miles, coma=decimal), puede incluir '$'\n" .
+            "- Para convertir: CAST(REPLACE(REPLACE(REPLACE(campo,'\$',''),'.',''),',','.') AS DECIMAL(15,2))\n" .
+            "- NUNCA uses: CAST(REPLACE(campo,',','') AS DECIMAL) — valores incorrectos para montos > 999,999\n" .
+            "- dias: POSITIVO = factura por vencer, NEGATIVO = factura VENCIDA\n" .
+            "- Facturas vencidas: WHERE dias < 0 OR vence < CURDATE()\n" .
+            "- cartera.documento = número de factura → se cruza con recaudos.numero_factura para ver pagos\n" .
+            "- Deuda neta real = saldo_contable MENOS lo pagado: MAX(saldo - SUM(recaudos.valor_cancelado), 0)\n" .
+            "- catera_type: 'nacional' | 'internacional' (para filtrar cartera de exportación vs local)\n\n" .
             "REGLA CRÍTICA DE CANTIDADES:\n" .
             "Cuando JOIN partials → purchase_order_product, SIEMPRE usa par.quantity para calcular valor despachado.\n" .
             "pop.quantity es la cantidad PEDIDA, par.quantity es la cantidad REAL DESPACHADA.\n\n" .
@@ -1774,40 +1786,71 @@ PROMPT;
 ## TABLAS RELEVANTES
 
 ### clients — Clientes
-- id PK, client_name, nit (UNIQUE), executive, client_type ('pareto'|'balance'|'none'), status ('active'|'inactive'), city, operation_type ('nacional'|'extranjero')
+- id PK, client_name, nit (UNIQUE), executive (EMAIL de la ejecutiva — ej: monica.castano@finearom.com), status ('active'|'inactive'), city, operation_type ('nacional'|'extranjero')
+- client_type: dos clasificaciones coexisten:
+  * Clasificación comercial/prioridad: 'AA' (mayor prioridad), 'A', 'B', 'C' (menor prioridad) — se usa para lead time y análisis de cumplimiento
+  * Clasificación de portafolio (legacy): 'pareto' (cliente estratégico), 'balance', 'none'
+  * En el dashboard de lead time SOLO se consideran AA/A/B/C
+- lead_time (INT días) — tiempo de entrega estándar del cliente. Ej: AA/A = 9 días, C = 12 días
+- required_delivery_date en purchase_orders = fecha solicitada de entrega (usada para medir cumplimiento)
+- payment_method (1=Contado, 2=Crédito), payment_day (día del mes para pago), credit_term (días de crédito)
+- purchase_frequency (frecuencia de compra), estimated_monthly_quantity (kilos mensuales estimados)
+- portfolio_contact_email, dispatch_confirmation_email, purchasing_contact_email, logistics_contact_email
+- iva, retefuente, reteiva, ica (tasas impositivas del cliente)
 
 ### branch_offices — Sucursales de clientes
 - id PK, client_id FK→clients.id, name, nit, delivery_address, delivery_city
 - Cada cliente puede tener múltiples sucursales con distintas direcciones y ciudades de entrega
 
 ### purchase_orders — Órdenes de compra
-- id PK, client_id FK→clients.id, order_consecutive (ej: '2258-4500302325'), status ('pending'|'processing'|'completed'|'cancelled'|'parcial_status'), order_creation_date (date), dispatch_date (date — fecha estimada puesta por Marlon), required_delivery_date (date), trm, is_new_win (0/1), is_muestra (0/1), observations, created_at
+- id PK, client_id FK→clients.id, order_consecutive (ej: '2258-4500302325'), status ('pending'|'processing'|'completed'|'cancelled'|'parcial_status'), order_creation_date (date), dispatch_date (date — fecha estimada puesta por Marlon), required_delivery_date (date — fecha solicitada por el cliente), trm, is_new_win (0/1), is_muestra (0/1), observations, created_at
 - pending = Francy creó, esperando Marlon | processing = Marlon revisó, en preparación | parcial_status = Alexa despachó parcialmente | completed = Alexa despachó todo
+- LEAD TIME por OC = DATEDIFF(fecha_real_despacho, order_creation_date). Comparar con clients.lead_time para saber si fue en tiempo.
+- ON TIME = dispatch real <= required_delivery_date
 - NOTA: la ejecutiva se obtiene JOIN clients → clients.executive
 
 ### purchase_order_product — Líneas de producto en OCs
 - id PK, purchase_order_id FK→purchase_orders.id, product_id FK→products.id, quantity (kg pedidos), price (USD/kg negociado — puede ser NULL en OCs antiguas), new_win (0/1), muestra (0/1), delivery_date, branch_office_id FK→branch_offices.id (sucursal de entrega), status
+- cierre_cartera (DATETIME) — fecha esperada de cierre/pago de esta línea
 - Para precio real usar siempre: COALESCE(NULLIF(pop.price,0), p.price, 0)
 
 ### products — Productos
-- id PK, code, product_name, price (USD/kg actual), client_id FK→clients.id
+- id PK, code, product_name, price (USD/kg actual — precio catálogo fallback), client_id FK→clients.id, categories (JSON array de categorías)
+- CRÍTICO: los productos son POR CLIENTE (client_id). El mismo fragancia puede tener precios distintos por cliente.
+- El precio en products es el precio catálogo vigente. Para precio negociado en una OC específica → usar pop.price (puede ser NULL en OCs antiguas)
+
+### product_price_history — Historial de precios
+- id PK, product_id FK→products.id, price (DECIMAL USD/kg), effective_date (fecha desde la que aplica, normalmente 1 enero), created_by FK→users.id
+- Útil para preguntas como "¿cuál era el precio en enero?" o "¿cómo ha cambiado el precio de X?"
 
 ### partials — Despachos
 - id PK, order_id FK→purchase_orders.id, product_order_id FK→purchase_order_product.id, product_id FK→products.id, quantity (kg), type ('temporal'|'real'), dispatch_date (date), trm, invoice_number, pdf_invoice, tracking_number, transporter, deleted_at (soft delete)
 - CRÍTICO: para análisis de despachos del período SIEMPRE filtrar: type = 'real' AND dispatch_date BETWEEN ... AND deleted_at IS NULL AND pop.muestra = 0
 
-### cartera — Cartera (COP, importada de sistema contable)
-- id PK, nit, nombre_empresa, fecha_cartera (date del snapshot), saldo_contable (string COP), saldo_vencido (string COP), dias (int, + = vencida), vence (date), vendedor
-- CRÍTICO: saldo_contable y saldo_vencido son STRINGS con formato colombiano "1.234.567,89" (punto = miles, coma = decimales)
-  → Para operar numéricamente: CAST(REPLACE(REPLACE(campo,'.',''),',','.') AS DECIMAL(15,2))
-  → Paso 1: quitar puntos de miles: REPLACE(campo,'.','') → "1234567,89"
-  → Paso 2: convertir coma decimal a punto: REPLACE(...,',','.') → "1234567.89"
-  → Paso 3: CAST como decimal
-- CRÍTICO: NUNCA filtrar con una fecha hardcodeada — el snapshot puede no existir para esa fecha. SIEMPRE usar: fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
-- Para ordenar por saldo usar: ORDER BY CAST(REPLACE(REPLACE(saldo_contable,'.',''),',','.') AS DECIMAL(15,2)) DESC
+### cartera — Cartera (COP, importada de sistema contable SIIGO)
+- id PK, nit, nombre_empresa, fecha_cartera (date del snapshot — agrupa todas las filas del mismo import)
+- documento (VARCHAR) — número de factura. Se une con recaudos.numero_factura para ver pagos de esa factura
+- fecha (DATE) — fecha de emisión de la factura
+- vence (DATE) — fecha de vencimiento de la factura
+- dias (INT) — días de cartera: POSITIVO = factura AÚN no vencida (días restantes), NEGATIVO = factura VENCIDA hace N días
+- saldo_contable (STRING COP) — saldo total de la factura
+- saldo_vencido (STRING COP) — porción ya vencida del saldo
+- vendedor, nombre_vendedor — vendedor en SIIGO (puede diferir de clients.executive)
+- catera_type (VARCHAR) — 'nacional' | 'internacional' | NULL (null = nacional por defecto)
+- ciudad, cuenta, descripcion_cuenta
+- CRÍTICO: saldo_contable y saldo_vencido son STRINGS con formato colombiano "1.234.567,89" (punto=miles, coma=decimales)
+  → Para operar: CAST(REPLACE(REPLACE(REPLACE(campo,'$',''),'.',''),',','.') AS DECIMAL(15,2))
+  → Se usa triple REPLACE por si el campo trae signo $ al inicio
+- CRÍTICO: NUNCA filtrar con fecha hardcodeada. SIEMPRE: fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+- CRÍTICO: para deuda NETA real = saldo_contable MENOS lo pagado en recaudos: MAX(saldo - SUM(recaudos), 0)
+- Para ordenar: ORDER BY CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2)) DESC
+- Facturas VENCIDAS: WHERE dias < 0 OR vence < CURDATE()
+- Facturas POR VENCER: WHERE dias >= 0 AND vence >= CURDATE()
 
 ### recaudos — Pagos recibidos (COP)
-- id PK, nit (bigint), cliente, fecha_recaudo (datetime), numero_factura, numero_recibo, valor_cancelado (decimal COP), dias
+- id PK, nit (BIGINT), cliente, fecha_recaudo (DATETIME), numero_factura (VARCHAR — join con cartera.documento), numero_recibo, valor_cancelado (DECIMAL COP), fecha_vencimiento (DATETIME — vencimiento de la factura al momento del pago), dias (días de mora al pagar)
+- Para ver cuánto se pagó de una factura específica: JOIN cartera ON recaudos.numero_factura = cartera.documento
+- Para deuda neta de un cliente: SUM(cartera.saldo_contable) - SUM(recaudos.valor_cancelado) por nit
 
 ### trm_daily — TRM diaria
 - id PK, date (date), value (decimal COP/USD), is_weekend (0/1), is_holiday (0/1)
@@ -1822,6 +1865,8 @@ PROMPT;
 - clients (1) → branch_offices (N) vía client_id
 - clients.nit ↔ cartera.nit (join por NIT, sin FK)
 - clients.nit ↔ recaudos.nit (join por NIT, sin FK)
+- cartera.documento ↔ recaudos.numero_factura (join para ver pagos de una factura)
+- products (1) → product_price_history (N) vía product_id (historial de precios)
 
 ## PRECIO EFECTIVO — REGLA CRÍTICA
 - pop.price puede ser NULL o 0 en órdenes antiguas → SIEMPRE usa: COALESCE(NULLIF(pop.price,0), p.price, 0)
@@ -1904,12 +1949,39 @@ WHERE EXISTS (
     AND par.deleted_at IS NULL AND pop.muestra = 0
 );
 
-Cartera vencida (último snapshot — con conversión correcta de formato colombiano):
-SELECT nit, nombre_empresa, MAX(fecha_cartera) ultima_fecha,
-  CAST(REPLACE(REPLACE(saldo_contable,'.',''),',','.') AS DECIMAL(15,2)) saldo_cop,
-  CAST(REPLACE(REPLACE(saldo_vencido,'.',''),',','.') AS DECIMAL(15,2)) vencido_cop
+Cartera vencida (último snapshot — conversión correcta con triple REPLACE):
+SELECT nit, nombre_empresa,
+  CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2)) saldo_cop,
+  CAST(REPLACE(REPLACE(REPLACE(saldo_vencido,'$',''),'.',''),',','.') AS DECIMAL(15,2)) vencido_cop,
+  dias, vence
 FROM cartera WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
-ORDER BY CAST(REPLACE(REPLACE(saldo_contable,'.',''),',','.') AS DECIMAL(15,2)) DESC;
+ORDER BY CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2)) DESC;
+
+Cartera por tipo (nacional vs internacional):
+SELECT catera_type, COUNT(*) facturas,
+  SUM(CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2))) total_cop
+FROM cartera WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+GROUP BY catera_type;
+
+Deuda neta por cliente (saldo contable menos lo ya pagado en recaudos):
+SELECT ca.nit, ca.nombre_empresa,
+  SUM(CAST(REPLACE(REPLACE(REPLACE(ca.saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2))) saldo_bruto,
+  COALESCE(SUM(r.valor_cancelado),0) total_pagado,
+  GREATEST(SUM(CAST(REPLACE(REPLACE(REPLACE(ca.saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2))) - COALESCE(SUM(r.valor_cancelado),0), 0) deuda_neta
+FROM cartera ca
+LEFT JOIN recaudos r ON r.numero_factura = ca.documento AND r.nit = ca.nit
+WHERE ca.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+GROUP BY ca.nit, ca.nombre_empresa
+ORDER BY deuda_neta DESC;
+
+Facturas vencidas (dias negativo) del último snapshot:
+SELECT nit, nombre_empresa, documento, fecha, vence,
+  ABS(dias) dias_de_mora,
+  CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2)) saldo_cop
+FROM cartera
+WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+  AND dias < 0
+ORDER BY dias ASC;
 
 Recaudos del período:
 SELECT nit, cliente, SUM(valor_cancelado) total_cop, COUNT(*) recibos
@@ -1938,6 +2010,25 @@ WHERE po.status IN ('pending','processing','parcial_status')
   ) BETWEEN '2026-03-01' AND '2026-03-31'
 GROUP BY po.id, c.client_name, po.status
 ORDER BY fecha_despacho_estimada;
+
+Lead time real por tipo de cliente (AA/A/B/C):
+SELECT c.client_type,
+  COUNT(DISTINCT po.id) total_ordenes,
+  ROUND(AVG(DATEDIFF(
+    (SELECT MIN(par2.dispatch_date) FROM partials par2 WHERE par2.order_id = po.id AND par2.type='real' AND par2.deleted_at IS NULL),
+    po.order_creation_date
+  ))) avg_dias_reales,
+  ROUND(AVG(DATEDIFF(po.required_delivery_date, po.order_creation_date))) avg_dias_solicitados,
+  ROUND(100.0 * SUM(CASE WHEN
+    (SELECT MIN(par2.dispatch_date) FROM partials par2 WHERE par2.order_id = po.id AND par2.type='real' AND par2.deleted_at IS NULL) <= po.required_delivery_date
+    THEN 1 ELSE 0 END) / COUNT(DISTINCT po.id), 1) pct_a_tiempo
+FROM purchase_orders po
+JOIN clients c ON po.client_id = c.id
+WHERE po.order_creation_date BETWEEN '2026-03-01' AND '2026-03-31'
+  AND c.client_type IN ('AA','A','B','C')
+  AND (po.is_muestra = 0 OR po.is_muestra IS NULL)
+GROUP BY c.client_type
+ORDER BY FIELD(c.client_type,'AA','A','B','C');
 
 Órdenes vencidas / rezagadas (processing sin despachar hace más de 7 días):
 SELECT po.order_consecutive, c.client_name, po.status, po.order_creation_date,
