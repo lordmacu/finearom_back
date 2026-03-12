@@ -7,6 +7,7 @@ use App\Models\PurchaseOrder;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -405,6 +406,10 @@ class MonthlyReportController extends Controller
 
         $model = $request->get('model', 'gpt-4.1');
 
+        if ($limitResponse = $this->checkAndIncrementModelLimit($model)) {
+            return $limitResponse;
+        }
+
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
                 ->timeout(60)
@@ -530,6 +535,10 @@ class MonthlyReportController extends Controller
 
         $model = $request->get('model', 'gpt-4.1');
 
+        if ($limitResponse = $this->checkAndIncrementModelLimit($model)) {
+            return $limitResponse;
+        }
+
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
                 ->timeout(120)
@@ -625,6 +634,83 @@ class MonthlyReportController extends Controller
     {
         ChatSession::where('user_id', auth()->id())->delete();
         return response()->json(['success' => true]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Límites diarios por modelo
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Verifica el límite diario del modelo y, si no se ha superado, incrementa el contador.
+     * Retorna JsonResponse 429 si se alcanzó el límite; null si se puede continuar.
+     *
+     * Modelos con límite (10 req/usuario/día):
+     *   - gpt-4o   (nivel Avanzado)
+     *   - o3-mini  (nivel Premium)
+     * Modelos sin límite: cualquier otro (incluido gpt-4.1).
+     */
+    private function checkAndIncrementModelLimit(string $model): ?JsonResponse
+    {
+        $limitedModels = ['gpt-4o', 'o3-mini'];
+
+        if (!in_array($model, $limitedModels, true)) {
+            return null;
+        }
+
+        $bogota  = Carbon::now('America/Bogota');
+        $key     = 'chat_limit:' . auth()->id() . ':' . $model . ':' . $bogota->toDateString();
+        $ttl     = $bogota->secondsUntilEndOfDay();
+        $current = (int) Cache::get($key, 0);
+
+        if ($current >= 10) {
+            Log::info("[ChatLimit] Límite alcanzado user=" . auth()->id() . " model={$model} count={$current}");
+            return response()->json([
+                'success'       => false,
+                'message'       => 'Límite diario de 10 peticiones alcanzado para este modelo. Se reinicia a medianoche.',
+                'limit_exceeded' => true,
+            ], 429);
+        }
+
+        if ($current === 0) {
+            Cache::put($key, 1, $ttl);
+        } else {
+            Cache::increment($key);
+        }
+
+        return null;
+    }
+
+    /**
+     * Retorna el estado actual de uso de límites diarios por modelo para el usuario autenticado.
+     */
+    public function chatModelLimits(Request $request): JsonResponse
+    {
+        $bogota      = Carbon::now('America/Bogota');
+        $today       = $bogota->toDateString();
+        $userId      = auth()->id();
+        $limitedModels = ['gpt-4o', 'o3-mini'];
+        $limit       = 10;
+
+        $result = [];
+
+        foreach ($limitedModels as $model) {
+            $key  = "chat_limit:{$userId}:{$model}:{$today}";
+            $used = (int) Cache::get($key, 0);
+            $result[$model] = [
+                'used'      => $used,
+                'limit'     => $limit,
+                'remaining' => max(0, $limit - $used),
+            ];
+        }
+
+        // Modelos sin límite
+        $result['gpt-4.1'] = [
+            'used'      => null,
+            'limit'     => null,
+            'remaining' => null,
+        ];
+
+        return response()->json(['success' => true, 'data' => $result]);
     }
 
     /**
