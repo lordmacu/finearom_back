@@ -504,6 +504,7 @@ class MonthlyReportController extends Controller
             "Si el SELECT tiene c.client_name, c.executive → el GROUP BY DEBE tener c.id, c.client_name, c.executive. " .
             "Puedes agrupar por c.executive (no por el alias 'ejecutiva') y mostrar el alias solo en el SELECT. " .
             "NUNCA omitas columnas del SELECT en el GROUP BY aunque parezcan redundantes con el id. " .
+            "SUBQUERIES CORRELACIONADAS con GROUP BY: si necesitas calcular algo por OC (ej: primer despacho) y luego agregar por grupo, NUNCA uses subquery correlacionada en SELECT (viola ONLY_FULL_GROUP_BY). En su lugar, pre-calcula en un JOIN: LEFT JOIN (SELECT order_id, MIN(dispatch_date) first_dispatch FROM partials WHERE type='real' AND deleted_at IS NULL GROUP BY order_id) fd ON fd.order_id = po.id " .
             "PRESENTACIÓN: NUNCA incluyas columnas de id (id, client_id, product_id, purchase_order_id, etc.) en el SELECT — son números internos irrelevantes para el usuario. " .
             "Cuando muestres nombre de cliente (c.client_name o ca.nombre_empresa) SIEMPRE incluye también c.nit o ca.nit en la misma query. " .
             "CRÍTICO de formato: NO generes tablas HTML — el sistema renderiza los resultados del SQL automáticamente. Escribe solo un párrafo corto explicativo + el bloque SQL. NO uses LaTeX ni markdown (no \\times, no **texto**). " .
