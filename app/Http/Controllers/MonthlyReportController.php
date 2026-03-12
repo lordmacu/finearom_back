@@ -251,7 +251,11 @@ class MonthlyReportController extends Controller
             "- IMPORTANTE: después de cada bloque SQL, agrega siempre una línea breve con dos partes:\n" .
             "  1. Los campos que estás mostrando: '<p><small>Mostrando: <strong>campo1, campo2, campo3</strong>.</small></p>'\n" .
             "  2. Campos adicionales disponibles que el usuario puede pedir: '<p><small>Puedes pedirme que también muestre: campo4, campo5, campo6.</small></p>'\n" .
-            "  Ejemplo real: 'Mostrando: consecutivo, cliente, valor USD. Puedes pedirme que también muestre: ejecutiva, kilos, factura, ciudad, estado, TRM, fecha de despacho.'\n" .
+            "  CRÍTICO: usa SIEMPRE nombres en español legibles para el usuario, NUNCA nombres de columna de la BD. Ejemplos de traducción:\n" .
+            "  order_consecutive → número de OC | dispatch_date → fecha de despacho | client_name → cliente | executive → ejecutiva\n" .
+            "  status → estado | invoice_number → número de factura | tracking_number → número de guía | trm → TRM\n" .
+            "  quantity → kilos | price → precio USD/kg | order_creation_date → fecha de creación | city → ciudad\n" .
+            "  Ejemplo correcto: 'Mostrando: número de OC, cliente, fecha de despacho. Puedes pedirme que también muestre: ejecutiva, kilos, valor USD, número de factura, ciudad.'\n" .
             "- El mensaje de bienvenida debe ser: saludo breve, período activo, y 3-4 ejemplos de preguntas que puedes responder.";
 
         $periodLabel = Carbon::parse($startDate)->locale('es')->isoFormat('MMMM YYYY');
@@ -343,7 +347,7 @@ class MonthlyReportController extends Controller
             "Valor USD despachado = par.quantity * pop.price. Valor COP despachado = par.quantity * pop.price * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000). " .
             "CRÍTICO de formato: NO generes tablas HTML — el sistema renderiza los resultados del SQL automáticamente. Escribe solo un párrafo corto explicativo + el bloque SQL. NO uses LaTeX ni markdown (no \\times, no **texto**). " .
             "Para cualquier lista/ranking/tabla SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
-            "Después del SQL agrega siempre: '<p><small>Mostrando: campo1, campo2. Puedes pedirme que también muestre: campo3, campo4, campo5.</small></p>'.\n\nMensaje del usuario: ";
+            "Después del SQL agrega siempre en español legible (NUNCA nombres de columna BD): '<p><small>Mostrando: número de OC, cliente. Puedes pedirme que también muestre: ejecutiva, kilos, valor USD, factura, ciudad.</small></p>'.\n\nMensaje del usuario: ";
 
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
