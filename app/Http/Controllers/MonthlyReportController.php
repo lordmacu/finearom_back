@@ -1302,7 +1302,8 @@ PROMPT;
             $md .= " | \${$n($dispUsd, 2)}";
             $md .= " | \${$n($e['dispatched_cop'])}";
             $md .= " | {$n($e['dispatched_kilos'], 2)}";
-            $md .= " | {$e['compliance_usd_pct'] ?? $e['compliance_cop_pct']}%";
+            $cumpl = $e['compliance_usd_pct'] ?? $e['compliance_cop_pct'];
+            $md .= " | {$cumpl}%";
             $md .= " |\n";
         }
         $md .= "\n";
