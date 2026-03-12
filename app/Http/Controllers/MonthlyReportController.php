@@ -486,7 +486,7 @@ class MonthlyReportController extends Controller
             "products (id, code, product_name, price USD/kg — precio catálogo fallback), " .
             "partials (id, order_id, product_order_id, quantity kg despachados, type 'temporal'=Marlon estimó|'real'=Alexa despachó, dispatch_date, trm, invoice_number, tracking_number, transporter, deleted_at SOFT DELETE), " .
             "cartera (nit, nombre_empresa, saldo_contable VARCHAR decimal '26857379.12' — CAST directo sin REPLACE, saldo_vencido VARCHAR mismo formato — CAST(saldo_vencido AS DECIMAL(15,2)), dias INT negativo=vencido, fecha_cartera — filtrar siempre por MAX(fecha_cartera)), " .
-            "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP), " .
+            "recaudos (nit BIGINT, cliente, numero_factura, fecha_recaudo, valor_cancelado COP — datos importados desde SIIGO, pueden no estar actualizados al mes en curso; cruzar con cartera.documento=recaudos.numero_factura), " .
             "trm_daily (date, value COP/USD). " .
             "REGLA de filtro por período: si la pregunta es sobre órdenes DESPACHADAS/FACTURADAS → usa partials: par.type='real' AND par.dispatch_date BETWEEN '{$periodStart}' AND '{$periodEnd}' AND par.deleted_at IS NULL AND pop.muestra=0. " .
             "Si la pregunta es sobre órdenes CREADAS → usa purchase_orders directo: po.order_creation_date BETWEEN '{$periodStart}' AND '{$periodEnd}' (sin JOIN a partials). " .
