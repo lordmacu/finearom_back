@@ -321,7 +321,11 @@ class MonthlyReportController extends Controller
             "- catera_type: 'nacional' | 'internacional' (para filtrar cartera de exportación vs local)\n" .
             "- ⚠ CRÍTICO: cartera.vendedor y cartera.nombre_vendedor son el vendedor en SIIGO (ERP) y pueden NO coincidir con clients.executive.\n" .
             "  → Para filtrar cartera por ejecutiva: usa JOIN cartera ca ON ca.nit = clients.nit y filtra por clients.executive, NO por ca.vendedor.\n" .
-            "- recaudos.nit es BIGINT (número sin texto). clients.nit y cartera.nit son VARCHAR. El JOIN funciona con conversión implícita en MariaDB.\n\n" .
+            "- recaudos.nit es BIGINT (número sin texto). clients.nit y cartera.nit son VARCHAR. El JOIN funciona con conversión implícita en MariaDB.\n" .
+            "- ⚠ CRÍTICO GROUP BY en cartera: la tabla cartera tiene UNA FILA POR FACTURA (no por cliente).\n" .
+            "  → Si agrupas por nit/cliente, DEBES usar SUM(CAST(saldo_contable AS DECIMAL(15,2))) — nunca saldo_contable directo en SELECT.\n" .
+            "  → Si muestras detalle por factura (sin GROUP BY), puedes usar CAST(saldo_contable AS DECIMAL(15,2)) directo.\n" .
+            "  → En MariaDB ONLY_FULL_GROUP_BY, todo campo no-agregado en SELECT debe estar en GROUP BY.\n\n" .
             "REGLA CRÍTICA DE CANTIDADES:\n" .
             "Cuando JOIN partials → purchase_order_product, SIEMPRE usa par.quantity para calcular valor despachado.\n" .
             "pop.quantity es la cantidad PEDIDA, par.quantity es la cantidad REAL DESPACHADA.\n\n" .
@@ -468,6 +472,7 @@ class MonthlyReportController extends Controller
             "EXCEPCIÓN pop.quantity vs par.quantity: para 'Total OC' (denominador de cumplimiento) usa pop.quantity (pedido). Solo usa par.quantity para lo despachado. " .
             "CRÍTICO de cartera: saldo_contable ya es decimal normal con punto ('26857379.12'). Usar: CAST(saldo_contable AS DECIMAL(15,2)). NUNCA uses REPLACE para quitar puntos — destruyes el decimal. " .
             "CARTERA POR EJECUTIVA: NO filtres por cartera.vendedor — usa JOIN cartera ca ON ca.nit = clients.nit y filtra por clients.executive. " .
+            "CARTERA GROUP BY: cartera tiene UNA FILA POR FACTURA. Si agrupas por nit/cliente → usa SUM(CAST(saldo_contable AS DECIMAL(15,2))). Si listas facturas individuales → sin GROUP BY, usa CAST directo. NUNCA mezcles saldo_contable sin agregar en un SELECT con GROUP BY. " .
             "FILL RATE: SUM(par.quantity)/SUM(pop.quantity)*100 — mide % de kilos pedidos que se despacharon. " .
             "TENDENCIAS DIARIAS: usa tabla order_statistics (date, commercial_dispatched_value_usd, dispatched_orders_count, total_orders_created, dispatch_fulfillment_rate_usd, pending_dispatch_value_usd, extended_stats JSON) — es un snapshot pre-calculado por día, más eficiente que agregar partials. " .
             "CRÍTICO GROUP BY (MariaDB ONLY_FULL_GROUP_BY): TODOS los campos no-agregados del SELECT deben estar en el GROUP BY. " .
@@ -2035,13 +2040,21 @@ WHERE EXISTS (
     AND par.deleted_at IS NULL AND pop.muestra = 0
 );
 
-Cartera vencida (último snapshot):
-SELECT nit, nombre_empresa,
+Cartera detalle por factura (sin GROUP BY — cada fila es una factura):
+SELECT nit, nombre_empresa, documento,
   CAST(saldo_contable AS DECIMAL(15,2)) saldo_cop,
   CAST(saldo_vencido AS DECIMAL(15,2)) vencido_cop,
   dias, vence
 FROM cartera WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
 ORDER BY CAST(saldo_contable AS DECIMAL(15,2)) DESC;
+
+Cartera AGRUPADA por cliente (usar SUM porque hay múltiples facturas por NIT):
+SELECT ca.nit, ca.nombre_empresa,
+  SUM(CAST(ca.saldo_contable AS DECIMAL(15,2))) saldo_cop,
+  SUM(CAST(ca.saldo_vencido AS DECIMAL(15,2))) vencido_cop
+FROM cartera ca WHERE ca.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+GROUP BY ca.nit, ca.nombre_empresa
+ORDER BY saldo_cop DESC;
 
 Cartera por tipo (nacional vs internacional):
 SELECT catera_type, COUNT(*) facturas,
