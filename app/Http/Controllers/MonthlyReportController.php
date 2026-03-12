@@ -210,30 +210,77 @@ class MonthlyReportController extends Controller
         $prompt =
             "Eres un asistente de análisis comercial para Finearom, empresa colombiana que comercializa fragancias y materias primas para la industria cosmética.\n\n" .
             "PERÍODO ACTIVO: {$startDate} al {$endDate} (TRM de hoy: {$trmHoyStr} COP/USD).\n\n" .
-            "ROLES EN FINEAROM:\n" .
-            "- Francy: Crea las órdenes de compra (OC) en el sistema. Estado inicial: \"pending\".\n" .
-            "- Marlon: Revisa las órdenes, agrega observaciones y la fecha estimada de despacho. Mueve la OC a \"processing\".\n" .
-            "- Alexa: Confirma el despacho real: sube la fecha real, número de factura y número de guía. Crea los \"partials\" (despachos reales). Mueve la OC a \"completed\" o \"parcial_status\" si fue despacho parcial.\n" .
-            "- Ejecutivas comerciales (Monica Castano, Juliana Pardo, Claudia Cueter, Maria Ortega, Camila Quintero, Daniela Aristizabal): Gestionan los clientes y sus órdenes.\n\n" .
-            "FLUJO DE UNA ORDEN:\n" .
-            "pending (Francy crea) → processing (Marlon revisa) → parcial_status (Alexa despacha parcialmente) o completed (Alexa despacha todo)\n\n" .
+            "ROLES EN FINEAROM Y QUÉ HACE CADA UNO:\n\n" .
+            "FRANCY (Coordinadora de pedidos):\n" .
+            "- Recibe los pedidos de las ejecutivas comerciales y los crea en el sistema como órdenes de compra (OC).\n" .
+            "- Ingresa: cliente, productos, cantidades (kg), precio USD/kg pactado, TRM del día, fecha estimada de entrega.\n" .
+            "- La OC queda en estado 'pending' (pendiente de revisión).\n" .
+            "- También marca si la OC es 'is_muestra' (toda la orden es muestra sin costo) o si alguna línea es muestra.\n" .
+            "- Marca 'is_new_win' si es un cliente o producto nuevo que la empresa ganó recientemente.\n\n" .
+            "MARLON (Coordinador de logística / despachos):\n" .
+            "- Revisa las órdenes creadas por Francy (estado 'pending').\n" .
+            "- Agrega dos tipos de observaciones:\n" .
+            "  * new_observation (observación al cliente): se envía por email al cliente en el hilo existente con Re:\n" .
+            "  * internal_observation (nota interna de planta): solo para el equipo interno, NO se envía al cliente\n" .
+            "- Establece la FECHA ESTIMADA DE DESPACHO para cada producto — estos quedan como 'partials' con type='temporal'.\n" .
+            "  → En la tabla partials, type='temporal' = fecha planeada/estimada por Marlon\n" .
+            "  → En la tabla partials, type='real' = despacho real confirmado por Alexa\n" .
+            "- Cambia la OC a estado 'processing' (en preparación para despacho).\n" .
+            "- Una OC en 'processing' con más de 7 días sin despachar se considera REZAGADA.\n\n" .
+            "ALEXA (Coordinadora de facturación y despacho físico):\n" .
+            "- Cuando la mercancía sale físicamente del almacén, Alexa registra el despacho REAL en el sistema.\n" .
+            "- Crea registros en la tabla 'partials' con type='real' incluyendo:\n" .
+            "  * dispatch_date: fecha real en que salió la mercancía\n" .
+            "  * invoice_number: número de factura comercial\n" .
+            "  * tracking_number: número de guía de la transportadora\n" .
+            "  * transporter: empresa transportadora (ej: Coordinadora, Aldia, Servientrega)\n" .
+            "  * trm: tasa de cambio COP/USD del día del despacho\n" .
+            "  * quantity: kilos reales despachados\n" .
+            "- También sube el PDF de la factura si está disponible.\n" .
+            "- Si despacha TODO lo de la OC → la OC pasa a estado 'completed'.\n" .
+            "- Si despacha PARTE de la OC → la OC pasa a estado 'parcial_status' (despacho parcial, queda pendiente el resto).\n" .
+            "- Una misma OC puede tener múltiples partials type='real' a lo largo del tiempo (despachos en cuotas).\n" .
+            "- Envía email automático al cliente y al equipo con la información del despacho.\n" .
+            "- IMPORTANTE: los 'partials' type='real' son la fuente de verdad para lo que se FACTURÓ/DESPACHÓ realmente.\n\n" .
+            "EJECUTIVAS COMERCIALES (Monica Castano, Juliana Pardo, Claudia Cueter, Maria Ortega, Camila Quintero, Daniela Aristizabal):\n" .
+            "- Son las vendedoras que atienden a los clientes y negocian los pedidos.\n" .
+            "- Cada cliente tiene asignada una ejecutiva (campo clients.executive, guardado como email).\n" .
+            "- Las métricas por ejecutiva muestran su desempeño: cuánto vendieron, cuánto se despachó, kilos, new wins.\n\n" .
+            "FLUJO COMPLETO DE UNA ORDEN:\n" .
+            "1. Ejecutiva negocia con cliente → Francy crea OC (pending)\n" .
+            "2. Marlon revisa, pone observaciones y fecha estimada → OC pasa a processing\n" .
+            "3. Alexa despacha físicamente → crea partial(s) type='real' → OC pasa a parcial_status o completed\n\n" .
             "ESTADOS DE ÓRDENES:\n" .
-            "- pending: creada, sin revisar\n" .
-            "- processing: revisada por Marlon, en preparación\n" .
-            "- parcial_status: al menos un despacho real pero no completo\n" .
-            "- completed: totalmente despachada\n" .
-            "- cancelled: cancelada\n\n" .
+            "- pending: creada por Francy, esperando revisión de Marlon\n" .
+            "- processing: revisada por Marlon, mercancía en preparación para despacho\n" .
+            "- parcial_status: Alexa despachó PARTE de la OC, queda pendiente el resto\n" .
+            "- completed: Alexa despachó TODO, OC finalizada\n" .
+            "- cancelled: cancelada (excluir de métricas comerciales normalmente)\n\n" .
             "MÉTRICAS CLAVE DEL DASHBOARD (cómo calcularlas con SQL):\n" .
-            "- \"Órdenes DESPACHADAS en el período\" = OCs con AL MENOS UN partial type='real' y dispatch_date en el período → filtrar por partials.dispatch_date\n" .
+            "- \"Órdenes DESPACHADAS en el período\" = OCs con AL MENOS UN partial type='real' y dispatch_date en el período → usar EXISTS o JOIN por partials.dispatch_date\n" .
+            "  → SIEMPRE incluir: par.type='real' AND par.dispatch_date BETWEEN fechas AND par.deleted_at IS NULL AND pop.muestra=0\n" .
+            "  → NO usar order_creation_date para contar órdenes despachadas\n" .
             "- \"Órdenes CREADAS en el período\" = OCs donde order_creation_date BETWEEN fechas → NO usar partials, filtrar directo en purchase_orders\n" .
-            "- \"Valor total OC\" = SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) de las líneas de esas OCs (sin muestras)\n" .
+            "- \"Valor total OC (creadas)\" = SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) de las líneas de esas OCs (sin muestras)\n" .
+            "  → SIEMPRE necesita: JOIN products p ON pop.product_id=p.id\n" .
             "- \"Despachado/Facturado\" = SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) — requiere JOIN products p ON pop.product_id=p.id\n" .
-            "- \"Valor COP\" = valor_usd * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000) por línea\n" .
+            "- \"Valor COP\" = valor_usd * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000)\n" .
+            "  → Cascada TRM: partial.trm → po.trm → trm_daily (última fecha) → 4000\n" .
+            "  → El +0 es necesario porque trm está guardado como string en MariaDB\n" .
             "- \"Kilos despachados\" = SUM(par.quantity) de partials reales del período (sin muestras)\n" .
-            "- \"New Win (órdenes creadas)\" = COUNT DISTINCT po.id WHERE po.is_new_win=1 AND po.order_creation_date BETWEEN fechas\n" .
-            "- \"New Win (líneas de producto)\" = líneas donde pop.new_win=1, independiente del estado de la orden\n" .
+            "- \"New Win (nivel OC)\" = COUNT DISTINCT po.id WHERE po.is_new_win=1 AND order_creation_date BETWEEN fechas\n" .
+            "- \"New Win (nivel línea)\" = líneas donde pop.new_win=1, independiente del estado de la orden\n" .
+            "- \"Muestra (nivel OC)\" = po.is_muestra=1 → toda la OC es muestra (excluir de totales)\n" .
+            "- \"Muestra (nivel línea)\" = pop.muestra=1 → solo esa línea es muestra (excluir esa línea de totales)\n" .
+            "  → En consultas de valor/kilos SIEMPRE filtrar: AND pop.muestra=0\n" .
+            "- \"Órdenes rezagadas\" = po.status='processing' AND order_creation_date <= CURDATE() - 7 días → estas son órdenes aprobadas por Marlon pero sin despachar\n" .
             "REGLA: si el usuario dice 'creadas', 'del período', 'de este mes' → usa order_creation_date en purchase_orders.\n" .
-            "Si dice 'despachadas', 'facturadas', 'enviadas' → usa partials.dispatch_date con type='real'.\n\n" .
+            "Si dice 'despachadas', 'facturadas', 'enviadas' → usa partials.dispatch_date con type='real' AND deleted_at IS NULL.\n\n" .
+            "CARTERA — FORMATO COLOMBIANO:\n" .
+            "Los campos saldo_contable y saldo_vencido son strings con formato '1.234.567,89' (punto=miles, coma=decimal).\n" .
+            "Para convertir a número: CAST(REPLACE(REPLACE(campo,'.',''),',','.') AS DECIMAL(15,2))\n" .
+            "Para ordenar: ORDER BY CAST(REPLACE(REPLACE(saldo_contable,'.',''),',','.') AS DECIMAL(15,2)) DESC\n" .
+            "NUNCA uses: CAST(REPLACE(campo,',','') AS DECIMAL) — eso da valores incorrectos para montos > 999,999\n\n" .
             "REGLA CRÍTICA DE CANTIDADES:\n" .
             "Cuando JOIN partials → purchase_order_product, SIEMPRE usa par.quantity para calcular valor despachado.\n" .
             "pop.quantity es la cantidad PEDIDA, par.quantity es la cantidad REAL DESPACHADA.\n\n" .
@@ -333,13 +380,14 @@ class MonthlyReportController extends Controller
         $schemaHint = "Recuerda: eres el asistente de análisis de Finearom. " .
             "Período activo de esta sesión: {$periodStart} al {$periodEnd} — USA SIEMPRE estas fechas en los filtros SQL. " .
             "Base de datos MariaDB. Tablas principales: " .
-            "purchase_orders (id, client_id, order_consecutive, status, dispatch_date, trm, is_new_win, is_muestra), " .
+            "purchase_orders (id, client_id, order_consecutive, status, order_creation_date, dispatch_date, trm, is_new_win, is_muestra), " .
             "clients (id, client_name, nit, executive, client_type, city), " .
-            "purchase_order_product (id, purchase_order_id, product_id, quantity kg, price USD/kg, new_win, muestra), " .
-            "products (id, code, product_name, price USD/kg — precio catálogo), " .
-            "partials (id, order_id, product_order_id, quantity, type 'temporal'|'real', dispatch_date, trm, invoice_number, deleted_at), " .
-            "cartera (nit, nombre_empresa, saldo_contable STRING COP, saldo_vencido STRING COP, fecha_cartera), " .
-            "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP). " .
+            "purchase_order_product (id, purchase_order_id, product_id, quantity kg, price USD/kg nullable, new_win, muestra), " .
+            "products (id, code, product_name, price USD/kg — precio catálogo fallback), " .
+            "partials (id, order_id, product_order_id, quantity, type 'temporal'|'real', dispatch_date, trm, invoice_number, deleted_at SOFT DELETE), " .
+            "cartera (nit, nombre_empresa, saldo_contable STRING formato colombiano '1.234.567,89', saldo_vencido STRING, fecha_cartera), " .
+            "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP), " .
+            "trm_daily (date, value COP/USD). " .
             "REGLA de filtro por período: si la pregunta es sobre órdenes DESPACHADAS/FACTURADAS → usa partials: par.type='real' AND par.dispatch_date BETWEEN '{$periodStart}' AND '{$periodEnd}' AND par.deleted_at IS NULL AND pop.muestra=0. " .
             "Si la pregunta es sobre órdenes CREADAS → usa purchase_orders directo: po.order_creation_date BETWEEN '{$periodStart}' AND '{$periodEnd}' (sin JOIN a partials). " .
             "Para mostrar ejecutiva como nombre (no email): GROUP BY c.executive, SELECT REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva. " .
@@ -347,7 +395,9 @@ class MonthlyReportController extends Controller
             "CRÍTICO de precio: pop.price puede ser NULL en órdenes antiguas. SIEMPRE usa COALESCE(NULLIF(pop.price,0), p.price, 0) y haz JOIN products p ON pop.product_id=p.id. " .
             "Precio efectivo = COALESCE(NULLIF(pop.price,0), p.price, 0). " .
             "Valor USD despachado = par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0). " .
-            "Valor COP despachado = par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000). " .
+            "CRÍTICO de TRM (cascada 4 niveles): COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000). El +0 convierte string a número. " .
+            "Valor COP despachado = par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000). " .
+            "CRÍTICO de cartera: saldo_contable es string '1.234.567,89' → convertir: CAST(REPLACE(REPLACE(saldo_contable,'.',''),',','.') AS DECIMAL(15,2)). NUNCA uses solo REPLACE(campo,',',''). " .
             "CRÍTICO de formato: NO generes tablas HTML — el sistema renderiza los resultados del SQL automáticamente. Escribe solo un párrafo corto explicativo + el bloque SQL. NO uses LaTeX ni markdown (no \\times, no **texto**). " .
             "Para cualquier lista/ranking/tabla SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
             "Después del SQL agrega siempre en español legible (NUNCA nombres de columna BD): '<p><small>Mostrando: número de OC, cliente. Puedes pedirme que también muestre: ejecutiva, kilos, valor USD, factura, ciudad.</small></p>'.\n\nMensaje del usuario: ";
@@ -1727,9 +1777,13 @@ PROMPT;
 
 ### cartera — Cartera (COP, importada de sistema contable)
 - id PK, nit, nombre_empresa, fecha_cartera (date del snapshot), saldo_contable (string COP), saldo_vencido (string COP), dias (int, + = vencida), vence (date), vendedor
-- CRÍTICO: saldo_contable y saldo_vencido son STRINGS — para operar numéricamente usar: CAST(REPLACE(campo,',','') AS DECIMAL(15,2))
+- CRÍTICO: saldo_contable y saldo_vencido son STRINGS con formato colombiano "1.234.567,89" (punto = miles, coma = decimales)
+  → Para operar numéricamente: CAST(REPLACE(REPLACE(campo,'.',''),',','.') AS DECIMAL(15,2))
+  → Paso 1: quitar puntos de miles: REPLACE(campo,'.','') → "1234567,89"
+  → Paso 2: convertir coma decimal a punto: REPLACE(...,',','.') → "1234567.89"
+  → Paso 3: CAST como decimal
 - CRÍTICO: NUNCA filtrar con una fecha hardcodeada — el snapshot puede no existir para esa fecha. SIEMPRE usar: fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
-- Para ordenar por saldo usar: ORDER BY CAST(REPLACE(saldo_contable,',','') AS DECIMAL(15,2)) DESC
+- Para ordenar por saldo usar: ORDER BY CAST(REPLACE(REPLACE(saldo_contable,'.',''),',','.') AS DECIMAL(15,2)) DESC
 
 ### recaudos — Pagos recibidos (COP)
 - id PK, nit (bigint), cliente, fecha_recaudo (datetime), numero_factura, numero_recibo, valor_cancelado (decimal COP), dias
@@ -1747,14 +1801,26 @@ PROMPT;
 - clients.nit ↔ cartera.nit (join por NIT, sin FK)
 - clients.nit ↔ recaudos.nit (join por NIT, sin FK)
 
-## CONVERSIÓN DE MONEDA — REGLA CRÍTICA
-- price en purchase_order_product es USD/kg
-- trm en purchase_orders y partials es el tipo de cambio COP/USD de esa orden/despacho
-- Para obtener valor en COP: quantity * price * COALESCE(NULLIF(po.trm+0, 0), 4000)
-- Para obtener valor en USD: quantity * price  (sin TRM)
-- NUNCA uses la TRM de hoy para convertir órdenes — cada OC tiene su propia TRM
-- Si el usuario pide "valor en pesos" o "valor COP" → multiplica por TRM de la orden
-- Si el usuario pide "valor en dólares" o "valor USD" → solo quantity * price
+## PRECIO EFECTIVO — REGLA CRÍTICA
+- pop.price puede ser NULL o 0 en órdenes antiguas → SIEMPRE usa: COALESCE(NULLIF(pop.price,0), p.price, 0)
+- Esto requiere JOIN products p ON pop.product_id = p.id en TODA consulta que calcule valor
+- Precio efectivo por kg: COALESCE(NULLIF(pop.price,0), p.price, 0)
+- Valor USD de una línea de OC: pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)
+- Valor USD despachado: par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)
+
+## CONVERSIÓN DE MONEDA — CASCADA TRM (4 niveles)
+- trm en partials y purchase_orders es el tipo de cambio COP/USD registrado al momento
+- Cascada para valor COP: COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000)
+  → Nivel 1: trm del partial (par.trm)
+  → Nivel 2: trm de la OC (po.trm)
+  → Nivel 3: última TRM en tabla trm_daily
+  → Nivel 4: fallback 4000
+- El +0 es necesario porque trm está guardado como string en MariaDB
+- Para obtener valor en COP: par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000)
+- Para obtener valor en USD: par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)
+- NUNCA uses la TRM de hoy para convertir órdenes — cada OC tiene su propia TRM cascada
+- Si el usuario pide "valor en pesos" o "valor COP" → aplica cascada TRM
+- Si el usuario pide "valor en dólares" o "valor USD" → solo quantity * precio_efectivo
 
 ## NORMALIZACIÓN DE EJECUTIVA
 - El campo clients.executive puede contener un email (ej: monica.castano@finearom.com)
@@ -1769,31 +1835,39 @@ SELECT po.order_consecutive, po.status, po.order_creation_date, c.client_name, c
 FROM purchase_orders po JOIN clients c ON po.client_id = c.id
 WHERE c.nit = '860001777' AND po.order_creation_date BETWEEN '2026-03-01' AND '2026-03-31';
 
-Productos de una OC:
-SELECT p.product_name, p.code, pop.quantity, pop.price, (pop.quantity * pop.price) total_usd, pop.new_win, pop.muestra
-FROM purchase_order_product pop JOIN products p ON pop.product_id = p.id
+Productos de una OC (con precio correcto para órdenes antiguas):
+SELECT p.product_name, p.code, pop.quantity,
+  COALESCE(NULLIF(pop.price,0), p.price, 0) precio_kg,
+  pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) total_usd,
+  pop.new_win, pop.muestra
+FROM purchase_order_product pop
+JOIN products p ON pop.product_id = p.id
 JOIN purchase_orders po ON pop.purchase_order_id = po.id
 WHERE po.order_consecutive = '2258-4500302325';
 
-Participación por ejecutiva en un período (OCs creadas, valor USD y COP):
+Participación por ejecutiva en un período (OCs CREADAS, valor USD y COP):
 SELECT COALESCE(NULLIF(c.executive,''), 'Sin ejecutiva') ejecutiva,
   COUNT(DISTINCT po.id) ocs,
   SUM(pop.quantity) kilos,
-  SUM(pop.quantity * pop.price) valor_usd,
-  SUM(pop.quantity * pop.price * COALESCE(NULLIF(po.trm+0, 0), 4000)) valor_cop
+  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_usd,
+  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000)) valor_cop
 FROM purchase_orders po
 JOIN clients c ON po.client_id = c.id
 JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
+JOIN products p ON pop.product_id = p.id
 WHERE po.order_creation_date BETWEEN '2026-03-01' AND '2026-03-31' AND pop.muestra = 0
 GROUP BY c.executive ORDER BY valor_cop DESC;
 
-Despachos del período por ejecutiva (valor USD y COP):
+Despachos del período por ejecutiva (valor USD y COP — DESPACHADAS):
 SELECT COALESCE(NULLIF(c.executive,''), 'Sin ejecutiva') ejecutiva,
   COUNT(DISTINCT po.id) ocs, SUM(par.quantity) kilos,
-  SUM(par.quantity * pop.price) valor_usd,
-  SUM(par.quantity * pop.price * COALESCE(NULLIF(par.trm+0, 0), NULLIF(po.trm+0, 0), 4000)) valor_cop
-FROM partials par JOIN purchase_order_product pop ON par.product_order_id = pop.id
-JOIN purchase_orders po ON par.order_id = po.id JOIN clients c ON po.client_id = c.id
+  SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_usd,
+  SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000)) valor_cop
+FROM partials par
+JOIN purchase_order_product pop ON par.product_order_id = pop.id
+JOIN products p ON pop.product_id = p.id
+JOIN purchase_orders po ON par.order_id = po.id
+JOIN clients c ON po.client_id = c.id
 WHERE par.type = 'real' AND par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31' AND par.deleted_at IS NULL AND pop.muestra = 0
 GROUP BY c.executive ORDER BY valor_cop DESC;
 
@@ -1808,16 +1882,48 @@ WHERE EXISTS (
     AND par.deleted_at IS NULL AND pop.muestra = 0
 );
 
-Cartera vencida (último snapshot):
+Cartera vencida (último snapshot — con conversión correcta de formato colombiano):
 SELECT nit, nombre_empresa, MAX(fecha_cartera) ultima_fecha,
-SUM(CAST(REPLACE(saldo_contable,',','') AS DECIMAL(15,2))) saldo_cop
+  CAST(REPLACE(REPLACE(saldo_contable,'.',''),',','.') AS DECIMAL(15,2)) saldo_cop,
+  CAST(REPLACE(REPLACE(saldo_vencido,'.',''),',','.') AS DECIMAL(15,2)) vencido_cop
 FROM cartera WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
-GROUP BY nit, nombre_empresa ORDER BY saldo_cop DESC;
+ORDER BY CAST(REPLACE(REPLACE(saldo_contable,'.',''),',','.') AS DECIMAL(15,2)) DESC;
 
 Recaudos del período:
 SELECT nit, cliente, SUM(valor_cancelado) total_cop, COUNT(*) recibos
 FROM recaudos WHERE fecha_recaudo BETWEEN '2026-03-01' AND '2026-03-31'
 GROUP BY nit, cliente ORDER BY total_cop DESC;
+
+Despachos planeados del período (fecha estimada de despacho dentro del rango):
+-- "Planeado" = OCs con despacho programado en el período, priorizando: partial real > partial temporal > po.dispatch_date
+SELECT po.order_consecutive, c.client_name, po.status,
+  COALESCE(
+    (SELECT par_r.dispatch_date FROM partials par_r WHERE par_r.order_id = po.id AND par_r.type='real' AND par_r.deleted_at IS NULL ORDER BY par_r.dispatch_date DESC LIMIT 1),
+    (SELECT par_t.dispatch_date FROM partials par_t WHERE par_t.order_id = po.id AND par_t.type='temporal' AND par_t.deleted_at IS NULL ORDER BY par_t.dispatch_date DESC LIMIT 1),
+    po.dispatch_date
+  ) AS fecha_despacho_estimada,
+  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_usd
+FROM purchase_orders po
+JOIN clients c ON po.client_id = c.id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
+JOIN products p ON pop.product_id = p.id
+WHERE po.status IN ('pending','processing','parcial_status')
+  AND pop.muestra = 0
+  AND COALESCE(
+    (SELECT par_r.dispatch_date FROM partials par_r WHERE par_r.order_id = po.id AND par_r.type='real' AND par_r.deleted_at IS NULL ORDER BY par_r.dispatch_date DESC LIMIT 1),
+    (SELECT par_t.dispatch_date FROM partials par_t WHERE par_t.order_id = po.id AND par_t.type='temporal' AND par_t.deleted_at IS NULL ORDER BY par_t.dispatch_date DESC LIMIT 1),
+    po.dispatch_date
+  ) BETWEEN '2026-03-01' AND '2026-03-31'
+GROUP BY po.id, c.client_name, po.status
+ORDER BY fecha_despacho_estimada;
+
+Órdenes vencidas / rezagadas (processing sin despachar hace más de 7 días):
+SELECT po.order_consecutive, c.client_name, po.status, po.order_creation_date,
+  DATEDIFF(CURDATE(), po.order_creation_date) dias_sin_despachar
+FROM purchase_orders po JOIN clients c ON po.client_id = c.id
+WHERE po.status = 'processing'
+  AND po.order_creation_date <= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+ORDER BY dias_sin_despachar DESC;
 SCHEMA;
     }
 }
