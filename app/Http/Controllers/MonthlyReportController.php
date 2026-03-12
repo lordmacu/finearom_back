@@ -191,7 +191,7 @@ class MonthlyReportController extends Controller
         $request->validate([
             'start_date' => 'nullable|date_format:Y-m-d',
             'end_date'   => 'nullable|date_format:Y-m-d',
-            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5,o3-mini',
+            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5',
         ]);
 
         $aiUrl = config('custom.ai_server_url');
@@ -460,7 +460,7 @@ class MonthlyReportController extends Controller
             'thread_id'  => 'required|string',
             'message'    => 'required|string|max:2000',
             'session_id' => 'nullable|integer',
-            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5,o3-mini',
+            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5',
         ]);
 
         $aiUrl = config('custom.ai_server_url');
@@ -651,7 +651,7 @@ class MonthlyReportController extends Controller
      */
     private function checkAndIncrementModelLimit(string $model): ?JsonResponse
     {
-        $limitedModels = ['claude-sonnet-4-5', 'o3-mini'];
+        $limitedModels = ['claude-sonnet-4-5'];
 
         if (!in_array($model, $limitedModels, true)) {
             return null;
@@ -688,7 +688,7 @@ class MonthlyReportController extends Controller
         $bogota      = Carbon::now('America/Bogota');
         $today       = $bogota->toDateString();
         $userId      = auth()->id();
-        $limitedModels = ['claude-sonnet-4-5', 'o3-mini'];
+        $limitedModels = ['claude-sonnet-4-5'];
         $limit       = 10;
 
         $result = [];
