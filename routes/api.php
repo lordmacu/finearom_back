@@ -484,6 +484,7 @@ Route::get('/dashboard/monthly-report/analyze', [\App\Http\Controllers\MonthlyRe
 Route::get('/dashboard/monthly-report/analyze/stream', [\App\Http\Controllers\MonthlyReportController::class, 'stream']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/dashboard/chat/start',             [\App\Http\Controllers\MonthlyReportController::class, 'chatStart']);
+    Route::post('/dashboard/chat/start-v2',          [\App\Http\Controllers\MonthlyReportController::class, 'chatStartV2']);
     Route::post('/dashboard/chat/message',           [\App\Http\Controllers\MonthlyReportController::class, 'chatMessage']);
     Route::post('/dashboard/chat/run-query',         [\App\Http\Controllers\MonthlyReportController::class, 'runQuery']);
     Route::get('/dashboard/chat/sessions',           [\App\Http\Controllers\MonthlyReportController::class, 'chatSessions']);

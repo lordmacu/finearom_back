@@ -179,6 +179,118 @@ class MonthlyReportController extends Controller
     }
 
     /**
+     * Inicia una nueva conversación con la IA usando un prompt ligero (sin reporte precompilado).
+     * Envía solo el schema de DB, contexto de negocio e instrucciones de métricas.
+     * Devuelve el thread_id para continuar la conversación.
+     */
+    public function chatStartV2(Request $request): JsonResponse
+    {
+        $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date'   => 'nullable|date_format:Y-m-d',
+        ]);
+
+        $aiUrl = config('custom.ai_server_url');
+        $aiKey = config('custom.ai_server_key');
+
+        $startDate = $request->get('start_date') ?? Carbon::now()->startOfMonth()->toDateString();
+        $endDate   = $request->get('end_date')   ?? Carbon::now()->endOfMonth()->toDateString();
+        $period    = ['start_date' => $startDate, 'end_date' => $endDate];
+
+        $now   = Carbon::now('America/Bogota');
+        $today = $now->toDateString();
+
+        // TRM de hoy (o la más reciente disponible)
+        $trmHoy = DB::table('trm_daily')
+            ->where('date', '<=', $today)
+            ->orderByDesc('date')
+            ->value('value');
+        $trmHoyStr = $trmHoy ? number_format((float)$trmHoy, 2) : '4000.00';
+
+        $prompt =
+            "Eres un asistente de análisis comercial para Finearom, empresa colombiana que comercializa fragancias y materias primas para la industria cosmética.\n\n" .
+            "PERÍODO ACTIVO: {$startDate} al {$endDate} (TRM de hoy: {$trmHoyStr} COP/USD).\n\n" .
+            "ROLES EN FINEAROM:\n" .
+            "- Francy: Crea las órdenes de compra (OC) en el sistema. Estado inicial: \"pending\".\n" .
+            "- Marlon: Revisa las órdenes, agrega observaciones y la fecha estimada de despacho. Mueve la OC a \"processing\".\n" .
+            "- Alexa: Confirma el despacho real: sube la fecha real, número de factura y número de guía. Crea los \"partials\" (despachos reales). Mueve la OC a \"completed\" o \"parcial_status\" si fue despacho parcial.\n" .
+            "- Ejecutivas comerciales (Monica Castano, Juliana Pardo, Claudia Cueter, Maria Ortega, Camila Quintero, Daniela Aristizabal): Gestionan los clientes y sus órdenes.\n\n" .
+            "FLUJO DE UNA ORDEN:\n" .
+            "pending (Francy crea) → processing (Marlon revisa) → parcial_status (Alexa despacha parcialmente) o completed (Alexa despacha todo)\n\n" .
+            "ESTADOS DE ÓRDENES:\n" .
+            "- pending: creada, sin revisar\n" .
+            "- processing: revisada por Marlon, en preparación\n" .
+            "- parcial_status: al menos un despacho real pero no completo\n" .
+            "- completed: totalmente despachada\n" .
+            "- cancelled: cancelada\n\n" .
+            "MÉTRICAS CLAVE DEL DASHBOARD (cómo calcularlas con SQL):\n" .
+            "- \"Total OC del período\" = OCs que tienen AL MENOS UN partial con type='real' y dispatch_date en el período (no muestra)\n" .
+            "- \"Valor total OC\" = SUM(pop.quantity * pop.price) de las líneas de esas OCs (sin muestras)\n" .
+            "- \"Despachado/Facturado\" = SUM(par.quantity * pop.price) usando par.quantity de partials reales del período\n" .
+            "- \"Valor COP\" = usar COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000) como TRM por línea\n" .
+            "- \"Kilos despachados\" = SUM(par.quantity) de partials reales del período (sin muestras)\n" .
+            "- \"Órdenes creadas\" = COUNT(po.id) WHERE order_creation_date BETWEEN fechas (diferente de despachadas)\n" .
+            "- \"New Win\" = órdenes/líneas donde new_win=1 o is_new_win=1\n\n" .
+            "REGLA CRÍTICA DE CANTIDADES:\n" .
+            "Cuando JOIN partials → purchase_order_product, SIEMPRE usa par.quantity para calcular valor despachado.\n" .
+            "pop.quantity es la cantidad PEDIDA, par.quantity es la cantidad REAL DESPACHADA.\n\n" .
+            "EJECUTIVA: clients.executive puede ser email (ej: monica.castano@finearom.com).\n" .
+            "Para mostrar como nombre: REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva\n" .
+            "Siempre GROUP BY c.executive (no por el alias).\n\n" .
+            "ESQUEMA DE BASE DE DATOS:\n" . $this->getDbSchema() . "\n\n" .
+            "INSTRUCCIONES:\n" .
+            "- Responde SOLO en HTML limpio. NO uses LaTeX, NO uses markdown (no \\times, no **texto**, no backticks).\n" .
+            "- NO generes tablas HTML con datos — el sistema ejecuta el SQL y muestra los resultados automáticamente.\n" .
+            "- Para cualquier pregunta sobre datos (listas, rankings, totales, comparaciones): escribe un párrafo corto explicando qué hace la consulta + el bloque SQL.\n" .
+            "- SQL siempre en: <pre><code class=\"language-sql\">QUERY</code></pre>\n" .
+            "- Usa siempre las fechas del período activo en los filtros.\n" .
+            "- Para preguntas conceptuales simples (¿qué es X?, ¿cómo funciona Y?) responde sin SQL.\n" .
+            "- El mensaje de bienvenida debe ser: saludo breve, período activo, y 3-4 ejemplos de preguntas que puedes responder.";
+
+        $periodLabel = Carbon::parse($startDate)->locale('es')->isoFormat('MMMM YYYY');
+
+        try {
+            $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
+                ->timeout(60)
+                ->post("{$aiUrl}/v1/chat/completions", [
+                    'model'    => 'gpt-4.1',
+                    'messages' => [['role' => 'user', 'content' => $prompt]],
+                ]);
+
+            if (!$resp->successful()) {
+                Log::error('[Chat] Error en chatStartV2: ' . $resp->body());
+                return response()->json(['success' => false, 'message' => 'Error conectando con IA'], 500);
+            }
+
+            $threadId   = $resp->json('thread_id');
+            $welcomeMsg = trim($resp->json('choices.0.message.content', 'Listo, puedes hacerme preguntas sobre el período.'));
+            $now        = now()->toDateTimeString();
+
+            $session = ChatSession::create([
+                'user_id'      => auth()->id(),
+                'thread_id'    => $threadId,
+                'period_label' => ucfirst($periodLabel),
+                'period_start' => $startDate,
+                'period_end'   => $endDate,
+                'messages'     => [
+                    ['role' => 'assistant', 'content' => $welcomeMsg, 'time' => $now],
+                ],
+            ]);
+
+            return response()->json([
+                'success'    => true,
+                'session_id' => $session->id,
+                'thread_id'  => $threadId,
+                'message'    => $welcomeMsg,
+                'period'     => $period,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('[Chat] chatStartV2 exception: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Envía un mensaje del usuario al hilo existente y devuelve la respuesta de la IA.
      */
     public function chatMessage(Request $request): JsonResponse
