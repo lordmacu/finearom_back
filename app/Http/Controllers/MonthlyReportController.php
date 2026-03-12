@@ -273,11 +273,18 @@ class MonthlyReportController extends Controller
             "  → SIEMPRE incluir: par.type='real' AND par.dispatch_date BETWEEN fechas AND par.deleted_at IS NULL AND pop.muestra=0\n" .
             "  → NO usar order_creation_date para contar órdenes despachadas\n" .
             "- \"Órdenes CREADAS en el período\" = OCs donde order_creation_date BETWEEN fechas → NO usar partials, filtrar directo en purchase_orders\n" .
+            "- \"Stats por ejecutiva (pedido vs despachado)\" — PATRÓN CORRECTO:\n" .
+            "  → Empieza SIEMPRE desde partials con dispatch_date en el período\n" .
+            "  → SUM(pop.quantity) = kilos pedidos en esas OCs (denominador)\n" .
+            "  → SUM(par.quantity) = kilos despachados en el período (numerador)\n" .
+            "  → Agrupa por c.executive — incluye TODAS las ejecutivas que tuvieron despachos (incluso si sus OCs se crearon en meses anteriores)\n" .
+            "  → NUNCA filtres por order_creation_date para esta métrica — perderías ejecutivas cuyas OCs se crearon antes del período\n" .
+            "  Ejemplo: SELECT ejecutiva, SUM(pop.quantity) kilos_pedidos, SUM(par.quantity) kilos_despachados, ROUND(SUM(par.quantity)/NULLIF(SUM(pop.quantity),0)*100,1) cumplimiento_pct FROM partials par JOIN purchase_order_product pop ON par.product_order_id=pop.id AND pop.muestra=0 JOIN products p ON pop.product_id=p.id JOIN purchase_orders po ON ar.order_id=po.id JOIN clients c ON po.client_id=c.id WHERE par.type='real' AND par.dispatch_date BETWEEN fechas AND par.deleted_at IS NULL GROUP BY c.executive ORDER BY kilos_despachados DESC\n" .
             "- \"Valor total OC\" = SUM(pop.quantity * precio) — usa pop.quantity (kilos PEDIDOS) para el denominador del cumplimiento\n" .
             "  ⚠ EXCEPCIÓN A LA REGLA GENERAL: aquí usa pop.quantity, NO par.quantity\n" .
             "  → SIEMPRE necesita: JOIN products p ON pop.product_id=p.id\n" .
             "- \"Despachado/Facturado\" = SUM(par.quantity * precio) — usa par.quantity (kilos REALES DESPACHADOS)\n" .
-            "- \"Cumplimiento %\" = despachado_usd / total_oc_usd × 100. Para ejecutivas usa dispatched_usd / value_usd × 100\n" .
+            "- \"Cumplimiento %\" = despachado_usd / total_oc_usd × 100. Calculado desde partials (NO desde order_creation_date)\n" .
             "- \"Fill Rate (tasa de llenado)\" = SUM(par.quantity) / SUM(pop.quantity) × 100 (en kilos). Mide qué porcentaje de lo pedido se despachó.\n" .
             "- \"Valor COP\" = valor_usd × COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000)\n" .
             "  → Cascada TRM: partial.trm → po.trm → trm_daily (última fecha) → 4000\n" .
@@ -1967,6 +1974,28 @@ FROM purchase_order_product pop
 JOIN products p ON pop.product_id = p.id
 JOIN purchase_orders po ON pop.purchase_order_id = po.id
 WHERE po.order_consecutive = '2258-4500302325';
+
+Stats por ejecutiva — pedido vs despachado con cumplimiento (BASE = partials del período):
+SELECT REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva,
+  c.nit AS nit_cliente,
+  SUM(pop.quantity) kilos_pedidos,
+  ROUND(SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)), 2) total_oc_usd,
+  SUM(par.quantity) kilos_despachados,
+  ROUND(SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)), 2) despachado_usd,
+  ROUND(SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) /
+    NULLIF(SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)), 0) * 100, 1) cumplimiento_pct
+FROM partials par
+JOIN purchase_order_product pop ON par.product_order_id = pop.id AND pop.muestra = 0
+JOIN products p ON pop.product_id = p.id
+JOIN purchase_orders po ON par.order_id = po.id
+JOIN clients c ON po.client_id = c.id
+WHERE par.type = 'real'
+  AND par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31'
+  AND par.deleted_at IS NULL
+GROUP BY c.executive
+ORDER BY despachado_usd DESC;
+-- NOTA: esta query parte de partials (despachos) e incluye OCs creadas en cualquier mes.
+-- NO usar order_creation_date aquí — se perderían ejecutivas con OCs antiguas despachadas en el período.
 
 Participación por ejecutiva en un período (OCs CREADAS, valor USD y COP):
 SELECT COALESCE(NULLIF(c.executive,''), 'Sin ejecutiva') ejecutiva,
