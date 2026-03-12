@@ -462,7 +462,10 @@ class MonthlyReportController extends Controller
 
         // Recordatorio compacto para que la IA no pierda contexto entre turnos
         $schemaHint = "Recuerda: eres el asistente de análisis de Finearom. " .
-            "Período activo de esta sesión: {$periodStart} al {$periodEnd} — USA SIEMPRE estas fechas en los filtros SQL. " .
+            "Período activo de esta sesión: {$periodStart} al {$periodEnd}. " .
+            "REGLA DE FECHAS: usa SIEMPRE {$periodStart} y {$periodEnd} como filtro por defecto en todas las queries. " .
+            "EXCEPCIÓN 1: si el usuario menciona fechas distintas en su mensaje, esas fechas SOBREESCRIBEN el período activo. " .
+            "EXCEPCIÓN 2: para preguntas sobre órdenes 'estancadas', 'sin despacho hace X días', 'sin movimiento' — NO uses BETWEEN sobre order_creation_date; usa solo DATEDIFF(CURDATE(), po.order_creation_date) > X sin filtro de período. " .
             "Base de datos MariaDB. Tablas principales: " .
             "purchase_orders (id, client_id, order_consecutive, status, order_creation_date, dispatch_date, trm, is_new_win, is_muestra), " .
             "clients (id, client_name, nit, executive, client_type, city), " .
