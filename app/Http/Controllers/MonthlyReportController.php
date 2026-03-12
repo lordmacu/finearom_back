@@ -199,11 +199,11 @@ class MonthlyReportController extends Controller
             "clients (id, client_name, nit, executive, client_type, city), " .
             "purchase_order_product (id, purchase_order_id, product_id, quantity kg, price USD/kg, new_win, muestra), " .
             "products (id, code, product_name), " .
-            "partials (id, order_id, product_order_id, quantity, dispatch_date, trm, invoice_number, deleted_at), " .
+            "partials (id, order_id, product_order_id, quantity, type 'temporal'|'real', dispatch_date, trm, invoice_number, deleted_at), " .
             "cartera (nit, nombre_empresa, saldo_contable STRING COP, saldo_vencido STRING COP, fecha_cartera), " .
             "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP). " .
-            "CRÍTICO: para filtrar órdenes por período SIEMPRE usa partials.dispatch_date (fecha del despacho real), NO order_creation_date. " .
-            "Ejemplo correcto: JOIN partials par ON par.order_id = po.id WHERE par.dispatch_date BETWEEN 'INICIO' AND 'FIN' AND par.deleted_at IS NULL. " .
+            "CRÍTICO: para filtrar órdenes por período SIEMPRE usa partials con type='real' y dispatch_date en el rango. " .
+            "Ejemplo correcto: JOIN partials par ON par.order_id = po.id WHERE par.type = 'real' AND par.dispatch_date BETWEEN 'INICIO' AND 'FIN' AND par.deleted_at IS NULL AND pop.muestra = 0. " .
             "Valor USD de una línea = quantity * price. Valor COP = quantity * price * trm. " .
             "Responde en HTML. Para listas/rankings/tablas SIEMPRE genera SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
             "NO uses nombres de tabla genéricos — usa los nombres reales.\n\n" .
@@ -1576,6 +1576,7 @@ PROMPT;
 
 ### partials — Despachos
 - id PK, order_id FK→purchase_orders.id, product_order_id FK→purchase_order_product.id, product_id FK→products.id, quantity (kg), type ('temporal'|'real'), dispatch_date (date), trm, invoice_number, pdf_invoice, tracking_number, transporter, deleted_at (soft delete)
+- CRÍTICO: para análisis de despachos del período SIEMPRE filtrar: type = 'real' AND dispatch_date BETWEEN ... AND deleted_at IS NULL AND pop.muestra = 0
 
 ### cartera — Cartera (COP, importada de sistema contable)
 - id PK, nit, nombre_empresa, fecha_cartera (date del snapshot), saldo_contable (string COP), saldo_vencido (string COP), dias (int, + = vencida), vence (date), vendedor
