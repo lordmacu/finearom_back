@@ -351,6 +351,8 @@ class MonthlyReportController extends Controller
             "  Si tienes c.client_name y c.executive en el SELECT → el GROUP BY debe incluir c.id, c.client_name, c.executive.\n" .
             "  Agrupa SIEMPRE por c.executive (no por el alias 'ejecutiva'). El alias va solo en el SELECT.\n" .
             "  NUNCA omitas columnas del SELECT en el GROUP BY aunque sean derivadas del id.\n" .
+            "- PRESENTACIÓN: NUNCA incluyas columnas de id (id, client_id, product_id, etc.) en el SELECT.\n" .
+            "  Cuando muestres nombre de cliente SIEMPRE incluye también el NIT del cliente en la misma query.\n" .
             "- Para preguntas conceptuales simples (¿qué es X?, ¿cómo funciona Y?) responde sin SQL.\n" .
             "- IMPORTANTE: después de cada bloque SQL, agrega siempre una línea breve con dos partes:\n" .
             "  1. Los campos que estás mostrando: '<p><small>Mostrando: <strong>campo1, campo2, campo3</strong>.</small></p>'\n" .
@@ -464,6 +466,8 @@ class MonthlyReportController extends Controller
             "Si el SELECT tiene c.client_name, c.executive → el GROUP BY DEBE tener c.id, c.client_name, c.executive. " .
             "Puedes agrupar por c.executive (no por el alias 'ejecutiva') y mostrar el alias solo en el SELECT. " .
             "NUNCA omitas columnas del SELECT en el GROUP BY aunque parezcan redundantes con el id. " .
+            "PRESENTACIÓN: NUNCA incluyas columnas de id (id, client_id, product_id, purchase_order_id, etc.) en el SELECT — son números internos irrelevantes para el usuario. " .
+            "Cuando muestres nombre de cliente (c.client_name o ca.nombre_empresa) SIEMPRE incluye también c.nit o ca.nit en la misma query. " .
             "CRÍTICO de formato: NO generes tablas HTML — el sistema renderiza los resultados del SQL automáticamente. Escribe solo un párrafo corto explicativo + el bloque SQL. NO uses LaTeX ni markdown (no \\times, no **texto**). " .
             "Para cualquier lista/ranking/tabla SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
             "ALIASES: usa estos nombres en SELECT AS para que la tabla se muestre correctamente: client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, total_kilos, dispatched_kilos, fecha_despacho, fecha_creacion, numero_oc, saldo_cop, deuda_neta. " .
