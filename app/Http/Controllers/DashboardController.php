@@ -1020,13 +1020,20 @@ class DashboardController extends Controller
      */
     private function calculateExecutiveStats(string $startDate, string $endDate): array
     {
-        // OC creadas en el período, agrupadas por ejecutiva del cliente (solo comerciales, no muestras)
+        // OCs con al menos un despacho real en el período, agrupadas por ejecutiva (mismo criterio que /analyze)
         $ordersQuery = DB::table('purchase_orders as po')
             ->join('clients as c', 'po.client_id', '=', 'c.id')
             ->join('purchase_order_product as pop', 'pop.purchase_order_id', '=', 'po.id')
             ->join('products as p', 'pop.product_id', '=', 'p.id')
             ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
-            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->whereExists(function ($q) use ($startDate, $endDate) {
+                $q->select(DB::raw(1))
+                    ->from('partials as pt')
+                    ->whereColumn('pt.product_order_id', 'pop.id')
+                    ->where('pt.type', 'real')
+                    ->whereNotNull('pt.dispatch_date')
+                    ->whereBetween('pt.dispatch_date', [$startDate, $endDate]);
+            })
             ->where('pop.muestra', '=', 0)
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
@@ -1043,7 +1050,7 @@ class DashboardController extends Controller
             ->groupBy('c.executive')
             ->get();
 
-        // Despachos reales (partials tipo 'real') de OCs creadas en el período, agrupados por ejecutiva
+        // Despachos reales (partials tipo 'real') en el período, agrupados por ejecutiva (igual que /analyze)
         $dispatchQuery = DB::table('partials as pt')
             ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
             ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
@@ -1052,7 +1059,7 @@ class DashboardController extends Controller
             ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
             ->where('pt.type', 'real')
             ->whereNotNull('pt.dispatch_date')
-            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
             ->where('pop.muestra', '=', 0)
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
