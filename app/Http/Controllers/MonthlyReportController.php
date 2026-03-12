@@ -195,13 +195,15 @@ class MonthlyReportController extends Controller
         // Recordatorio compacto para que la IA no pierda contexto entre turnos
         $schemaHint = "Recuerda: eres el asistente de análisis de Finearom. " .
             "Base de datos MariaDB. Tablas principales: " .
-            "purchase_orders (id, client_id, order_consecutive, status, order_creation_date, dispatch_date, trm, is_new_win, is_muestra), " .
+            "purchase_orders (id, client_id, order_consecutive, status, dispatch_date, trm, is_new_win, is_muestra), " .
             "clients (id, client_name, nit, executive, client_type, city), " .
             "purchase_order_product (id, purchase_order_id, product_id, quantity kg, price USD/kg, new_win, muestra), " .
             "products (id, code, product_name), " .
             "partials (id, order_id, product_order_id, quantity, dispatch_date, trm, invoice_number, deleted_at), " .
             "cartera (nit, nombre_empresa, saldo_contable STRING COP, saldo_vencido STRING COP, fecha_cartera), " .
             "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP). " .
+            "CRÍTICO: para filtrar órdenes por período SIEMPRE usa partials.dispatch_date (fecha del despacho real), NO order_creation_date. " .
+            "Ejemplo correcto: JOIN partials par ON par.order_id = po.id WHERE par.dispatch_date BETWEEN 'INICIO' AND 'FIN' AND par.deleted_at IS NULL. " .
             "Valor USD de una línea = quantity * price. Valor COP = quantity * price * trm. " .
             "Responde en HTML. Para listas/rankings/tablas SIEMPRE genera SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
             "NO uses nombres de tabla genéricos — usa los nombres reales.\n\n" .
