@@ -224,13 +224,16 @@ class MonthlyReportController extends Controller
             "- completed: totalmente despachada\n" .
             "- cancelled: cancelada\n\n" .
             "MÉTRICAS CLAVE DEL DASHBOARD (cómo calcularlas con SQL):\n" .
-            "- \"Total OC del período\" = OCs que tienen AL MENOS UN partial con type='real' y dispatch_date en el período (no muestra)\n" .
+            "- \"Órdenes DESPACHADAS en el período\" = OCs con AL MENOS UN partial type='real' y dispatch_date en el período → filtrar por partials.dispatch_date\n" .
+            "- \"Órdenes CREADAS en el período\" = OCs donde order_creation_date BETWEEN fechas → NO usar partials, filtrar directo en purchase_orders\n" .
             "- \"Valor total OC\" = SUM(pop.quantity * pop.price) de las líneas de esas OCs (sin muestras)\n" .
             "- \"Despachado/Facturado\" = SUM(par.quantity * pop.price) usando par.quantity de partials reales del período\n" .
             "- \"Valor COP\" = usar COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000) como TRM por línea\n" .
             "- \"Kilos despachados\" = SUM(par.quantity) de partials reales del período (sin muestras)\n" .
-            "- \"Órdenes creadas\" = COUNT(po.id) WHERE order_creation_date BETWEEN fechas (diferente de despachadas)\n" .
-            "- \"New Win\" = órdenes/líneas donde new_win=1 o is_new_win=1\n\n" .
+            "- \"New Win (órdenes creadas)\" = COUNT DISTINCT po.id WHERE po.is_new_win=1 AND po.order_creation_date BETWEEN fechas\n" .
+            "- \"New Win (líneas de producto)\" = líneas donde pop.new_win=1, independiente del estado de la orden\n" .
+            "REGLA: si el usuario dice 'creadas', 'del período', 'de este mes' → usa order_creation_date en purchase_orders.\n" .
+            "Si dice 'despachadas', 'facturadas', 'enviadas' → usa partials.dispatch_date con type='real'.\n\n" .
             "REGLA CRÍTICA DE CANTIDADES:\n" .
             "Cuando JOIN partials → purchase_order_product, SIEMPRE usa par.quantity para calcular valor despachado.\n" .
             "pop.quantity es la cantidad PEDIDA, par.quantity es la cantidad REAL DESPACHADA.\n\n" .
@@ -329,7 +332,8 @@ class MonthlyReportController extends Controller
             "partials (id, order_id, product_order_id, quantity, type 'temporal'|'real', dispatch_date, trm, invoice_number, deleted_at), " .
             "cartera (nit, nombre_empresa, saldo_contable STRING COP, saldo_vencido STRING COP, fecha_cartera), " .
             "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP). " .
-            "CRÍTICO: para filtrar por período SIEMPRE: par.type = 'real' AND par.dispatch_date BETWEEN '{$periodStart}' AND '{$periodEnd}' AND par.deleted_at IS NULL AND pop.muestra = 0. " .
+            "REGLA de filtro por período: si la pregunta es sobre órdenes DESPACHADAS/FACTURADAS → usa partials: par.type='real' AND par.dispatch_date BETWEEN '{$periodStart}' AND '{$periodEnd}' AND par.deleted_at IS NULL AND pop.muestra=0. " .
+            "Si la pregunta es sobre órdenes CREADAS → usa purchase_orders directo: po.order_creation_date BETWEEN '{$periodStart}' AND '{$periodEnd}' (sin JOIN a partials). " .
             "Para mostrar ejecutiva como nombre (no email): GROUP BY c.executive, SELECT REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva. " .
             "CRÍTICO de cantidades: cuando haces JOIN partials par → purchase_order_product pop, usa SIEMPRE par.quantity (kilos despachados) para calcular valor, NO pop.quantity (kilos pedidos). " .
             "Valor USD despachado = par.quantity * pop.price. Valor COP despachado = par.quantity * pop.price * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000). " .
