@@ -263,6 +263,12 @@ class MonthlyReportController extends Controller
             "- 'parcial', 'despacho parcial', 'parcialmente despachada' → 'parcial_status'\n" .
             "- 'completada', 'completa', 'entregada', 'despachada' → 'completed'\n" .
             "- 'cancelada', 'cancelado', 'anulada' → 'cancelled'\n\n" .
+            "ÓRDENES ESTANCADAS / SIN DESPACHO:\n" .
+            "- Si el usuario pregunta por órdenes 'estancadas', 'sin despacho', 'sin movimiento' en X días:\n" .
+            "  → NO filtres por período de creación (no uses BETWEEN sobre order_creation_date con el mes actual).\n" .
+            "  → Filtra SOLO por status y DATEDIFF(CURDATE(), po.order_creation_date) > X\n" .
+            "  → Las órdenes estancadas pueden venir de meses o años atrás — no limites por fecha de creación.\n" .
+            "  → Ejemplo correcto: WHERE po.status = 'processing' AND par.id IS NULL AND DATEDIFF(CURDATE(), po.order_creation_date) > 15\n\n" .
             "CÓMO SABER QUÉ QUEDA PENDIENTE EN UNA OC (parcial_status):\n" .
             "- Kilos pedidos = SUM(pop.quantity) de purchase_order_product WHERE muestra=0\n" .
             "- Kilos despachados = SUM(par.quantity) de partials WHERE type='real' AND deleted_at IS NULL\n" .
