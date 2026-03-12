@@ -1043,7 +1043,7 @@ class DashboardController extends Controller
             ->groupBy('c.executive')
             ->get();
 
-        // Despachos reales (partials tipo 'real') en el período, agrupados por ejecutiva
+        // Despachos reales (partials tipo 'real') de OCs creadas en el período, agrupados por ejecutiva
         $dispatchQuery = DB::table('partials as pt')
             ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
             ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
@@ -1052,7 +1052,7 @@ class DashboardController extends Controller
             ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
             ->where('pt.type', 'real')
             ->whereNotNull('pt.dispatch_date')
-            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
+            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
             ->where('pop.muestra', '=', 0)
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
