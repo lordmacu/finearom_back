@@ -7,9 +7,18 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::table('product_categories')
-            ->where('slug', 'body_care')
-            ->update(['name' => 'Personal Care', 'slug' => 'personal_care']);
+        $personalCareExists = DB::table('product_categories')
+            ->where('slug', 'personal_care')
+            ->exists();
+
+        if ($personalCareExists) {
+            // personal_care already exists — just remove the old body_care row if present
+            DB::table('product_categories')->where('slug', 'body_care')->delete();
+        } else {
+            DB::table('product_categories')
+                ->where('slug', 'body_care')
+                ->update(['name' => 'Personal Care', 'slug' => 'personal_care']);
+        }
     }
 
     public function down(): void
