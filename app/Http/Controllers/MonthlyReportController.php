@@ -256,6 +256,13 @@ class MonthlyReportController extends Controller
             "- parcial_status → Alexa despachó PARTE de la OC. Queda mercancía pendiente.\n" .
             "- completed → Alexa despachó TODO. Estado final de la OC.\n" .
             "- cancelled → Solo Francy o Marlon cancelan. Alexa NO cancela ni cambia a processing. Excluir de métricas.\n\n" .
+            "MAPEO DE TÉRMINOS EN ESPAÑOL → VALORES REALES EN BD:\n" .
+            "Cuando el usuario use estos términos, usa el valor exacto del campo status:\n" .
+            "- 'pendiente', 'pendientes', 'creada' → 'pending'\n" .
+            "- 'procesando', 'en proceso', 'procesado', 'en procesamiento' → 'processing'\n" .
+            "- 'parcial', 'despacho parcial', 'parcialmente despachada' → 'parcial_status'\n" .
+            "- 'completada', 'completa', 'entregada', 'despachada' → 'completed'\n" .
+            "- 'cancelada', 'cancelado', 'anulada' → 'cancelled'\n\n" .
             "CÓMO SABER QUÉ QUEDA PENDIENTE EN UNA OC (parcial_status):\n" .
             "- Kilos pedidos = SUM(pop.quantity) de purchase_order_product WHERE muestra=0\n" .
             "- Kilos despachados = SUM(par.quantity) de partials WHERE type='real' AND deleted_at IS NULL\n" .
@@ -484,6 +491,7 @@ class MonthlyReportController extends Controller
             "CRÍTICO de formato: NO generes tablas HTML — el sistema renderiza los resultados del SQL automáticamente. Escribe solo un párrafo corto explicativo + el bloque SQL. NO uses LaTeX ni markdown (no \\times, no **texto**). " .
             "Para cualquier lista/ranking/tabla SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
             "ALIASES: usa estos nombres en SELECT AS para que la tabla se muestre correctamente: client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, total_kilos, dispatched_kilos, fecha_despacho, fecha_creacion, numero_oc, saldo_cop, deuda_neta. " .
+            "ESTADOS (mapeo español → BD): 'pendiente/pendientes/creada' → 'pending'; 'procesando/en proceso/procesado/en procesamiento' → 'processing'; 'parcial/despacho parcial' → 'parcial_status'; 'completada/completa/entregada/despachada' → 'completed'; 'cancelada/anulada' → 'cancelled'. " .
             "Después del SQL agrega siempre en español legible (NUNCA nombres de columna BD): '<p><small>Mostrando: X, Y, Z. Puedes pedirme que también muestre: ...</small></p>'.\n\nMensaje del usuario: ";
 
         try {
