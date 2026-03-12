@@ -1647,8 +1647,19 @@ SELECT COALESCE(NULLIF(c.executive,''), 'Sin ejecutiva') ejecutiva,
   SUM(par.quantity * pop.price * COALESCE(NULLIF(par.trm+0, 0), NULLIF(po.trm+0, 0), 4000)) valor_cop
 FROM partials par JOIN purchase_order_product pop ON par.product_order_id = pop.id
 JOIN purchase_orders po ON par.order_id = po.id JOIN clients c ON po.client_id = c.id
-WHERE par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31' AND par.deleted_at IS NULL AND pop.muestra = 0
+WHERE par.type = 'real' AND par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31' AND par.deleted_at IS NULL AND pop.muestra = 0
 GROUP BY c.executive ORDER BY valor_cop DESC;
+
+Contar órdenes despachadas en un período (mismo criterio que el dashboard):
+SELECT COUNT(DISTINCT po.id) ordenes_despachadas
+FROM purchase_orders po
+WHERE EXISTS (
+  SELECT 1 FROM partials par
+  JOIN purchase_order_product pop ON par.product_order_id = pop.id
+  WHERE par.order_id = po.id AND par.type = 'real'
+    AND par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31'
+    AND par.deleted_at IS NULL AND pop.muestra = 0
+);
 
 Cartera vencida (último snapshot):
 SELECT nit, nombre_empresa, MAX(fecha_cartera) ultima_fecha,
