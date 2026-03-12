@@ -218,10 +218,11 @@ class MonthlyReportController extends Controller
             "cartera (nit, nombre_empresa, saldo_contable STRING COP, saldo_vencido STRING COP, fecha_cartera), " .
             "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP). " .
             "CRÍTICO: para filtrar por período SIEMPRE: par.type = 'real' AND par.dispatch_date BETWEEN '{$periodStart}' AND '{$periodEnd}' AND par.deleted_at IS NULL AND pop.muestra = 0. " .
-            "Para mostrar ejecutiva como nombre (no email): SUBSTRING_INDEX(SUBSTRING_INDEX(c.executive,'@',1),'.',-1) — o mejor: usa GROUP BY c.executive pero muéstralo con REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '). " .
-            "Valor USD = quantity * price. Valor COP = quantity * price * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000). " .
-            "Responde SOLO en HTML — NO uses LaTeX, NO uses markdown (no asteriscos, no \\times). Para tablas/rankings SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
-            "NO uses nombres de tabla genéricos — usa los nombres reales.\n\nMensaje del usuario: ";
+            "Para mostrar ejecutiva como nombre (no email): GROUP BY c.executive, SELECT REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva. " .
+            "CRÍTICO de cantidades: cuando haces JOIN partials par → purchase_order_product pop, usa SIEMPRE par.quantity (kilos despachados) para calcular valor, NO pop.quantity (kilos pedidos). " .
+            "Valor USD despachado = par.quantity * pop.price. Valor COP despachado = par.quantity * pop.price * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000). " .
+            "CRÍTICO de formato: NO generes tablas HTML — el sistema renderiza los resultados del SQL automáticamente. Escribe solo un párrafo corto explicativo + el bloque SQL. NO uses LaTeX ni markdown (no \\times, no **texto**). " .
+            "Para cualquier lista/ranking/tabla SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>.\n\nMensaje del usuario: ";
 
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
