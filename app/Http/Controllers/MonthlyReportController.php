@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ChatSession;
 use App\Models\PurchaseOrder;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -133,6 +134,8 @@ class MonthlyReportController extends Controller
 
         Storage::disk('local')->put('monthly_report.md', $md);
 
+        $periodLabel = Carbon::parse($startDate)->locale('es')->isoFormat('MMMM YYYY');
+
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
                 ->timeout(60)
@@ -146,11 +149,27 @@ class MonthlyReportController extends Controller
                 return response()->json(['success' => false, 'message' => 'Error conectando con IA'], 500);
             }
 
+            $threadId      = $resp->json('thread_id');
+            $welcomeMsg    = trim($resp->json('choices.0.message.content', 'Listo, puedes hacerme preguntas sobre el reporte.'));
+            $now           = now()->toDateTimeString();
+
+            $session = ChatSession::create([
+                'user_id'      => auth()->id(),
+                'thread_id'    => $threadId,
+                'period_label' => ucfirst($periodLabel),
+                'period_start' => $startDate,
+                'period_end'   => $endDate,
+                'messages'     => [
+                    ['role' => 'assistant', 'content' => $welcomeMsg, 'time' => $now],
+                ],
+            ]);
+
             return response()->json([
-                'success'   => true,
-                'thread_id' => $resp->json('thread_id'),
-                'message'   => trim($resp->json('choices.0.message.content', 'Listo, puedes hacerme preguntas sobre el reporte.')),
-                'period'    => $period,
+                'success'    => true,
+                'session_id' => $session->id,
+                'thread_id'  => $threadId,
+                'message'    => $welcomeMsg,
+                'period'     => $period,
             ]);
         } catch (\Throwable $e) {
             Log::error('[Chat] chatStart exception: ' . $e->getMessage());
@@ -164,8 +183,9 @@ class MonthlyReportController extends Controller
     public function chatMessage(Request $request): JsonResponse
     {
         $request->validate([
-            'thread_id' => 'required|string',
-            'message'   => 'required|string|max:2000',
+            'thread_id'  => 'required|string',
+            'message'    => 'required|string|max:2000',
+            'session_id' => 'nullable|integer',
         ]);
 
         $aiUrl = config('custom.ai_server_url');
@@ -185,15 +205,74 @@ class MonthlyReportController extends Controller
                 return response()->json(['success' => false, 'message' => 'Error en IA'], 500);
             }
 
+            $aiMessage = trim($resp->json('choices.0.message.content', ''));
+            $now       = now()->toDateTimeString();
+
+            // Persistir mensajes en la sesión si se proveyó session_id
+            if ($request->session_id) {
+                $session = ChatSession::where('id', $request->session_id)
+                    ->where('user_id', auth()->id())
+                    ->first();
+
+                if ($session) {
+                    $messages   = $session->messages ?? [];
+                    $messages[] = ['role' => 'user',      'content' => $request->message, 'time' => $now];
+                    $messages[] = ['role' => 'assistant', 'content' => $aiMessage,         'time' => $now];
+                    $session->update(['messages' => $messages]);
+                }
+            }
+
             return response()->json([
                 'success'   => true,
-                'message'   => trim($resp->json('choices.0.message.content', '')),
+                'message'   => $aiMessage,
                 'thread_id' => $resp->json('thread_id'),
             ]);
         } catch (\Throwable $e) {
             Log::error('[Chat] chatMessage exception: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Lista las últimas sesiones de chat del usuario autenticado.
+     */
+    public function chatSessions(): JsonResponse
+    {
+        $sessions = ChatSession::where('user_id', auth()->id())
+            ->orderByDesc('created_at')
+            ->limit(30)
+            ->get(['id', 'period_label', 'period_start', 'period_end', 'thread_id', 'created_at', 'messages'])
+            ->map(fn($s) => [
+                'id'            => $s->id,
+                'period_label'  => $s->period_label,
+                'period_start'  => $s->period_start?->toDateString(),
+                'period_end'    => $s->period_end?->toDateString(),
+                'thread_id'     => $s->thread_id,
+                'created_at'    => $s->created_at->toDateTimeString(),
+                'message_count' => count($s->messages ?? []),
+            ]);
+
+        return response()->json(['success' => true, 'data' => $sessions]);
+    }
+
+    /**
+     * Carga los mensajes de una sesión específica.
+     */
+    public function chatSessionMessages(ChatSession $session): JsonResponse
+    {
+        abort_if($session->user_id !== auth()->id(), 403);
+
+        return response()->json([
+            'success'  => true,
+            'session'  => [
+                'id'           => $session->id,
+                'period_label' => $session->period_label,
+                'period_start' => $session->period_start?->toDateString(),
+                'period_end'   => $session->period_end?->toDateString(),
+                'thread_id'    => $session->thread_id,
+                'messages'     => $session->messages ?? [],
+            ],
+        ]);
     }
 
     /**
