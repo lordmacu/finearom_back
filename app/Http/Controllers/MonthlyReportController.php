@@ -309,10 +309,11 @@ class MonthlyReportController extends Controller
             "- Lead time real de una OC = DATEDIFF(fecha_primer_despacho_real, po.order_creation_date)\n" .
             "- On-time = el despacho real ocurrió en o antes de po.required_delivery_date\n" .
             "- Para análisis de lead time usar: JOIN con c.client_type IN ('AA','A','B','C')\n\n" .
-            "CARTERA — FORMATO COLOMBIANO Y LÓGICA:\n" .
-            "- saldo_contable y saldo_vencido son strings con formato '1.234.567,89' (punto=miles, coma=decimal), puede incluir '\$' o espacios\n" .
-            "- Para convertir: CAST(REPLACE(REPLACE(REPLACE(REPLACE(campo,' ',''),'\$',''),'.',''),',','.') AS DECIMAL(15,2))\n" .
-            "- NUNCA uses: CAST(REPLACE(campo,',','') AS DECIMAL) — valores incorrectos para montos > 999,999\n" .
+            "CARTERA — FORMATO Y LÓGICA:\n" .
+            "- saldo_contable y saldo_vencido son strings con PUNTO como separador decimal (ej: '26857379.12', '-256309.65'). Ya son decimales normales.\n" .
+            "- Para operar numéricamente: CAST(saldo_contable AS DECIMAL(15,2)) — sin REPLACE, el punto es el decimal.\n" .
+            "- NUNCA uses REPLACE para quitar puntos — destruyes el separador decimal y multiplicas el valor por 10.\n" .
+            "- Para ordenar: ORDER BY CAST(saldo_contable AS DECIMAL(15,2)) DESC\n" .
             "- dias: POSITIVO = factura por vencer, NEGATIVO = factura VENCIDA hace |dias| días\n" .
             "- Facturas vencidas: WHERE dias < 0 OR vence < CURDATE()\n" .
             "- cartera.documento = número de factura → se cruza con recaudos.numero_factura para ver pagos\n" .
@@ -465,7 +466,7 @@ class MonthlyReportController extends Controller
             "CRÍTICO de TRM (cascada 4 niveles): COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000). El +0 convierte string a número. " .
             "Valor COP despachado = par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000). " .
             "EXCEPCIÓN pop.quantity vs par.quantity: para 'Total OC' (denominador de cumplimiento) usa pop.quantity (pedido). Solo usa par.quantity para lo despachado. " .
-            "CRÍTICO de cartera: saldo_contable formato '1.234.567,89' puede incluir \$ y espacios → CAST(REPLACE(REPLACE(REPLACE(REPLACE(campo,' ',''),'\$',''),'.',''),',','.') AS DECIMAL(15,2)). " .
+            "CRÍTICO de cartera: saldo_contable ya es decimal normal con punto ('26857379.12'). Usar: CAST(saldo_contable AS DECIMAL(15,2)). NUNCA uses REPLACE para quitar puntos — destruyes el decimal. " .
             "CARTERA POR EJECUTIVA: NO filtres por cartera.vendedor — usa JOIN cartera ca ON ca.nit = clients.nit y filtra por clients.executive. " .
             "FILL RATE: SUM(par.quantity)/SUM(pop.quantity)*100 — mide % de kilos pedidos que se despacharon. " .
             "TENDENCIAS DIARIAS: usa tabla order_statistics (date, commercial_dispatched_value_usd, dispatched_orders_count, total_orders_created, dispatch_fulfillment_rate_usd, pending_dispatch_value_usd, extended_stats JSON) — es un snapshot pre-calculado por día, más eficiente que agregar partials. " .
@@ -1303,14 +1304,14 @@ PROMPT;
 
         $saldoCartera = (float) DB::table('cartera')
             ->where('fecha_cartera', $latestCarteraDate)
-            ->sum(DB::raw("CAST(REPLACE(REPLACE(REPLACE(saldo_contable, ' ', ''), '.', ''), ',', '.') AS DECIMAL(20,2))"));
+            ->sum(DB::raw("CAST(saldo_contable AS DECIMAL(20,2))"));
 
         // Deuda neta (saldo - recaudos totales por factura, mínimo 0)
         $netDebt = (float) DB::table('cartera as car')
             ->leftJoin('recaudos as r', 'r.numero_factura', '=', 'car.documento')
             ->where('car.fecha_cartera', '=', $latestCarteraDate)
             ->groupBy('car.documento', 'car.saldo_contable')
-            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(REPLACE(car.saldo_contable, ' ', ''), '.', ''), ',', '.') AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
+            ->selectRaw("GREATEST(CAST(car.saldo_contable AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
             ->pluck('net_debt')
             ->sum();
 
@@ -1323,7 +1324,7 @@ PROMPT;
                   ->orWhere(function ($n) { $n->whereNotNull('car.dias')->where('car.dias', '<', 0); });
             })
             ->groupBy('car.documento', 'car.saldo_contable')
-            ->selectRaw("GREATEST(CAST(REPLACE(REPLACE(REPLACE(car.saldo_contable, ' ', ''), '.', ''), ',', '.') AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
+            ->selectRaw("GREATEST(CAST(car.saldo_contable AS DECIMAL(20,2)) - COALESCE(SUM(r.valor_cancelado), 0), 0) as net_debt")
             ->pluck('net_debt')
             ->sum();
 
@@ -1888,12 +1889,12 @@ PROMPT;
 - vendedor, nombre_vendedor — vendedor en SIIGO (puede diferir de clients.executive)
 - catera_type (VARCHAR) — 'nacional' | 'internacional' | NULL (null = nacional por defecto)
 - ciudad, cuenta, descripcion_cuenta
-- CRÍTICO: saldo_contable y saldo_vencido son STRINGS con formato colombiano "1.234.567,89" (punto=miles, coma=decimales)
-  → Para operar: CAST(REPLACE(REPLACE(REPLACE(campo,'$',''),'.',''),',','.') AS DECIMAL(15,2))
-  → Se usa triple REPLACE por si el campo trae signo $ al inicio
+- CRÍTICO: saldo_contable y saldo_vencido son strings con PUNTO como separador decimal (ej: '26857379.12', '-256309.65'). Ya son decimales normales.
+  → Para operar: CAST(saldo_contable AS DECIMAL(15,2)) — sin REPLACE, el punto ya es el decimal
+  → NUNCA uses REPLACE para quitar puntos — destruyes el separador decimal y multiplicas el valor por 10
 - CRÍTICO: NUNCA filtrar con fecha hardcodeada. SIEMPRE: fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
 - CRÍTICO: para deuda NETA real = saldo_contable MENOS lo pagado en recaudos: MAX(saldo - SUM(recaudos), 0)
-- Para ordenar: ORDER BY CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2)) DESC
+- Para ordenar: ORDER BY CAST(saldo_contable AS DECIMAL(15,2)) DESC
 - Facturas VENCIDAS: WHERE dias < 0 OR vence < CURDATE()
 - Facturas POR VENCER: WHERE dias >= 0 AND vence >= CURDATE()
 
@@ -2034,25 +2035,25 @@ WHERE EXISTS (
     AND par.deleted_at IS NULL AND pop.muestra = 0
 );
 
-Cartera vencida (último snapshot — conversión correcta con triple REPLACE):
+Cartera vencida (último snapshot):
 SELECT nit, nombre_empresa,
-  CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2)) saldo_cop,
-  CAST(REPLACE(REPLACE(REPLACE(saldo_vencido,'$',''),'.',''),',','.') AS DECIMAL(15,2)) vencido_cop,
+  CAST(saldo_contable AS DECIMAL(15,2)) saldo_cop,
+  CAST(saldo_vencido AS DECIMAL(15,2)) vencido_cop,
   dias, vence
 FROM cartera WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
-ORDER BY CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2)) DESC;
+ORDER BY CAST(saldo_contable AS DECIMAL(15,2)) DESC;
 
 Cartera por tipo (nacional vs internacional):
 SELECT catera_type, COUNT(*) facturas,
-  SUM(CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2))) total_cop
+  SUM(CAST(saldo_contable AS DECIMAL(15,2))) total_cop
 FROM cartera WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
 GROUP BY catera_type;
 
 Deuda neta por cliente (saldo contable menos lo ya pagado en recaudos):
 SELECT ca.nit, ca.nombre_empresa,
-  SUM(CAST(REPLACE(REPLACE(REPLACE(ca.saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2))) saldo_bruto,
+  SUM(CAST(ca.saldo_contable AS DECIMAL(15,2))) saldo_bruto,
   COALESCE(SUM(r.valor_cancelado),0) total_pagado,
-  GREATEST(SUM(CAST(REPLACE(REPLACE(REPLACE(ca.saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2))) - COALESCE(SUM(r.valor_cancelado),0), 0) deuda_neta
+  GREATEST(SUM(CAST(ca.saldo_contable AS DECIMAL(15,2))) - COALESCE(SUM(r.valor_cancelado),0), 0) deuda_neta
 FROM cartera ca
 LEFT JOIN recaudos r ON r.numero_factura = ca.documento AND r.nit = ca.nit
 WHERE ca.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
@@ -2062,7 +2063,7 @@ ORDER BY deuda_neta DESC;
 Facturas vencidas (dias negativo) del último snapshot:
 SELECT nit, nombre_empresa, documento, fecha, vence,
   ABS(dias) dias_de_mora,
-  CAST(REPLACE(REPLACE(REPLACE(saldo_contable,'$',''),'.',''),',','.') AS DECIMAL(15,2)) saldo_cop
+  CAST(saldo_contable AS DECIMAL(15,2)) saldo_cop
 FROM cartera
 WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
   AND dias < 0
