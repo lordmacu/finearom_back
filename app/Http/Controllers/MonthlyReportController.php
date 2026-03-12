@@ -347,6 +347,10 @@ class MonthlyReportController extends Controller
             "- ALIASES recomendados en SELECT para que la tabla muestre etiquetas legibles:\n" .
             "  client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, total_kilos, dispatched_kilos,\n" .
             "  fecha_despacho, fecha_creacion, numero_oc, saldo_cop, deuda_neta, vencido_cop, fill_rate_pct, pipeline_usd\n" .
+            "- CRÍTICO GROUP BY (MariaDB ONLY_FULL_GROUP_BY): TODOS los campos no-agregados del SELECT deben estar en el GROUP BY.\n" .
+            "  Si tienes c.client_name y c.executive en el SELECT → el GROUP BY debe incluir c.id, c.client_name, c.executive.\n" .
+            "  Agrupa SIEMPRE por c.executive (no por el alias 'ejecutiva'). El alias va solo en el SELECT.\n" .
+            "  NUNCA omitas columnas del SELECT en el GROUP BY aunque sean derivadas del id.\n" .
             "- Para preguntas conceptuales simples (¿qué es X?, ¿cómo funciona Y?) responde sin SQL.\n" .
             "- IMPORTANTE: después de cada bloque SQL, agrega siempre una línea breve con dos partes:\n" .
             "  1. Los campos que estás mostrando: '<p><small>Mostrando: <strong>campo1, campo2, campo3</strong>.</small></p>'\n" .
@@ -456,6 +460,10 @@ class MonthlyReportController extends Controller
             "CARTERA POR EJECUTIVA: NO filtres por cartera.vendedor — usa JOIN cartera ca ON ca.nit = clients.nit y filtra por clients.executive. " .
             "FILL RATE: SUM(par.quantity)/SUM(pop.quantity)*100 — mide % de kilos pedidos que se despacharon. " .
             "TENDENCIAS DIARIAS: usa tabla order_statistics (date, commercial_dispatched_value_usd, dispatched_orders_count, total_orders_created, dispatch_fulfillment_rate_usd, pending_dispatch_value_usd, extended_stats JSON) — es un snapshot pre-calculado por día, más eficiente que agregar partials. " .
+            "CRÍTICO GROUP BY (MariaDB ONLY_FULL_GROUP_BY): TODOS los campos no-agregados del SELECT deben estar en el GROUP BY. " .
+            "Si el SELECT tiene c.client_name, c.executive → el GROUP BY DEBE tener c.id, c.client_name, c.executive. " .
+            "Puedes agrupar por c.executive (no por el alias 'ejecutiva') y mostrar el alias solo en el SELECT. " .
+            "NUNCA omitas columnas del SELECT en el GROUP BY aunque parezcan redundantes con el id. " .
             "CRÍTICO de formato: NO generes tablas HTML — el sistema renderiza los resultados del SQL automáticamente. Escribe solo un párrafo corto explicativo + el bloque SQL. NO uses LaTeX ni markdown (no \\times, no **texto**). " .
             "Para cualquier lista/ranking/tabla SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
             "ALIASES: usa estos nombres en SELECT AS para que la tabla se muestre correctamente: client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, total_kilos, dispatched_kilos, fecha_despacho, fecha_creacion, numero_oc, saldo_cop, deuda_neta. " .
