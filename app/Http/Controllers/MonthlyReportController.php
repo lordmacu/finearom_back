@@ -288,6 +288,23 @@ class MonthlyReportController extends Controller
             "Para mostrar como nombre: REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva\n" .
             "Siempre GROUP BY c.executive (no por el alias).\n\n" .
             "ESQUEMA DE BASE DE DATOS:\n" . $this->getDbSchema() . "\n\n" .
+            "PREGUNTAS TÍPICAS POR ROL Y QUÉ QUERIES USAR:\n\n" .
+            "Si el usuario pregunta por FRANCY (o 'órdenes creadas', 'ingresadas', 'pedidos nuevos'):\n" .
+            "→ Filtrar por purchase_orders.order_creation_date BETWEEN fechas\n" .
+            "→ Las OC pendientes de que Marlon revise: status = 'pending'\n" .
+            "→ Cuánto ingresó Francy este mes: SUM por order_creation_date del período\n\n" .
+            "Si el usuario pregunta por MARLON (o 'en proceso', 'pendientes de despacho', 'qué falta despachar', 'fechas estimadas'):\n" .
+            "→ OC que Marlon tiene que revisar: status = 'pending'\n" .
+            "→ OC que Marlon ya revisó (en preparación): status = 'processing'\n" .
+            "→ OC rezagadas (Marlon revisó pero llevan >7 días sin despachar): status='processing' AND order_creation_date <= DATE_SUB(CURDATE(), INTERVAL 7 DAY)\n" .
+            "→ Fechas estimadas de despacho puestas por Marlon: partials WHERE type='temporal' AND deleted_at IS NULL\n\n" .
+            "Si el usuario pregunta por ALEXA (o 'despachado', 'facturado', 'guías', 'facturas', 'enviado'):\n" .
+            "→ Lo que despachó Alexa: partials WHERE type='real' AND deleted_at IS NULL AND dispatch_date BETWEEN fechas\n" .
+            "→ Órdenes que Alexa aún debe completar: status = 'parcial_status'\n" .
+            "→ Todas las guías del período: SELECT DISTINCT tracking_number, transporter FROM partials WHERE type='real'\n" .
+            "→ Todas las facturas del período: SELECT DISTINCT invoice_number FROM partials WHERE type='real'\n\n" .
+            "Si el usuario pregunta por CIUDAD DE ENTREGA o SUCURSAL:\n" .
+            "→ Hacer LEFT JOIN branch_offices bo ON pop.branch_office_id = bo.id → usar bo.delivery_city, bo.name\n\n" .
             "INSTRUCCIONES:\n" .
             "- Responde SOLO en HTML limpio. NO uses LaTeX, NO uses markdown (no \\times, no **texto**, no backticks).\n" .
             "- NO generes tablas HTML con datos — el sistema ejecuta el SQL y muestra los resultados automáticamente.\n" .
@@ -382,9 +399,10 @@ class MonthlyReportController extends Controller
             "Base de datos MariaDB. Tablas principales: " .
             "purchase_orders (id, client_id, order_consecutive, status, order_creation_date, dispatch_date, trm, is_new_win, is_muestra), " .
             "clients (id, client_name, nit, executive, client_type, city), " .
-            "purchase_order_product (id, purchase_order_id, product_id, quantity kg, price USD/kg nullable, new_win, muestra), " .
+            "purchase_order_product (id, purchase_order_id, product_id, quantity kg pedidos, price USD/kg nullable, new_win, muestra, branch_office_id FK→branch_offices), " .
+            "branch_offices (id, client_id, name, nit, delivery_address, delivery_city — sucursal de entrega por línea), " .
             "products (id, code, product_name, price USD/kg — precio catálogo fallback), " .
-            "partials (id, order_id, product_order_id, quantity, type 'temporal'|'real', dispatch_date, trm, invoice_number, deleted_at SOFT DELETE), " .
+            "partials (id, order_id, product_order_id, quantity kg despachados, type 'temporal'=Marlon estimó|'real'=Alexa despachó, dispatch_date, trm, invoice_number, tracking_number, transporter, deleted_at SOFT DELETE), " .
             "cartera (nit, nombre_empresa, saldo_contable STRING formato colombiano '1.234.567,89', saldo_vencido STRING, fecha_cartera), " .
             "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP), " .
             "trm_daily (date, value COP/USD). " .
@@ -1758,15 +1776,18 @@ PROMPT;
 ### clients — Clientes
 - id PK, client_name, nit (UNIQUE), executive, client_type ('pareto'|'balance'|'none'), status ('active'|'inactive'), city, operation_type ('nacional'|'extranjero')
 
-### branch_offices — Sucursales
+### branch_offices — Sucursales de clientes
 - id PK, client_id FK→clients.id, name, nit, delivery_address, delivery_city
+- Cada cliente puede tener múltiples sucursales con distintas direcciones y ciudades de entrega
 
 ### purchase_orders — Órdenes de compra
-- id PK, client_id FK→clients.id, order_consecutive (ej: '2258-4500302325'), status ('pending'|'processing'|'completed'|'cancelled'|'parcial_status'), order_creation_date (date), dispatch_date (date), required_delivery_date (date), trm, is_new_win (0/1), is_muestra (0/1), observations, created_at
+- id PK, client_id FK→clients.id, order_consecutive (ej: '2258-4500302325'), status ('pending'|'processing'|'completed'|'cancelled'|'parcial_status'), order_creation_date (date), dispatch_date (date — fecha estimada puesta por Marlon), required_delivery_date (date), trm, is_new_win (0/1), is_muestra (0/1), observations, created_at
+- pending = Francy creó, esperando Marlon | processing = Marlon revisó, en preparación | parcial_status = Alexa despachó parcialmente | completed = Alexa despachó todo
 - NOTA: la ejecutiva se obtiene JOIN clients → clients.executive
 
 ### purchase_order_product — Líneas de producto en OCs
-- id PK, purchase_order_id FK→purchase_orders.id, product_id FK→products.id, quantity (kg, decimal), price (USD/kg), new_win (0/1), muestra (0/1), delivery_date, branch_office_id, status
+- id PK, purchase_order_id FK→purchase_orders.id, product_id FK→products.id, quantity (kg pedidos), price (USD/kg negociado — puede ser NULL en OCs antiguas), new_win (0/1), muestra (0/1), delivery_date, branch_office_id FK→branch_offices.id (sucursal de entrega), status
+- Para precio real usar siempre: COALESCE(NULLIF(pop.price,0), p.price, 0)
 
 ### products — Productos
 - id PK, code, product_name, price (USD/kg actual), client_id FK→clients.id
@@ -1795,6 +1816,7 @@ PROMPT;
 - clients (1) → purchase_orders (N) vía client_id
 - purchase_orders (1) → purchase_order_product (N) vía purchase_order_id
 - purchase_order_product (N) → products (1) vía product_id
+- purchase_order_product (N) → branch_offices (1) vía branch_office_id (sucursal de entrega por línea)
 - purchase_orders (1) → partials (N) vía order_id
 - partials (N) → purchase_order_product (1) vía product_order_id
 - clients (1) → branch_offices (N) vía client_id
@@ -1924,6 +1946,105 @@ FROM purchase_orders po JOIN clients c ON po.client_id = c.id
 WHERE po.status = 'processing'
   AND po.order_creation_date <= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
 ORDER BY dias_sin_despachar DESC;
+
+Despachos con ciudad de entrega (usando branch_offices):
+SELECT po.order_consecutive, c.client_name, p.product_name,
+  bo.delivery_city ciudad_entrega, bo.name sucursal,
+  par.quantity kilos_despachados, par.dispatch_date, par.invoice_number
+FROM partials par
+JOIN purchase_order_product pop ON par.product_order_id = pop.id
+JOIN products p ON pop.product_id = p.id
+JOIN purchase_orders po ON par.order_id = po.id
+JOIN clients c ON po.client_id = c.id
+LEFT JOIN branch_offices bo ON pop.branch_office_id = bo.id
+WHERE par.type = 'real' AND par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31'
+  AND par.deleted_at IS NULL AND pop.muestra = 0
+ORDER BY par.dispatch_date DESC;
+
+## CONSULTAS POR ROL
+
+### FRANCY — Creación de órdenes
+
+Órdenes creadas hoy por Francy (pendientes de revisión):
+SELECT po.order_consecutive, c.client_name, po.order_creation_date, po.status,
+  SUM(pop.quantity) kilos_pedidos,
+  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_usd
+FROM purchase_orders po
+JOIN clients c ON po.client_id = c.id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
+JOIN products p ON pop.product_id = p.id
+WHERE po.status = 'pending' AND pop.muestra = 0
+GROUP BY po.id, c.client_name, po.order_creation_date, po.status
+ORDER BY po.order_creation_date DESC;
+
+Todas las OC creadas en el período (lo que ingresó Francy):
+SELECT po.order_consecutive, c.client_name, po.order_creation_date, po.status,
+  po.is_new_win, po.is_muestra,
+  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_usd
+FROM purchase_orders po
+JOIN clients c ON po.client_id = c.id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
+JOIN products p ON pop.product_id = p.id
+WHERE po.order_creation_date BETWEEN '2026-03-01' AND '2026-03-31' AND pop.muestra = 0
+GROUP BY po.id, c.client_name, po.order_creation_date, po.status, po.is_new_win, po.is_muestra
+ORDER BY po.order_creation_date DESC;
+
+### MARLON — Revisión y fechas estimadas de despacho
+
+OC que Marlon tiene pendientes de revisar (status pending):
+SELECT po.order_consecutive, c.client_name, po.order_creation_date,
+  DATEDIFF(CURDATE(), po.order_creation_date) dias_esperando,
+  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_usd
+FROM purchase_orders po
+JOIN clients c ON po.client_id = c.id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
+JOIN products p ON pop.product_id = p.id
+WHERE po.status = 'pending' AND pop.muestra = 0
+GROUP BY po.id, c.client_name, po.order_creation_date
+ORDER BY dias_esperando DESC;
+
+OC en processing (Marlon revisó, Alexa aún no despacha):
+SELECT po.order_consecutive, c.client_name, po.order_creation_date, po.dispatch_date fecha_estimada,
+  DATEDIFF(CURDATE(), po.order_creation_date) dias_en_processing,
+  (SELECT par_t.dispatch_date FROM partials par_t WHERE par_t.order_id = po.id AND par_t.type='temporal' AND par_t.deleted_at IS NULL ORDER BY par_t.dispatch_date DESC LIMIT 1) fecha_estimada_marlon,
+  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_usd
+FROM purchase_orders po
+JOIN clients c ON po.client_id = c.id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
+JOIN products p ON pop.product_id = p.id
+WHERE po.status = 'processing' AND pop.muestra = 0
+GROUP BY po.id, c.client_name, po.order_creation_date, po.dispatch_date
+ORDER BY dias_en_processing DESC;
+
+### ALEXA — Despachos reales
+
+Lo que Alexa despachó en el período (despachos reales):
+SELECT po.order_consecutive, c.client_name, par.dispatch_date, par.invoice_number,
+  par.tracking_number, par.transporter, par.quantity kilos,
+  par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) valor_usd,
+  COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000) trm_usada
+FROM partials par
+JOIN purchase_order_product pop ON par.product_order_id = pop.id
+JOIN products p ON pop.product_id = p.id
+JOIN purchase_orders po ON par.order_id = po.id
+JOIN clients c ON po.client_id = c.id
+WHERE par.type = 'real' AND par.dispatch_date BETWEEN '2026-03-01' AND '2026-03-31'
+  AND par.deleted_at IS NULL AND pop.muestra = 0
+ORDER BY par.dispatch_date DESC;
+
+OC con despacho parcial que Alexa aún debe completar (parcial_status):
+SELECT po.order_consecutive, c.client_name, po.order_creation_date,
+  SUM(pop.quantity) kilos_pedidos,
+  COALESCE((SELECT SUM(par2.quantity) FROM partials par2 WHERE par2.order_id = po.id AND par2.type='real' AND par2.deleted_at IS NULL AND pop.muestra=0), 0) kilos_despachados,
+  SUM(pop.quantity) - COALESCE((SELECT SUM(par2.quantity) FROM partials par2 WHERE par2.order_id = po.id AND par2.type='real' AND par2.deleted_at IS NULL), 0) kilos_pendientes,
+  SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) valor_total_usd
+FROM purchase_orders po
+JOIN clients c ON po.client_id = c.id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
+JOIN products p ON pop.product_id = p.id
+WHERE po.status = 'parcial_status' AND pop.muestra = 0
+GROUP BY po.id, c.client_name, po.order_creation_date
+ORDER BY po.order_creation_date;
 SCHEMA;
     }
 }
