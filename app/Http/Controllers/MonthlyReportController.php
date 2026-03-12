@@ -192,8 +192,23 @@ class MonthlyReportController extends Controller
         $aiUrl = config('custom.ai_server_url');
         $aiKey = config('custom.ai_server_key');
 
+        // Cargar sesión para obtener el período real
+        $session = null;
+        $periodStart = 'INICIO';
+        $periodEnd   = 'FIN';
+        if ($request->session_id) {
+            $session = ChatSession::where('id', $request->session_id)
+                ->where('user_id', auth()->id())
+                ->first();
+            if ($session) {
+                $periodStart = $session->period_start?->toDateString() ?? 'INICIO';
+                $periodEnd   = $session->period_end?->toDateString()   ?? 'FIN';
+            }
+        }
+
         // Recordatorio compacto para que la IA no pierda contexto entre turnos
         $schemaHint = "Recuerda: eres el asistente de análisis de Finearom. " .
+            "Período activo de esta sesión: {$periodStart} al {$periodEnd} — USA SIEMPRE estas fechas en los filtros SQL. " .
             "Base de datos MariaDB. Tablas principales: " .
             "purchase_orders (id, client_id, order_consecutive, status, dispatch_date, trm, is_new_win, is_muestra), " .
             "clients (id, client_name, nit, executive, client_type, city), " .
@@ -202,12 +217,11 @@ class MonthlyReportController extends Controller
             "partials (id, order_id, product_order_id, quantity, type 'temporal'|'real', dispatch_date, trm, invoice_number, deleted_at), " .
             "cartera (nit, nombre_empresa, saldo_contable STRING COP, saldo_vencido STRING COP, fecha_cartera), " .
             "recaudos (nit, cliente, fecha_recaudo, valor_cancelado COP). " .
-            "CRÍTICO: para filtrar órdenes por período SIEMPRE usa partials con type='real' y dispatch_date en el rango. " .
-            "Ejemplo correcto: JOIN partials par ON par.order_id = po.id WHERE par.type = 'real' AND par.dispatch_date BETWEEN 'INICIO' AND 'FIN' AND par.deleted_at IS NULL AND pop.muestra = 0. " .
-            "Valor USD de una línea = quantity * price. Valor COP = quantity * price * trm. " .
-            "Responde en HTML. Para listas/rankings/tablas SIEMPRE genera SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
-            "NO uses nombres de tabla genéricos — usa los nombres reales.\n\n" .
-            "Mensaje del usuario: ";
+            "CRÍTICO: para filtrar por período SIEMPRE: par.type = 'real' AND par.dispatch_date BETWEEN '{$periodStart}' AND '{$periodEnd}' AND par.deleted_at IS NULL AND pop.muestra = 0. " .
+            "Para mostrar ejecutiva como nombre (no email): SUBSTRING_INDEX(SUBSTRING_INDEX(c.executive,'@',1),'.',-1) — o mejor: usa GROUP BY c.executive pero muéstralo con REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '). " .
+            "Valor USD = quantity * price. Valor COP = quantity * price * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), 4000). " .
+            "Responde SOLO en HTML — NO uses LaTeX, NO uses markdown (no asteriscos, no \\times). Para tablas/rankings SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
+            "NO uses nombres de tabla genéricos — usa los nombres reales.\n\nMensaje del usuario: ";
 
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
@@ -227,17 +241,11 @@ class MonthlyReportController extends Controller
             $now       = now()->toDateTimeString();
 
             // Persistir mensajes en la sesión si se proveyó session_id
-            if ($request->session_id) {
-                $session = ChatSession::where('id', $request->session_id)
-                    ->where('user_id', auth()->id())
-                    ->first();
-
-                if ($session) {
-                    $messages   = $session->messages ?? [];
-                    $messages[] = ['role' => 'user',      'content' => $request->message, 'time' => $now];
-                    $messages[] = ['role' => 'assistant', 'content' => $aiMessage,         'time' => $now];
-                    $session->update(['messages' => $messages]);
-                }
+            if ($session) {
+                $messages   = $session->messages ?? [];
+                $messages[] = ['role' => 'user',      'content' => $request->message, 'time' => $now];
+                $messages[] = ['role' => 'assistant', 'content' => $aiMessage,         'time' => $now];
+                $session->update(['messages' => $messages]);
             }
 
             return response()->json([
