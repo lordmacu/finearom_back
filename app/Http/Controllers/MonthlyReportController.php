@@ -95,8 +95,8 @@ class MonthlyReportController extends Controller
                   "TRM de hoy ({$today}): \${$trmHoyStr} COP/USD — úsala SOLO para convertir valores de cartera a USD si te lo piden. Las órdenes tienen su propia TRM individual y no deben usar esta.\n\n" .
 
                   "NOTAS CLAVE — lee antes de responder:\n" .
-                  "- 'Total órdenes creadas' = valor de TODAS las OC del período, sin importar si se despacharon o no\n" .
-                  "- 'Despachado / Facturado' = dinero ya enviado al cliente. 'Pendiente' = Total − Facturado\n" .
+                  "- 'Total OC' = valor de las órdenes que tuvieron AL MENOS UN despacho real (dispatch_date) en el período — igual al dashboard\n" .
+                  "- 'Despachado / Facturado' = dinero ya enviado al cliente (suma de partials reales del período). 'Pendiente' = Total OC − Facturado\n" .
                   "- 'Planeado' = OC con fecha de despacho programada dentro del período (subconjunto del total, NO igual al total)\n" .
                   "- Cumplimiento% puede superar el 100%: es normal porque los despachos del período pueden incluir OC creadas en meses anteriores\n" .
                   "- ESTADÍSTICAS POR EJECUTIVA es la fuente de verdad para preguntas por ejecutiva — NO sumar desde el detalle de órdenes\n" .
@@ -722,18 +722,38 @@ PROMPT;
 
     private function buildStats(string $startDate, string $endDate): array
     {
-        // Pre-computed daily snapshots
+        // Pre-computed daily snapshots (solo para métricas secundarias)
         $dailyStats = DB::table('order_statistics')
             ->whereBetween('date', [$startDate, $endDate])
             ->orderBy('date')
             ->get();
 
-        // Totals from pre-computed stats
-        $totalUsd      = $dailyStats->sum('commercial_dispatched_value_usd');
-        $totalCop      = $dailyStats->sum('commercial_dispatched_value_cop');
+        $daysCount = $dailyStats->count();
+
+        // Despachos reales del período — misma lógica que DashboardController::calculateExecutiveStats()
+        $dispatchRow = DB::table('partials as pt')
+            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
+            ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
+            ->where('pt.type', 'real')
+            ->whereNotNull('pt.dispatch_date')
+            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
+            ->where('pop.muestra', '=', 0)
+            ->selectRaw("
+                COUNT(DISTINCT po.id) as orders_count,
+                SUM((CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity) as value_usd,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
+                    COALESCE(NULLIF(pt.trm,0), NULLIF(po.trm,0), NULLIF(td.value,0), 4000)
+                ) as value_cop
+            ")
+            ->first();
+
+        $totalUsd    = (float) ($dispatchRow->value_usd   ?? 0);
+        $totalCop    = (float) ($dispatchRow->value_cop   ?? 0);
+        $totalOrders = (int)   ($dispatchRow->orders_count ?? 0);
         $totalProducts = $dailyStats->sum('commercial_products_dispatched');
-        $totalOrders   = $dailyStats->sum('dispatched_orders_count');
-        $daysCount     = $dailyStats->count();
 
         // Total kilos dispatched (real partials in period, excluding samples)
         $totalKilosDispatched = (float) DB::table('partials as pt')
@@ -818,13 +838,19 @@ PROMPT;
         }
         $plannedOrdersCount = count($ordersSet);
 
-        // Orders created in the period — total y valores queried directamente sobre purchase_orders
-        // (los snapshots de order_statistics pueden estar incompletos para el mes en curso)
+        // OCs con al menos un despacho real en el período — misma lógica que DashboardController::calculateExecutiveStats()
         $ordersCreatedQuery = DB::table('purchase_orders as po')
             ->join('purchase_order_product as pop', 'pop.purchase_order_id', '=', 'po.id')
             ->join('products as p', 'pop.product_id', '=', 'p.id')
             ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
-            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->whereExists(function ($q) use ($startDate, $endDate) {
+                $q->select(DB::raw(1))
+                    ->from('partials as pt')
+                    ->whereColumn('pt.product_order_id', 'pop.id')
+                    ->where('pt.type', 'real')
+                    ->whereNotNull('pt.dispatch_date')
+                    ->whereBetween('pt.dispatch_date', [$startDate, $endDate]);
+            })
             ->where('pop.muestra', '=', 0)
             ->selectRaw("
                 COUNT(DISTINCT po.id) as total_orders,
@@ -836,13 +862,21 @@ PROMPT;
             ")
             ->first();
 
-        $totalOrdersCreated  = (int)   ($ordersCreatedQuery->total_orders ?? $dailyStats->sum('total_orders_created'));
-        $ordersValueUsd      = (float) ($ordersCreatedQuery->value_usd    ?? $dailyStats->sum('total_orders_value_usd'));
-        $ordersValueCop      = (float) ($ordersCreatedQuery->value_cop    ?? $dailyStats->sum('total_orders_value_cop'));
+        $totalOrdersCreated  = (int)   ($ordersCreatedQuery->total_orders ?? 0);
+        $ordersValueUsd      = (float) ($ordersCreatedQuery->value_usd    ?? 0);
+        $ordersValueCop      = (float) ($ordersCreatedQuery->value_cop    ?? 0);
 
-        // Status counts — queried directly from purchase_orders for accuracy
+        // Status counts — de las OCs con despacho real en el período
         $statusCounts = DB::table('purchase_orders')
-            ->whereBetween('order_creation_date', [$startDate, $endDate])
+            ->whereExists(function ($q) use ($startDate, $endDate) {
+                $q->select(DB::raw(1))
+                    ->from('partials as pt')
+                    ->join('purchase_order_product as pop2', 'pt.product_order_id', '=', 'pop2.id')
+                    ->whereColumn('pop2.purchase_order_id', 'purchase_orders.id')
+                    ->where('pt.type', 'real')
+                    ->whereNotNull('pt.dispatch_date')
+                    ->whereBetween('pt.dispatch_date', [$startDate, $endDate]);
+            })
             ->selectRaw("
                 SUM(CASE WHEN status = 'pending'        THEN 1 ELSE 0 END) as pending,
                 SUM(CASE WHEN status = 'processing'     THEN 1 ELSE 0 END) as processing,
@@ -1027,12 +1061,21 @@ PROMPT;
             return ucwords(str_replace(['.', '_', '-'], ' ', $prefix));
         };
 
+        // Misma lógica que DashboardController::calculateExecutiveStats():
+        // OCs que tienen al menos un despacho real con dispatch_date en el período
         $ordersQuery = DB::table('purchase_orders as po')
             ->join('clients as c', 'po.client_id', '=', 'c.id')
             ->join('purchase_order_product as pop', 'pop.purchase_order_id', '=', 'po.id')
             ->join('products as p', 'pop.product_id', '=', 'p.id')
             ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
-            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->whereExists(function ($q) use ($startDate, $endDate) {
+                $q->select(DB::raw(1))
+                    ->from('partials as pt')
+                    ->whereColumn('pt.product_order_id', 'pop.id')
+                    ->where('pt.type', 'real')
+                    ->whereNotNull('pt.dispatch_date')
+                    ->whereBetween('pt.dispatch_date', [$startDate, $endDate]);
+            })
             ->where('pop.muestra', '=', 0)
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
@@ -1064,6 +1107,9 @@ PROMPT;
                 COUNT(DISTINCT po.id) as dispatched_orders,
                 SUM(pt.quantity) as dispatched_kilos,
                 SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity
+                ) as dispatched_usd,
+                SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
                     COALESCE(NULLIF(pt.trm, 0), NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
                 ) as dispatched_cop
@@ -1089,10 +1135,11 @@ PROMPT;
         foreach ($dispatchQuery as $row) {
             $exec = $normalizeExec($row->executive);
             if (!isset($dispatchMerged[$exec])) {
-                $dispatchMerged[$exec] = ['dispatched_orders' => 0, 'dispatched_kilos' => 0.0, 'dispatched_cop' => 0.0];
+                $dispatchMerged[$exec] = ['dispatched_orders' => 0, 'dispatched_kilos' => 0.0, 'dispatched_usd' => 0.0, 'dispatched_cop' => 0.0];
             }
             $dispatchMerged[$exec]['dispatched_orders'] += (int)   $row->dispatched_orders;
             $dispatchMerged[$exec]['dispatched_kilos']  += (float) $row->dispatched_kilos;
+            $dispatchMerged[$exec]['dispatched_usd']    += (float) ($row->dispatched_usd ?? 0);
             $dispatchMerged[$exec]['dispatched_cop']    += (float) $row->dispatched_cop;
         }
 
@@ -1102,23 +1149,27 @@ PROMPT;
         foreach ($merged as $exec => $row) {
             $dispatch  = $dispatchMerged[$exec] ?? null;
             $valueCop  = $row['value_cop'];
+            $valueUsd  = $row['value_usd'];
             $kilos     = $row['total_kilos'];
             $dispCop    = $dispatch ? $dispatch['dispatched_cop']    : 0;
+            $dispUsd    = $dispatch ? $dispatch['dispatched_usd']    : 0;
             $dispKilos  = $dispatch ? $dispatch['dispatched_kilos']  : 0;
             $dispOrders = $dispatch ? $dispatch['dispatched_orders'] : 0;
 
             $result[] = [
                 'executive'            => $exec,
                 'total_orders'         => $row['total_orders'],
-                'value_usd'            => round($row['value_usd'], 2),
+                'value_usd'            => round($valueUsd, 2),
                 'value_cop'            => round($valueCop, 0),
                 'total_kilos'          => round($kilos, 2),
                 'dispatched_orders'    => $dispOrders,
+                'dispatched_usd'       => round($dispUsd, 2),
                 'dispatched_cop'       => round($dispCop, 0),
                 'dispatched_kilos'     => round($dispKilos, 2),
                 'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0,
-                'compliance_cop_pct'   => $valueCop > 0 ? round($dispCop   / $valueCop * 100, 1) : 0,
-                'compliance_kilos_pct' => $kilos    > 0 ? round($dispKilos / $kilos    * 100, 1) : 0,
+                'compliance_usd_pct'   => $valueUsd > 0 ? round($dispUsd   / $valueUsd  * 100, 1) : 0,
+                'compliance_cop_pct'   => $valueCop  > 0 ? round($dispCop   / $valueCop  * 100, 1) : 0,
+                'compliance_kilos_pct' => $kilos     > 0 ? round($dispKilos / $kilos     * 100, 1) : 0,
             ];
         }
 
@@ -1166,7 +1217,7 @@ PROMPT;
         // ── RESUMEN FINANCIERO ──────────────────────────────────────────────
         $md .= "## RESUMEN FINANCIERO\n";
         $md .= "| Métrica | USD | COP |\n|---|---:|---:|\n";
-        $md .= "| Total órdenes creadas | \${$n($oc['value_usd'] ?? 0, 2)} | \${$n($oc['value_cop'] ?? 0)} |\n";
+        $md .= "| Total OC (con despacho en período) | \${$n($oc['value_usd'] ?? 0, 2)} | \${$n($oc['value_cop'] ?? 0)} |\n";
         $md .= "| Despachado / Facturado | \${$n($desp['value_usd'] ?? 0, 2)} | \${$n($desp['value_cop'] ?? 0)} |\n";
         $md .= "| Pendiente por facturar | \${$n($pend['value_usd'] ?? 0, 2)} | \${$n($pend['value_cop'] ?? 0)} |\n";
         $md .= "| Planeado en el período | \${$n($plan['value_usd'] ?? 0, 2)} | \${$n($plan['value_cop'] ?? 0)} |\n\n";
@@ -1233,11 +1284,12 @@ PROMPT;
 
         // ── ESTADÍSTICAS POR EJECUTIVA ──────────────────────────────────────
         $md .= "## ESTADÍSTICAS POR EJECUTIVA\n";
-        $md .= "| Ejecutiva | OC | Valor USD | Valor COP | $/kg USD | Kilos | Part.% | OC desp. | Desp. COP | Desp. kg | Cump.% |\n";
-        $md .= "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+        $md .= "| Ejecutiva | OC | Valor USD | Valor COP | $/kg USD | Kilos | Part.% | OC desp. | Desp. USD | Desp. COP | Desp. kg | Cump.% USD |\n";
+        $md .= "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
         foreach ($execs as $e) {
             $kilos    = (float) $e['total_kilos'];
             $valueUsd = (float) $e['value_usd'];
+            $dispUsd  = (float) ($e['dispatched_usd'] ?? 0);
             $pxkg     = $kilos > 0 ? $n($valueUsd / $kilos, 2) : '—';
             $md .= "| {$e['executive']}";
             $md .= " | {$e['total_orders']}";
@@ -1247,9 +1299,10 @@ PROMPT;
             $md .= " | {$n($kilos, 2)}";
             $md .= " | {$e['participation_pct']}%";
             $md .= " | {$e['dispatched_orders']}";
+            $md .= " | \${$n($dispUsd, 2)}";
             $md .= " | \${$n($e['dispatched_cop'])}";
             $md .= " | {$n($e['dispatched_kilos'], 2)}";
-            $md .= " | {$e['compliance_cop_pct']}%";
+            $md .= " | {$e['compliance_usd_pct'] ?? $e['compliance_cop_pct']}%";
             $md .= " |\n";
         }
         $md .= "\n";
