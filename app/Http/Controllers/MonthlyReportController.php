@@ -191,7 +191,7 @@ class MonthlyReportController extends Controller
         $request->validate([
             'start_date' => 'nullable|date_format:Y-m-d',
             'end_date'   => 'nullable|date_format:Y-m-d',
-            'model'      => 'nullable|string|in:gpt-4.1,gpt-4.1-mini,gpt-4o,o4-mini',
+            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5,o3-mini',
         ]);
 
         $aiUrl = config('custom.ai_server_url');
@@ -460,7 +460,7 @@ class MonthlyReportController extends Controller
             'thread_id'  => 'required|string',
             'message'    => 'required|string|max:2000',
             'session_id' => 'nullable|integer',
-            'model'      => 'nullable|string|in:gpt-4.1,gpt-4.1-mini,gpt-4o,o4-mini',
+            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5,o3-mini',
         ]);
 
         $aiUrl = config('custom.ai_server_url');
@@ -645,13 +645,13 @@ class MonthlyReportController extends Controller
      * Retorna JsonResponse 429 si se alcanzó el límite; null si se puede continuar.
      *
      * Modelos con límite (10 req/usuario/día):
-     *   - gpt-4o   (nivel Avanzado)
-     *   - o3-mini  (nivel Premium)
+     *   - claude-sonnet-4-5  (nivel Avanzado)
+     *   - o3-mini            (nivel Premium)
      * Modelos sin límite: cualquier otro (incluido gpt-4.1).
      */
     private function checkAndIncrementModelLimit(string $model): ?JsonResponse
     {
-        $limitedModels = ['gpt-4o', 'o3-mini'];
+        $limitedModels = ['claude-sonnet-4-5', 'o3-mini'];
 
         if (!in_array($model, $limitedModels, true)) {
             return null;
@@ -688,7 +688,7 @@ class MonthlyReportController extends Controller
         $bogota      = Carbon::now('America/Bogota');
         $today       = $bogota->toDateString();
         $userId      = auth()->id();
-        $limitedModels = ['gpt-4o', 'o3-mini'];
+        $limitedModels = ['claude-sonnet-4-5', 'o3-mini'];
         $limit       = 10;
 
         $result = [];
