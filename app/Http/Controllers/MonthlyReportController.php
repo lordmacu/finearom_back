@@ -124,10 +124,11 @@ class MonthlyReportController extends Controller
                   "ESQUEMA DE BASE DE DATOS:\n" . $this->getDbSchema() . "\n\n" .
 
                   "INSTRUCCIONES PARA QUERIES SQL:\n" .
-                  "- Cuando el usuario pida datos que NO están en el reporte precompilado (ej: listar clientes por ciudad, buscar órdenes de un período distinto, historial de un producto, etc.), genera una query SQL MariaDB lista para ejecutar.\n" .
-                  "- Presenta SIEMPRE la query dentro de este bloque especial (no uses otro formato): <div class=\"ai-sql-block\"><pre><code>QUERY_SQL_AQUI</code></pre></div>\n" .
-                  "- Fuera del bloque, explica brevemente qué devuelve la query y cómo interpretarla.\n" .
-                  "- Si el dato SÍ está en el reporte, responde directamente desde el reporte sin generar query.\n\n" .
+                  "- SIEMPRE que el usuario pida una lista, ranking, tabla o detalle de datos (top N órdenes, clientes, productos, ejecutivas, despachos, cartera, etc.), genera una query SQL MariaDB lista para ejecutar — incluso si el dato está en el reporte precompilado. El usuario quiere verlo en tabla interactiva.\n" .
+                  "- Solo responde sin query cuando la pregunta es un cálculo simple (ej: '¿cuánto es el cumplimiento?') o una explicación conceptual.\n" .
+                  "- Presenta SIEMPRE la query así (HTML exacto, sin variaciones): <pre><code class=\"language-sql\">QUERY_SQL_AQUI</code></pre>\n" .
+                  "- Antes del bloque SQL, escribe una línea breve diciendo qué muestra la consulta.\n" .
+                  "- Las queries deben usar las tablas del ESQUEMA DE BASE DE DATOS proporcionado. Usa el período {$period['start_date']} a {$period['end_date']} como filtro cuando sea relevante.\n\n" .
 
                   "Confirma que recibiste el reporte con un mensaje breve de bienvenida (2-3 líneas) " .
                   "indicando el período, el total de órdenes creadas (valor USD), y cuánto se despachó/facturó realmente en USD.";
