@@ -15,6 +15,7 @@ class ProjectEvaluation extends Model
     protected $fillable = [
         'project_id',
         'tipos',
+        'benchmark_reference_id',
         'metodologia',
         'observacion',
     ];
@@ -26,5 +27,10 @@ class ProjectEvaluation extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class, 'project_id');
+    }
+
+    public function benchmarkReference(): BelongsTo
+    {
+        return $this->belongsTo(FinearomReference::class, 'benchmark_reference_id');
     }
 }

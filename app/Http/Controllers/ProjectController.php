@@ -346,24 +346,38 @@ class ProjectController extends Controller
         ]);
     }
 
-    public function dashboard(): JsonResponse
+    public function dashboard(Request $request): JsonResponse
     {
-        $byTipo = Project::query()
+        $ejecutivo  = $request->query('ejecutivo');
+        $clientId   = $request->query('client_id');
+        $categoryId = $request->query('category_id');
+        $year       = (int) ($request->query('year', now()->year));
+
+        // Base scope with optional filters applied to all queries
+        $base = function () use ($ejecutivo, $clientId, $categoryId) {
+            $q = Project::query();
+            if ($ejecutivo)  $q->where('ejecutivo', $ejecutivo);
+            if ($clientId)   $q->where('client_id', $clientId);
+            if ($categoryId) $q->where('product_category_id', $categoryId);
+            return $q;
+        };
+
+        $byTipo = $base()
             ->selectRaw('tipo, COUNT(*) as total')
             ->groupBy('tipo')
             ->pluck('total', 'tipo');
 
-        $byEstadoExterno = Project::query()
+        $byEstadoExterno = $base()
             ->selectRaw('estado_externo, COUNT(*) as total')
             ->groupBy('estado_externo')
             ->pluck('total', 'estado_externo');
 
-        $byEstadoInterno = Project::query()
+        $byEstadoInterno = $base()
             ->selectRaw('estado_interno, COUNT(*) as total')
             ->groupBy('estado_interno')
             ->pluck('total', 'estado_interno');
 
-        $byEjecutivo = Project::query()
+        $byEjecutivo = $base()
             ->selectRaw('ejecutivo, COUNT(*) as total')
             ->whereNotNull('ejecutivo')
             ->groupBy('ejecutivo')
@@ -371,7 +385,7 @@ class ProjectController extends Controller
             ->limit(10)
             ->get();
 
-        $byMonth = Project::query()
+        $byMonth = $base()
             ->selectRaw("DATE_FORMAT(fecha_creacion, '%Y-%m') as mes, COUNT(*) as total")
             ->whereNotNull('fecha_creacion')
             ->where('fecha_creacion', '>=', now()->subYear())
@@ -380,27 +394,29 @@ class ProjectController extends Controller
             ->get();
 
         $totals = [
-            'total'      => Project::count(),
-            'ganados'    => Project::where('estado_externo', 'Ganado')->count(),
-            'perdidos'   => Project::where('estado_externo', 'Perdido')->count(),
-            'en_espera'  => Project::where('estado_externo', 'En espera')->count(),
-            'entregados' => Project::where('estado_interno', 'Entregado')->count(),
-            'en_proceso' => Project::where('estado_interno', 'En proceso')->count(),
+            'total'      => $base()->count(),
+            'ganados'    => $base()->where('estado_externo', 'Ganado')->count(),
+            'perdidos'   => $base()->where('estado_externo', 'Perdido')->count(),
+            'en_espera'  => $base()->where('estado_externo', 'En espera')->count(),
+            'entregados' => $base()->where('estado_interno', 'Entregado')->count(),
+            'en_proceso' => $base()->where('estado_interno', 'En proceso')->count(),
         ];
 
-        $winsAnio = Project::where('estado_externo', 'Ganado')
-            ->whereYear('updated_at', now()->year)
+        $winsAnio = $base()
+            ->where('estado_externo', 'Ganado')
+            ->whereYear('updated_at', $year)
             ->count();
 
-        $potencialPorProbabilidad = Project::query()
+        $potencialPorProbabilidad = $base()
             ->where('estado_externo', 'En espera')
             ->whereNotNull('probabilidad_cierre')
-            ->selectRaw('probabilidad_cierre, SUM(potencial_anual_usd) as total_usd, COUNT(*) as cantidad')
+            ->selectRaw('probabilidad_cierre, SUM(potencial_anual_usd) as total_usd, SUM(potencial_anual_kg) as total_kg, COUNT(*) as cantidad')
             ->groupBy('probabilidad_cierre')
             ->get()
             ->keyBy('probabilidad_cierre');
 
-        $pronosticoAnual = Project::where('estado_externo', 'En espera')
+        $pronosticoAnual = $base()
+            ->where('estado_externo', 'En espera')
             ->whereNotNull('probabilidad_cierre')
             ->whereNotNull('potencial_anual_usd')
             ->get(['probabilidad_cierre', 'potencial_anual_usd'])
@@ -414,8 +430,32 @@ class ProjectController extends Controller
                 return $p->potencial_anual_usd * $peso;
             });
 
+        // Pronóstico del año en curso: basado en fecha_cierre_estimada + frecuencia_compra_estimada
+        // Calcula cuántos despachos caben en el año desde la fecha estimada de cierre
+        $pronosticoAnioCurso = $base()
+            ->where('estado_externo', 'En espera')
+            ->whereNotNull('fecha_cierre_estimada')
+            ->whereNotNull('frecuencia_compra_estimada')
+            ->whereNotNull('potencial_anual_usd')
+            ->where('frecuencia_compra_estimada', '>', 0)
+            ->whereYear('fecha_cierre_estimada', $year)
+            ->get(['fecha_cierre_estimada', 'frecuencia_compra_estimada', 'potencial_anual_usd'])
+            ->sum(function ($p) {
+                $mescierre        = (int) \Carbon\Carbon::parse($p->fecha_cierre_estimada)->format('m');
+                $mesesRestantes   = max(0, 12 - $mescierre);
+                $despachosPosibles = (int) floor($mesesRestantes * $p->frecuencia_compra_estimada / 12);
+                $ingresoPorDespacho = $p->potencial_anual_usd / $p->frecuencia_compra_estimada;
+                return $despachosPosibles * $ingresoPorDespacho;
+            });
+
+        // Potencial total en KG (proyectos en espera)
+        $potencialKgTotal = $base()
+            ->where('estado_externo', 'En espera')
+            ->whereNotNull('potencial_anual_kg')
+            ->sum('potencial_anual_kg');
+
         // Proyectos activos por departamento (estado_interno = 'En proceso', booleano aún en false = pendiente)
-        $enProceso = Project::where('estado_interno', 'En proceso');
+        $enProceso = $base()->where('estado_interno', 'En proceso');
         $byProceso = [
             'Desarrollo'  => (clone $enProceso)->where('estado_desarrollo', false)->count(),
             'Laboratorio' => (clone $enProceso)->where('estado_laboratorio', false)->count(),
@@ -425,7 +465,7 @@ class ProjectController extends Controller
         ];
 
         // Top clientes por volumen de proyectos
-        $topClientes = Project::query()
+        $topClientes = $base()
             ->whereNotNull('client_id')
             ->selectRaw('client_id, COUNT(*) as total')
             ->groupBy('client_id')
@@ -439,20 +479,46 @@ class ProjectController extends Controller
                 'total'       => $r->total,
             ]);
 
+        // Promedio de precio por categoría
+        $byCategoria = $base()
+            ->whereNotNull('product_category_id')
+            ->selectRaw('product_category_id, COUNT(*) as cantidad, AVG(costo_perfumacion_especifico) as precio_promedio, SUM(potencial_anual_usd) as potencial_usd')
+            ->groupBy('product_category_id')
+            ->orderByDesc('cantidad')
+            ->get()
+            ->map(function ($r) {
+                $r->load('productCategory:id,name');
+                return [
+                    'categoria'      => $r->productCategory?->name ?? 'Sin categoría',
+                    'cantidad'       => (int) $r->cantidad,
+                    'precio_promedio' => $r->precio_promedio !== null ? round((float) $r->precio_promedio, 2) : null,
+                    'potencial_usd'  => round((float) $r->potencial_usd, 2),
+                ];
+            });
+
         return response()->json([
             'success' => true,
             'data' => [
-                'totals'                 => $totals,
-                'by_tipo'                => $byTipo,
-                'by_estado_externo'      => $byEstadoExterno,
-                'by_estado_interno'      => $byEstadoInterno,
-                'by_ejecutivo'           => $byEjecutivo,
-                'by_month'               => $byMonth,
-                'wins_anio'              => $winsAnio,
-                'potencial_probabilidad' => $potencialPorProbabilidad,
-                'pronostico_anual_usd'   => round($pronosticoAnual, 2),
-                'by_proceso'             => $byProceso,
-                'top_clientes'           => $topClientes,
+                'totals'                   => $totals,
+                'by_tipo'                  => $byTipo,
+                'by_estado_externo'        => $byEstadoExterno,
+                'by_estado_interno'        => $byEstadoInterno,
+                'by_ejecutivo'             => $byEjecutivo,
+                'by_month'                 => $byMonth,
+                'wins_anio'                => $winsAnio,
+                'potencial_probabilidad'   => $potencialPorProbabilidad,
+                'pronostico_anual_usd'     => round($pronosticoAnual, 2),
+                'pronostico_anio_curso_usd' => round($pronosticoAnioCurso, 2),
+                'potencial_kg_total'       => round((float) $potencialKgTotal, 2),
+                'by_proceso'               => $byProceso,
+                'top_clientes'             => $topClientes,
+                'by_categoria'             => $byCategoria,
+                'filters' => [
+                    'year'        => $year,
+                    'ejecutivo'   => $ejecutivo,
+                    'client_id'   => $clientId ? (int) $clientId : null,
+                    'category_id' => $categoryId ? (int) $categoryId : null,
+                ],
             ],
         ]);
     }

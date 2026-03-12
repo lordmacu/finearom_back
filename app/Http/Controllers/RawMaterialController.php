@@ -4,9 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\RawMaterial\RawMaterialStoreRequest;
 use App\Http\Requests\RawMaterial\RawMaterialUpdateRequest;
+use App\Models\FinearomPriceHistory;
+use App\Models\FinearomReference;
 use App\Models\RawMaterial;
 use App\Models\RawMaterialPriceHistory;
 use App\Models\RawMaterialStockMovement;
+use App\Models\ReferenceFormulaLine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -143,12 +146,77 @@ class RawMaterialController extends Controller
 
         $rawMaterial->update(['costo_unitario' => $costoNuevo]);
 
+        $updatedCount = $this->recalculateReferencePrices($rawMaterial);
+
+        $message = 'Costo actualizado correctamente.';
+        if ($updatedCount > 0) {
+            $message .= " Se recalcularon {$updatedCount} referencia(s) afectadas.";
+        }
+
         return response()->json([
             'data'    => $rawMaterial->fresh()->load(['priceHistory' => function ($q) {
                 $q->with('changedBy:id,name')->orderByDesc('created_at')->limit(10);
             }]),
-            'message' => 'Costo actualizado correctamente.',
+            'message' => $message,
         ]);
+    }
+
+    private function recalculateReferencePrices(RawMaterial $rawMaterial): int
+    {
+        $affectedReferenceIds = ReferenceFormulaLine::where('raw_material_id', $rawMaterial->id)
+            ->pluck('finearom_reference_id')
+            ->unique();
+
+        $updated = 0;
+
+        foreach ($affectedReferenceIds as $refId) {
+            $reference = FinearomReference::find($refId);
+            if (!$reference) {
+                continue;
+            }
+
+            $lines = ReferenceFormulaLine::where('finearom_reference_id', $refId)
+                ->with('rawMaterial')
+                ->get();
+
+            $costoTotal = 0.0;
+            foreach ($lines as $line) {
+                $rm = $line->rawMaterial;
+                if (!$rm) {
+                    continue;
+                }
+                $factor      = $this->toKgFactor($rm->unidad);
+                $costoTotal += ((float) $line->porcentaje / 100) * ((float) $rm->costo_unitario / $factor);
+            }
+
+            $costoTotal     = round($costoTotal, 4);
+            $precioAnterior = (float) $reference->precio;
+
+            if (abs($precioAnterior - $costoTotal) < 0.0001) {
+                continue;
+            }
+
+            FinearomPriceHistory::create([
+                'finearom_reference_id' => $reference->id,
+                'precio_anterior'       => $precioAnterior,
+                'precio_nuevo'          => $costoTotal,
+                'changed_by'            => auth()->id(),
+            ]);
+
+            $reference->update(['precio' => $costoTotal]);
+            $updated++;
+        }
+
+        return $updated;
+    }
+
+    private function toKgFactor(string $unidad): float
+    {
+        return match ($unidad) {
+            'g'  => 1 / 1000,
+            'ml' => 1 / 1000,
+            default => 1.0,
+        };
     }
 
     public function addMovement(Request $request, RawMaterial $rawMaterial): JsonResponse

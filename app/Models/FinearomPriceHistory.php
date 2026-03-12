@@ -25,4 +25,9 @@ class FinearomPriceHistory extends Model
     {
         return $this->belongsTo(FinearomReference::class, 'finearom_reference_id');
     }
+
+    public function changedBy(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\User::class, 'changed_by');
+    }
 }

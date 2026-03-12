@@ -59,6 +59,13 @@ class Kernel extends ConsoleKernel
             ->timezone('America/Bogota')
             ->onSuccess(fn () => \Log::info('Alertas de proyectos urgentes enviadas'))
             ->onFailure(fn () => \Log::error('Error al enviar alertas de proyectos urgentes'));
+
+        // Recordatorios diarios a desarrolladores y áreas con proyectos por vencer - 8:30 AM
+        $schedule->command('projects:deadline-reminders')
+            ->dailyAt('08:30')
+            ->timezone('America/Bogota')
+            ->onSuccess(fn () => \Log::info('Recordatorios de fecha límite enviados'))
+            ->onFailure(fn () => \Log::error('Error al enviar recordatorios de fecha límite'));
     }
 
     /**

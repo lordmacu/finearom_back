@@ -16,7 +16,9 @@ class ProjectVariant extends Model
     protected $fillable = [
         'project_id',
         'nombre',
+        'categoria',
         'observaciones',
+        'descripcion',
         'benchmark_reference_id',
     ];
 

@@ -427,6 +427,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ============================================================================
     Route::apiResource('finearom-references', FinearomReferenceController::class);
     Route::post('finearom-references/{finearomReference}/update-price', [FinearomReferenceController::class, 'updatePrice']);
+    Route::get('finearom-references/{finearomReference}/price-history', [FinearomReferenceController::class, 'priceHistory']);
     Route::post('finearom-references/{finearomReference}/evaluations', [FinearomEvaluationController::class, 'store']);
     Route::put('finearom-references/{finearomReference}/evaluations/{finearomEvaluation}', [FinearomEvaluationController::class, 'update']);
     Route::delete('finearom-references/{finearomReference}/evaluations/{finearomEvaluation}', [FinearomEvaluationController::class, 'destroy']);

@@ -12,7 +12,7 @@ class FinearomReferenceController extends Controller
 {
     public function __construct()
     {
-        $this->middleware('can:finearom reference list')->only(['index', 'show']);
+        $this->middleware('can:finearom reference list')->only(['index', 'show', 'priceHistory']);
         $this->middleware('can:finearom reference create')->only(['store']);
         $this->middleware('can:finearom reference edit')->only(['update', 'updatePrice']);
         $this->middleware('can:finearom reference delete')->only(['destroy']);
@@ -106,6 +106,20 @@ class FinearomReferenceController extends Controller
 
         return response()->json([
             'message' => 'Referencia eliminada correctamente',
+        ]);
+    }
+
+    public function priceHistory(FinearomReference $finearomReference): JsonResponse
+    {
+        $history = $finearomReference->priceHistory()
+            ->with('changedBy:id,name')
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get();
+
+        return response()->json([
+            'data'    => $history,
+            'message' => 'OK',
         ]);
     }
 
