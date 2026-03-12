@@ -495,6 +495,7 @@ class MonthlyReportController extends Controller
             "CRÍTICO de cartera: saldo_contable ya es decimal normal con punto ('26857379.12'). Usar: CAST(saldo_contable AS DECIMAL(15,2)). NUNCA uses REPLACE para quitar puntos — destruyes el decimal. " .
             "CARTERA POR EJECUTIVA: NO filtres por cartera.vendedor — usa JOIN cartera ca ON ca.nit = clients.nit y filtra por clients.executive. " .
             "CARTERA GROUP BY: cartera tiene UNA FILA POR FACTURA. Si agrupas por nit/cliente → usa SUM(CAST(saldo_contable AS DECIMAL(15,2))). Si listas facturas individuales → sin GROUP BY, usa CAST directo. NUNCA mezcles saldo_contable sin agregar en un SELECT con GROUP BY. " .
+            "ON-TIME: usa SIEMPRE pop.delivery_date (en purchase_order_product). NUNCA po.required_delivery_date para on-time — es la fecha original del cliente, siempre está en el pasado y da 0%. pop.required_delivery_date NO EXISTE. " .
             "FILL RATE: siempre partir desde partials (dispatch_date en período), NO desde order_creation_date. " .
             "Query correcta: FROM partials par JOIN purchase_order_product pop ON par.product_order_id=pop.id AND pop.muestra=0 WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN X AND Y. " .
             "Fill rate = SUM(par.quantity)/SUM(pop.quantity)*100. " .
