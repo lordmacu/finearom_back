@@ -54,6 +54,15 @@ return [
             'password' => env('MAIL_PASSWORD_FACTURACION')
         ],
 
+        'google_cartera' => [
+            'transport' => env('ALT_MAIL_MAILER', 'smtp'),
+            'host' => env('ALT_MAIL_HOST', 'smtp.gmail.com'),
+            'port' => env('ALT_MAIL_PORT', 587),
+            'encryption' => env('ALT_MAIL_ENCRYPTION', 'tls'),
+            'username' => env('ALT_MAIL_USERNAME', 'cartera@finearom.com'),
+            'password' => env('ALT_MAIL_PASSWORD'),
+        ],
+
         'ses' => [
             'transport' => 'ses',
         ],

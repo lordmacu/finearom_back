@@ -132,7 +132,7 @@ class ProcessEmailDispatch implements ShouldQueue
                                 'recipients' => $recipients,
                                 'total_vencidos' => $dataEmail['total_vencidos'],
                             ]);
-                            Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
+                            Mail::mailer('google_cartera')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
                             Log::info('ProcessEmailDispatch - ✅ Email order_block ENVIADO', [
                                 'dispatch_id' => $emailDispatch->id,
                             ]);
@@ -163,7 +163,7 @@ class ProcessEmailDispatch implements ShouldQueue
                             'dispatch_id' => $emailDispatch->id,
                             'recipients' => $recipients,
                         ]);
-                        Mail::mailer('google_alt')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
+                        Mail::mailer('google_cartera')->to($recipients)->send(new EstadoCarteraMail($dataEmail, $emailDispatch->email_type));
                         Log::info('ProcessEmailDispatch - ✅ Email outstanding_balance ENVIADO', [
                             'dispatch_id' => $emailDispatch->id,
                         ]);
