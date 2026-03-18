@@ -54,18 +54,18 @@ class Kernel extends ConsoleKernel
             ->timezone('America/Bogota');
 
         // Alertas de proyectos urgentes (≤ 2 días hábiles a fecha_requerida) - 7:30 AM
-        $schedule->command('projects:urgency-alerts')
-            ->dailyAt('07:30')
-            ->timezone('America/Bogota')
-            ->onSuccess(fn () => \Log::info('Alertas de proyectos urgentes enviadas'))
-            ->onFailure(fn () => \Log::error('Error al enviar alertas de proyectos urgentes'));
+        // $schedule->command('projects:urgency-alerts')
+        //     ->dailyAt('07:30')
+        //     ->timezone('America/Bogota')
+        //     ->onSuccess(fn () => \Log::info('Alertas de proyectos urgentes enviadas'))
+        //     ->onFailure(fn () => \Log::error('Error al enviar alertas de proyectos urgentes'));
 
         // Recordatorios diarios a desarrolladores y áreas con proyectos por vencer - 8:30 AM
-        $schedule->command('projects:deadline-reminders')
-            ->dailyAt('08:30')
-            ->timezone('America/Bogota')
-            ->onSuccess(fn () => \Log::info('Recordatorios de fecha límite enviados'))
-            ->onFailure(fn () => \Log::error('Error al enviar recordatorios de fecha límite'));
+        // $schedule->command('projects:deadline-reminders')
+        //     ->dailyAt('08:30')
+        //     ->timezone('America/Bogota')
+        //     ->onSuccess(fn () => \Log::info('Recordatorios de fecha límite enviados'))
+        //     ->onFailure(fn () => \Log::error('Error al enviar recordatorios de fecha límite'));
     }
 
     /**
