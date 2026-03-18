@@ -83,9 +83,10 @@ class SendProjectDeadlineReminders extends Command
                 }
             }
 
-            // 4. Siempre incluir admins con permiso project list
+            // 4. Solo incluir usuarios internos (@finearom.com) con permiso project list
             $adminEmails = User::permission('project list')
                 ->whereNotNull('email')
+                ->where('email', 'like', '%@finearom.com')
                 ->pluck('email');
             $recipients = $recipients->merge($adminEmails)->unique()->values();
 

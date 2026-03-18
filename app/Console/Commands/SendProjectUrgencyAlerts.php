@@ -35,9 +35,10 @@ class SendProjectUrgencyAlerts extends Command
 
         $this->info("Encontrados {$projects->count()} proyectos urgentes.");
 
-        // Destinatarios: ejecutivo del proyecto + admins con permiso project list
+        // Destinatarios: solo usuarios internos (@finearom.com) con permiso project list
         $adminEmails = User::permission('project list')
             ->whereNotNull('email')
+            ->where('email', 'like', '%@finearom.com')
             ->pluck('email')
             ->unique()
             ->values()
