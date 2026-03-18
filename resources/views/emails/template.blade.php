@@ -21,10 +21,8 @@
             max-width: 700px;
             border-collapse: collapse;
             margin: 16px 0;
-            border: 1px solid #1F2345;
         }
         th, td {
-            border: 1px solid #1F2345;
             padding: 10px 14px;
             text-align: left;
             color: #1F2345;
