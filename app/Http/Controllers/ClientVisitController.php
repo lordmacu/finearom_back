@@ -240,7 +240,7 @@ class ClientVisitController extends Controller
         ]);
 
         try {
-            $htmlBody = view('emails.template', $rendered)->render();
+            $htmlBody = view('emails.template_google_api', $rendered)->render();
             $draft    = $this->gmailService->createHtmlDraft($userId, $rendered['subject'], $htmlBody, $to ?: null);
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 500);
