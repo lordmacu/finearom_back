@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\SalesHistory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -36,12 +35,19 @@ class SalesHistoryController extends Controller
             'file' => ['required', 'file', 'mimes:xlsx,xls', 'max:51200'], // 50 MB
         ]);
 
+        set_time_limit(300);
+
         $path = $request->file('file')->getRealPath();
 
         try {
-            $spreadsheet = IOFactory::load($path);
+            // ReadDataOnly=true: omite estilos, formatos y fórmulas → 3-5x más rápido
+            $reader = IOFactory::createReader('Xlsx');
+            $reader->setReadDataOnly(true);
+            $spreadsheet = $reader->load($path);
             $sheet       = $spreadsheet->getActiveSheet();
-            $rows        = $sheet->toArray(null, true, true, false);
+
+            // false, false, false → sin calcular fórmulas, sin formatear, sin cabeceras de columna
+            $rows = $sheet->toArray(null, false, false, false);
         } catch (\Throwable $e) {
             return response()->json(['message' => 'Error al leer el archivo: ' . $e->getMessage()], 422);
         }
@@ -53,64 +59,70 @@ class SalesHistoryController extends Controller
             return response()->json(['message' => 'El archivo no contiene datos'], 422);
         }
 
-        // Truncar tabla (sobreescribir siempre)
+        // Liberar memoria del spreadsheet antes de procesar
+        $spreadsheet->disconnectWorksheets();
+        unset($spreadsheet);
+
+        // Truncar y re-insertar dentro de una transacción
+        // Deshabilitar query log para evitar acumulación en memoria
+        DB::disableQueryLog();
         DB::table('sales_history')->truncate();
 
         $batch = [];
         $now   = now()->toDateTimeString();
-        $chunk = 500;
+        $chunk = 2000;
 
-        foreach ($rows as $row) {
-            // Columnas del Excel (0-indexed):
-            // 0=NIT, 1=CODIGO BUSQUEDA, 2=CLIENTE, 3=EJECUTIVO, 4=CLIENTE2,
-            // 5=CATEGORIA, 6=CODIGO, 7=REFERENCIA, 8=REF-CODIGO,
-            // 9=AÑO, 10=MES, 11=VENTA, 12=CANTIDAD, 13=NEWWIN, 14=ESTADO
+        DB::transaction(function () use ($rows, $now, $chunk, &$batch) {
+            foreach ($rows as $row) {
+                // Columnas del Excel (0-indexed):
+                // 0=NIT, 1=CODIGO BUSQUEDA, 2=CLIENTE, 3=EJECUTIVO, 4=CLIENTE2,
+                // 5=CATEGORIA, 6=CODIGO, 7=REFERENCIA, 8=REF-CODIGO,
+                // 9=AÑO, 10=MES, 11=VENTA, 12=CANTIDAD, 13=NEWWIN, 14=ESTADO
 
-            $nit       = trim((string) ($row[0] ?? ''));
-            $cliente   = trim((string) ($row[2] ?? ''));
-            $codigo    = trim((string) ($row[6] ?? ''));
-            $referencia = trim((string) ($row[7] ?? ''));
-            $año       = trim((string) ($row[9] ?? ''));
-            $mes       = strtoupper(trim((string) ($row[10] ?? '')));
+                $nit    = trim((string) ($row[0] ?? ''));
+                $codigo = trim((string) ($row[6] ?? ''));
+                $año    = trim((string) ($row[9] ?? ''));
+                $mes    = strtoupper(trim((string) ($row[10] ?? '')));
 
-            // Saltar filas sin datos mínimos
-            if ($nit === '' || $codigo === '' || $año === '' || $mes === '') {
-                continue;
+                // Saltar filas sin datos mínimos
+                if ($nit === '' || $codigo === '' || $año === '' || $mes === '') {
+                    continue;
+                }
+
+                // Normalizar categoría (FINE FRAGANCE → FINE FRAGRANCE)
+                $categoria = trim((string) ($row[5] ?? ''));
+                if ($categoria === 'FINE FRAGANCE') {
+                    $categoria = 'FINE FRAGRANCE';
+                }
+
+                $batch[] = [
+                    'nit'          => $nit,
+                    'cliente'      => trim((string) ($row[2] ?? '')),
+                    'ejecutivo'    => trim((string) ($row[3] ?? '')) ?: null,
+                    'cliente_tipo' => trim((string) ($row[4] ?? '')) ?: null,
+                    'categoria'    => $categoria ?: null,
+                    'codigo'       => $codigo,
+                    'referencia'   => trim((string) ($row[7] ?? '')),
+                    'año'          => $año,
+                    'mes'          => $mes,
+                    'venta'        => (int) ($row[11] ?? 0),
+                    'cantidad'     => (int) ($row[12] ?? 0),
+                    'newwin'       => ($row[13] === 'NEW WIN'),
+                    'estado'       => trim((string) ($row[14] ?? '')) ?: null,
+                    'created_at'   => $now,
+                    'updated_at'   => $now,
+                ];
+
+                if (count($batch) >= $chunk) {
+                    DB::table('sales_history')->insert($batch);
+                    $batch = [];
+                }
             }
 
-            // Normalizar categoría (FINE FRAGANCE → FINE FRAGRANCE)
-            $categoria = trim((string) ($row[5] ?? ''));
-            if (strtoupper($categoria) === 'FINE FRAGANCE') {
-                $categoria = 'FINE FRAGRANCE';
-            }
-
-            $batch[] = [
-                'nit'         => $nit,
-                'cliente'     => $cliente,
-                'ejecutivo'   => trim((string) ($row[3] ?? '')) ?: null,
-                'cliente_tipo'=> trim((string) ($row[4] ?? '')) ?: null,
-                'categoria'   => $categoria ?: null,
-                'codigo'      => $codigo,
-                'referencia'  => $referencia,
-                'año'         => $año,
-                'mes'         => $mes,
-                'venta'       => (int) ($row[11] ?? 0),
-                'cantidad'    => (int) ($row[12] ?? 0),
-                'newwin'      => ($row[13] === 'NEW WIN'),
-                'estado'      => trim((string) ($row[14] ?? '')) ?: null,
-                'created_at'  => $now,
-                'updated_at'  => $now,
-            ];
-
-            if (count($batch) >= $chunk) {
+            if (!empty($batch)) {
                 DB::table('sales_history')->insert($batch);
-                $batch = [];
             }
-        }
-
-        if (!empty($batch)) {
-            DB::table('sales_history')->insert($batch);
-        }
+        });
 
         $total = DB::table('sales_history')->count();
 
