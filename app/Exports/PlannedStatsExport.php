@@ -334,7 +334,7 @@ class PlannedStatsExport implements FromCollection, WithHeadings, WithStyles, Wi
     private function getTrmForDateWithPartial($date, $partialTrm, $orderTrm, $trmData, $sourceType, &$trmUsageStats)
     {
         // 1. PRIORIDAD MÁXIMA: Si viene de partial real y tiene TRM válida, usar esa
-        if ($sourceType === 'partial_real' && !empty($partialTrm) && $partialTrm > 3800) {
+        if ($sourceType === 'partial_real' && !empty($partialTrm) && $partialTrm >= 3400) {
             $trmUsageStats['from_partial_real']++;
             return (float) $partialTrm;
         }
@@ -346,7 +346,7 @@ class PlannedStatsExport implements FromCollection, WithHeadings, WithStyles, Wi
         }
         
         // 3. Fallback: TRM de la orden si existe y es válida
-        if (!empty($orderTrm) && $orderTrm > 3800) {
+        if (!empty($orderTrm) && $orderTrm >= 3400) {
             $trmUsageStats['from_order']++;
             return (float) $orderTrm;
         }
@@ -358,7 +358,7 @@ class PlannedStatsExport implements FromCollection, WithHeadings, WithStyles, Wi
 
     private function getTrmSourceLabel($sourceType, $partialTrm, $trmData, $date, $orderTrm)
     {
-        if ($sourceType === 'partial_real' && !empty($partialTrm) && $partialTrm > 3800) {
+        if ($sourceType === 'partial_real' && !empty($partialTrm) && $partialTrm >= 3400) {
             return 'Partial Real';
         }
         
@@ -366,7 +366,7 @@ class PlannedStatsExport implements FromCollection, WithHeadings, WithStyles, Wi
             return 'Tabla TRM';
         }
         
-        if (!empty($orderTrm) && $orderTrm > 3800) {
+        if (!empty($orderTrm) && $orderTrm >= 3400) {
             return 'Orden';
         }
         

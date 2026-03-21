@@ -1044,7 +1044,7 @@ class DashboardController extends Controller
                 ) as value_usd,
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
-                    COALESCE(NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
+                    COALESCE(td.value, 4000)
                 ) as value_cop
             ")
             ->groupBy('c.executive')
@@ -1243,7 +1243,7 @@ class DashboardController extends Controller
     private function getTrmForDateWithPartial($date, $partialTrm, $orderTrm, $trmData, $sourceType, &$trmUsageStats)
     {
         // 1. PRIORIDAD MÁXIMA: Si viene de partial real y tiene TRM válida, usar esa
-        if ($sourceType === 'partial_real' && !empty($partialTrm) && $partialTrm > 3800) {
+        if ($sourceType === 'partial_real' && !empty($partialTrm) && $partialTrm >= 3400) {
             $trmUsageStats['from_partial_real']++;
             return (float) $partialTrm;
         }
@@ -1255,7 +1255,7 @@ class DashboardController extends Controller
         }
 
         // 3. Fallback: TRM de la orden si existe y es válida
-        if (!empty($orderTrm) && $orderTrm > 3800) {
+        if (!empty($orderTrm) && $orderTrm >= 3400) {
             $trmUsageStats['from_order']++;
             return (float) $orderTrm;
         }
@@ -1429,6 +1429,161 @@ class DashboardController extends Controller
                 'message' => 'Error al restaurar: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    // =========================================================================
+    // V2 — solo lo que el dashboard pinta
+    // =========================================================================
+
+    /**
+     * Stats v2: únicamente los datos que el dashboard general renderiza.
+     * - executive_stats        → OC creadas en el período vs despachos reales del período
+     * - lead_time_by_client_type → lead time por tipo de cliente
+     * - financial_analysis.average_trm → TRM promedio del período
+     *
+     * No depende de order_statistics ni de cálculos de días hábiles.
+     */
+    public function getStatsV2(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $now = Carbon::now();
+        $startDate = $request->get('start_date') ?? $now->copy()->startOfMonth()->format('Y-m-d');
+        $endDate   = $request->get('end_date')   ?? $now->copy()->endOfMonth()->format('Y-m-d');
+
+        try {
+            $daysCount = Carbon::parse($startDate)->diffInDays(Carbon::parse($endDate)) + 1;
+
+            $avgTrm = DB::table('trm_daily')
+                ->whereBetween('date', [$startDate, $endDate])
+                ->avg('value');
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'period' => [
+                        'start_date' => $startDate,
+                        'end_date'   => $endDate,
+                        'days_count' => $daysCount,
+                    ],
+                    'last_updated'     => $now->toDateTimeString(),
+                    'financial_analysis' => [
+                        'average_trm' => $avgTrm ? round((float) $avgTrm, 2) : 4000.0,
+                    ],
+                    'executive_stats'          => $this->calcExecutiveStatsV2($startDate, $endDate),
+                    'lead_time_by_client_type' => $this->calculateLeadTimeByClientType($startDate, $endDate),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('getStatsV2 error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving dashboard data',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Estadísticas por ejecutiva — versión corregida.
+     *
+     * OC (valor planeado):
+     *   Todas las OC *creadas* en el período (order_creation_date).
+     *   TRM: po.trm → trm_daily en fecha creación → 4000
+     *
+     * Despachos (valor real):
+     *   Partials tipo 'real' con dispatch_date en el período.
+     *   TRM: partials.trm >= 3400 → trm_daily en fecha despacho → 4000
+     *   (mismo criterio que AnalyzeQuery)
+     *
+     * Ambas queries excluyen muestras (muestra = 0).
+     */
+    private function calcExecutiveStatsV2(string $startDate, string $endDate): array
+    {
+        // ── Query 1: OC creadas en el período ────────────────────────────────
+        $ocRows = DB::table('purchase_orders as po')
+            ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->join('purchase_order_product as pop', 'pop.purchase_order_id', '=', 'po.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
+            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->where('pop.muestra', 0)
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COUNT(DISTINCT po.id) as total_orders,
+                SUM(pop.quantity) as total_kilos,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity
+                ) as value_usd,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
+                    COALESCE(td.value, 4000)
+                ) as value_cop
+            ")
+            ->groupBy('c.executive')
+            ->get();
+
+        // ── Query 2: Despachos reales con dispatch_date en el período ─────────
+        // TRM: igual que AnalyzeQuery — partials.trm >= 3400 → trm_daily → 4000
+        $dispRows = DB::table('partials as pt')
+            ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
+            ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
+            ->where('pt.type', 'real')
+            ->whereNull('pt.deleted_at')
+            ->whereNotNull('pt.dispatch_date')
+            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
+            ->where('pop.muestra', 0)
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                SUM(pt.quantity) as dispatched_kilos,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity
+                ) as dispatched_usd,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
+                    (CASE
+                        WHEN pt.trm IS NOT NULL AND pt.trm >= 3400 THEN pt.trm
+                        WHEN td.value  IS NOT NULL                 THEN td.value
+                        ELSE 4000
+                    END)
+                ) as dispatched_cop
+            ")
+            ->groupBy('c.executive')
+            ->get()
+            ->keyBy('executive');
+
+        $totalValueCop = $ocRows->sum('value_cop');
+
+        $result = [];
+        foreach ($ocRows as $row) {
+            $exec      = $row->executive;
+            $disp      = $dispRows[$exec] ?? null;
+            $valueCop  = (float) $row->value_cop;
+            $valueUsd  = (float) $row->value_usd;
+            $kilos     = (float) $row->total_kilos;
+            $dispCop   = $disp ? (float) $disp->dispatched_cop   : 0.0;
+            $dispUsd   = $disp ? (float) $disp->dispatched_usd   : 0.0;
+            $dispKilos = $disp ? (float) $disp->dispatched_kilos : 0.0;
+
+            $result[] = [
+                'executive'            => $exec,
+                'total_orders'         => (int) $row->total_orders,
+                'value_usd'            => round($valueUsd, 2),
+                'value_cop'            => round($valueCop, 0),
+                'total_kilos'          => round($kilos, 2),
+                'dispatched_usd'       => round($dispUsd, 2),
+                'dispatched_cop'       => round($dispCop, 0),
+                'dispatched_kilos'     => round($dispKilos, 2),
+                'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0.0,
+                'compliance_cop_pct'   => $valueCop > 0     ? round($dispCop   / $valueCop      * 100, 1) : 0.0,
+                'compliance_kilos_pct' => $kilos    > 0     ? round($dispKilos / $kilos          * 100, 1) : 0.0,
+            ];
+        }
+
+        usort($result, fn($a, $b) => $b['value_cop'] <=> $a['value_cop']);
+
+        return $result;
     }
 
     /**

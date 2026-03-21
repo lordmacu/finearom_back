@@ -314,7 +314,7 @@ public function calculateCurrentMonthStatistics(?int $days = null): array
 
             if (isset($trmData[$deliveryDate])) {
                 $trmToUse = (float) $trmData[$deliveryDate];
-            } elseif (!empty($orderProduct->order_trm) && $orderProduct->order_trm > 3800) {
+            } elseif (!empty($orderProduct->order_trm) && $orderProduct->order_trm >= 3400) {
                 $trmToUse = (float) $orderProduct->order_trm;
             } else {
                 $trmToUse = 4000;

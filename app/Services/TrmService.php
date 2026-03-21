@@ -272,7 +272,7 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
     }
 
     // ✅ AGREGAR ESTA VALIDACIÓN CRÍTICA (igual que en analyzeClientsByStatus):
-    if ($trm < TrmNormalizer::MIN_VALID_TRM) {  // 3800
+    if ($trm < TrmNormalizer::MIN_VALID_TRM) {  // 3400
         $isDefault = true;
         $trm = $this->getTrm($dispatchDate);  // ← ⚠️ RECALCULAR TRM POR DEFECTO
     }

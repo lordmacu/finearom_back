@@ -107,6 +107,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Dashboard Stats
     Route::get('/dashboard/stats', [DashboardController::class, 'getStats']);
+    Route::get('/dashboard/stats-v2', [DashboardController::class, 'getStatsV2']);
     Route::get('/dashboard/export-planned-stats', [DashboardController::class, 'exportPlannedStats']);
     Route::get('/dashboard/client-stats', [DashboardController::class, 'clientQuickStats']);
 

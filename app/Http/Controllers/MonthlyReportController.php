@@ -191,7 +191,7 @@ class MonthlyReportController extends Controller
         $request->validate([
             'start_date' => 'nullable|date_format:Y-m-d',
             'end_date'   => 'nullable|date_format:Y-m-d',
-            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5',
+            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5,deepseek-chat',
         ]);
 
         $aiUrl = config('custom.ai_server_url');
@@ -351,7 +351,20 @@ class MonthlyReportController extends Controller
             "- ⚠ CRÍTICO GROUP BY en cartera: la tabla cartera tiene UNA FILA POR FACTURA (no por cliente).\n" .
             "  → Si agrupas por nit/cliente, DEBES usar SUM(CAST(saldo_contable AS DECIMAL(15,2))) — nunca saldo_contable directo en SELECT.\n" .
             "  → Si muestras detalle por factura (sin GROUP BY), puedes usar CAST(saldo_contable AS DECIMAL(15,2)) directo.\n" .
-            "  → En MariaDB ONLY_FULL_GROUP_BY, todo campo no-agregado en SELECT debe estar en GROUP BY.\n\n" .
+            "  → En MariaDB ONLY_FULL_GROUP_BY, todo campo no-agregado en SELECT debe estar en GROUP BY.\n" .
+            "- ⚠ CRÍTICO JOIN cartera con despachos: NUNCA hagas JOIN directo de cartera a una query que ya tiene GROUP BY de despachos.\n" .
+            "- ⚠ CRÍTICO CARTERA EN SCORECARD POR EJECUTIVA: la cartera vencida debe incluir TODOS los clientes de la ejecutiva, NO solo los que tuvieron despachos en el período.\n" .
+            "  → Un cliente puede tener cartera vencida aunque no haya despachado en marzo. Si filtras por partials, esos clientes quedan fuera y la cartera aparece como 0.\n" .
+            "  → Para cartera vencida por ejecutiva, SIEMPRE usa subconsulta correlacionada independiente del flujo de despachos:\n" .
+            "     (\n" .
+            "         SELECT COALESCE(SUM(CAST(ca.saldo_vencido AS DECIMAL(15,2))), 0)\n" .
+            "         FROM cartera ca\n" .
+            "         JOIN clients cc ON cc.nit = ca.nit\n" .
+            "         WHERE ca.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)\n" .
+            "           AND ca.dias < 0\n" .
+            "           AND cc.executive = c.executive\n" .
+            "     ) AS cartera_vencida_cop\n" .
+            "  → NUNCA uses SUM(DISTINCT ca.saldo_vencido) ni LEFT JOIN de cartera al flujo principal de despachos para calcular cartera por ejecutiva.\n\n" .
             "REGLA CRÍTICA DE CANTIDADES:\n" .
             "Cuando JOIN partials → purchase_order_product, SIEMPRE usa par.quantity para calcular valor despachado.\n" .
             "pop.quantity es la cantidad PEDIDA, par.quantity es la cantidad REAL DESPACHADA.\n\n" .
@@ -376,31 +389,28 @@ class MonthlyReportController extends Controller
             "→ Todas las facturas del período: SELECT DISTINCT invoice_number FROM partials WHERE type='real'\n\n" .
             "Si el usuario pregunta por CIUDAD DE ENTREGA o SUCURSAL:\n" .
             "→ Hacer LEFT JOIN branch_offices bo ON pop.branch_office_id = bo.id → usar bo.delivery_city, bo.name\n\n" .
-            "INSTRUCCIONES:\n" .
-            "- Responde SOLO en HTML limpio. NO uses LaTeX, NO uses markdown (no \\times, no **texto**, no backticks).\n" .
-            "- NO generes tablas HTML con datos — el sistema ejecuta el SQL y muestra los resultados automáticamente.\n" .
-            "- Para cualquier pregunta sobre datos (listas, rankings, totales, comparaciones): escribe un párrafo corto explicando qué hace la consulta + el bloque SQL.\n" .
-            "- SQL siempre en: <pre><code class=\"language-sql\">QUERY</code></pre>\n" .
+            "FORMATO DE RESPUESTA — OBLIGATORIO:\n" .
+            "Responde SIEMPRE con un objeto JSON válido, sin texto antes ni después, sin wrapper de backticks.\n" .
+            "Estructura exacta:\n" .
+            "{\"html\":\"<p>explicación breve en HTML</p>\",\"sql\":\"SELECT ...\",\"showing\":\"campo1, campo2\",\"available\":\"campo3, campo4\"}\n\n" .
+            "Reglas del JSON:\n" .
+            "- \"html\": explicación en HTML limpio. Sin LaTeX, sin markdown, sin backticks. Para preguntas sin datos: solo el html, sql=null.\n" .
+            "- \"sql\": la query SQL completa, sin escapar. null si no hay query.\n" .
+            "- \"showing\": campos que muestra la query, en español legible (ej: 'total órdenes, kilos pedidos, valor USD'). Omitir si sql=null.\n" .
+            "- \"available\": campos adicionales que el usuario puede pedir. Omitir si sql=null.\n" .
+            "- Usa nombres en español en showing/available. NUNCA nombres de columna de BD.\n" .
+            "  order_consecutive→número de OC | dispatch_date→fecha de despacho | executive→ejecutiva | quantity→kilos | price→precio USD/kg\n\n" .
+            "REGLAS SQL:\n" .
             "- Usa siempre las fechas del período activo en los filtros.\n" .
-            "- ALIASES recomendados en SELECT para que la tabla muestre etiquetas legibles:\n" .
-            "  client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, total_kilos, dispatched_kilos,\n" .
-            "  fecha_despacho, fecha_creacion, numero_oc, saldo_cop, deuda_neta, vencido_cop, fill_rate_pct, pipeline_usd\n" .
-            "- CRÍTICO GROUP BY (MariaDB ONLY_FULL_GROUP_BY): TODOS los campos no-agregados del SELECT deben estar en el GROUP BY.\n" .
-            "  Si tienes c.client_name y c.executive en el SELECT → el GROUP BY debe incluir c.id, c.client_name, c.executive.\n" .
-            "  Agrupa SIEMPRE por c.executive (no por el alias 'ejecutiva'). El alias va solo en el SELECT.\n" .
-            "  NUNCA omitas columnas del SELECT en el GROUP BY aunque sean derivadas del id.\n" .
-            "- PRESENTACIÓN: NUNCA incluyas columnas de id (id, client_id, product_id, etc.) en el SELECT.\n" .
-            "  Cuando muestres nombre de cliente SIEMPRE incluye también el NIT del cliente en la misma query.\n" .
-            "- Para preguntas conceptuales simples (¿qué es X?, ¿cómo funciona Y?) responde sin SQL.\n" .
-            "- IMPORTANTE: después de cada bloque SQL, agrega siempre una línea breve con dos partes:\n" .
-            "  1. Los campos que estás mostrando: '<p><small>Mostrando: <strong>campo1, campo2, campo3</strong>.</small></p>'\n" .
-            "  2. Campos adicionales disponibles que el usuario puede pedir: '<p><small>Puedes pedirme que también muestre: campo4, campo5, campo6.</small></p>'\n" .
-            "  CRÍTICO: usa SIEMPRE nombres en español legibles para el usuario, NUNCA nombres de columna de la BD. Ejemplos de traducción:\n" .
-            "  order_consecutive → número de OC | dispatch_date → fecha de despacho | client_name → cliente | executive → ejecutiva\n" .
-            "  status → estado | invoice_number → número de factura | tracking_number → número de guía | trm → TRM\n" .
-            "  quantity → kilos | price → precio USD/kg | order_creation_date → fecha de creación | city → ciudad\n" .
-            "  Ejemplo correcto: 'Mostrando: número de OC, cliente, fecha de despacho. Puedes pedirme que también muestre: ejecutiva, kilos, valor USD, número de factura, ciudad.'\n" .
-            "- El mensaje de bienvenida debe ser: saludo breve, período activo, y 3-4 ejemplos de preguntas que puedes responder.";
+            "- ALIASES recomendados: client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, fill_rate_pct, pipeline_usd, fecha_despacho, numero_oc.\n" .
+            "- GROUP BY (MariaDB ONLY_FULL_GROUP_BY): todos los campos no-agregados del SELECT deben estar en GROUP BY. Agrupa por c.executive (no alias).\n" .
+            "- NUNCA incluyas columnas id en SELECT. Siempre incluye NIT junto al nombre del cliente.\n" .
+            "- ⚠ CLIENTES NUEVOS: cuando el usuario pida 'clientes nuevos', 'first order este año/mes', 'clientes que entraron este año' — NUNCA uses HAVING MIN(po.order_creation_date) >= fecha sobre OCs filtradas por status.\n" .
+            "  → Ese patrón falla: un cliente con órdenes completadas en años anteriores pasa el filtro porque sus OCs viejas no tienen status activo.\n" .
+            "  → PATRÓN CORRECTO: verificar la primera orden en TODA la historia del cliente con subconsulta:\n" .
+            "     HAVING (SELECT MIN(po_all.order_creation_date) FROM purchase_orders po_all WHERE po_all.client_id = c.id) >= 'FECHA_INICIO'\n" .
+            "  → Esto garantiza que el cliente no tiene ninguna orden anterior a esa fecha en todo el sistema.\n\n" .
+            "- El mensaje de bienvenida: html con saludo breve + período activo + 3-4 ejemplos de preguntas. sql=null.";
 
         $periodLabel = Carbon::parse($startDate)->locale('es')->isoFormat('MMMM YYYY');
 
@@ -410,6 +420,49 @@ class MonthlyReportController extends Controller
             return $limitResponse;
         }
 
+        // === DEEPSEEK PATH ===
+        if (str_starts_with($model, 'deepseek')) {
+            try {
+                $result = $this->callDeepSeekApi([
+                    ['role' => 'user', 'content' => $prompt],
+                ]);
+
+                if (!$result['success']) {
+                    return response()->json(['success' => false, 'message' => 'Error conectando con DeepSeek'], 500);
+                }
+
+                $threadId   = (string) \Illuminate\Support\Str::uuid();
+                $welcomeMsg = $result['content'] ?: 'Listo, puedes hacerme preguntas sobre el período.';
+                $now        = now()->toDateTimeString();
+
+                $session = ChatSession::create([
+                    'user_id'      => auth()->id(),
+                    'thread_id'    => $threadId,
+                    'period_label' => ucfirst($periodLabel),
+                    'period_start' => $startDate,
+                    'period_end'   => $endDate,
+                    'messages'     => [
+                        // Contexto inicial guardado para reconstruir historial en mensajes posteriores
+                        ['role' => 'user',      'content' => $prompt,     'hidden' => true],
+                        ['role' => 'assistant', 'content' => $welcomeMsg, 'time'   => $now],
+                    ],
+                ]);
+
+                return response()->json([
+                    'success'    => true,
+                    'session_id' => $session->id,
+                    'thread_id'  => $threadId,
+                    'message'    => $welcomeMsg,
+                    'period'     => $period,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('[Chat][DeepSeek] chatStartV2 exception: ' . $e->getMessage());
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+            }
+        }
+
+        // === NODE PROXY PATH (servidor Node intermedio) ===
+        /*
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
                 ->timeout(60)
@@ -449,6 +502,9 @@ class MonthlyReportController extends Controller
             Log::error('[Chat] chatStartV2 exception: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
+        */
+
+        return response()->json(['success' => false, 'message' => 'Modelo no soportado en este endpoint'], 422);
     }
 
     /**
@@ -460,7 +516,7 @@ class MonthlyReportController extends Controller
             'thread_id'  => 'required|string',
             'message'    => 'required|string|max:2000',
             'session_id' => 'nullable|integer',
-            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5',
+            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5,deepseek-chat',
         ]);
 
         $aiUrl = config('custom.ai_server_url');
@@ -484,8 +540,9 @@ class MonthlyReportController extends Controller
         $schemaHint = "Recuerda: eres el asistente de análisis de Finearom. " .
             "Base de datos: MariaDB 11.4 — soporta CTEs (WITH), window functions (SUM/ROW_NUMBER OVER), y FIELD() para ordenamiento personalizado. Úsalos cuando aporten claridad (ej: Pareto con pct acumulado, rankings). " .
             "Período activo de esta sesión: {$periodStart} al {$periodEnd}. " .
-            "REGLA DE FECHAS: usa SIEMPRE {$periodStart} y {$periodEnd} como filtro por defecto en todas las queries. " .
-            "EXCEPCIÓN 1: si el usuario menciona fechas distintas en su mensaje, esas fechas SOBREESCRIBEN el período activo. " .
+            "REGLA DE FECHAS: usa SIEMPRE '{$periodStart}' y '{$periodEnd}' como filtro por defecto en todas las queries. " .
+            "⚠ NUNCA hardcodees otras fechas distintas al período activo — el usuario cambiará el período cuando quiera ver otro rango. " .
+            "EXCEPCIÓN 1: si el usuario menciona fechas distintas en su mensaje, esas fechas SOBREESCRIBEN el período activo SOLO para esa consulta. " .
             "EXCEPCIÓN 2: para preguntas sobre órdenes 'estancadas', 'sin despacho hace X días', 'sin movimiento' — NO uses BETWEEN sobre order_creation_date; usa solo DATEDIFF(CURDATE(), po.order_creation_date) > X sin filtro de período. " .
             "Base de datos MariaDB. Tablas principales: " .
             "purchase_orders (id, client_id, order_consecutive, status, order_creation_date, dispatch_date, trm, is_new_win, is_muestra), " .
@@ -513,14 +570,34 @@ class MonthlyReportController extends Controller
             "CARTERA GROUP BY: cartera tiene UNA FILA POR FACTURA. Si agrupas por nit/cliente → usa SUM(CAST(saldo_contable AS DECIMAL(15,2))). Si listas facturas individuales → sin GROUP BY, usa CAST directo. NUNCA mezcles saldo_contable sin agregar en un SELECT con GROUP BY. " .
             "ON-TIME: usa SIEMPRE pop.delivery_date (en purchase_order_product). NUNCA po.required_delivery_date — da 0%. pop.required_delivery_date NO EXISTE. " .
             "⚠ ON-TIME numerador y denominador deben medir la misma unidad: por LÍNEA → SUM(CASE WHEN par.dispatch_date<=pop.delivery_date THEN 1 ELSE 0 END)/COUNT(par.id); por OC → COUNT(DISTINCT CASE WHEN...po.id)/COUNT(DISTINCT po.id). NUNCA mezcles líneas con órdenes — da >100%. " .
-            "FILL RATE: siempre partir desde partials (dispatch_date en período), NO desde order_creation_date. " .
-            "Query correcta: FROM partials par JOIN purchase_order_product pop ON par.product_order_id=pop.id AND pop.muestra=0 WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN X AND Y. " .
+            "FILL RATE — hay dos versiones con significados distintos, usar la correcta según el contexto:\n" .
+            "1) FILL RATE DE DESPACHO (cumplimiento de lo que se despachó): parte desde partials con dispatch_date en el período. " .
+            "Mide: de las líneas que ya tienen despacho real, qué % de la cantidad pedida se despachó. " .
+            "Query: FROM partials par JOIN purchase_order_product pop ON par.product_order_id=pop.id AND pop.muestra=0 WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN X AND Y. " .
             "Fill rate = SUM(par.quantity)/SUM(pop.quantity)*100. " .
+            "⚠ Limitación: excluye OCs sin ningún despacho — sobreestima el cumplimiento real. Usar para análisis de lo despachado.\n" .
+            "2) FILL RATE REAL DEL MES (cumplimiento de lo pedido): parte desde purchase_orders con order_creation_date en el período + LEFT JOIN partials. " .
+            "Mide: de todo lo pedido en el mes, qué % fue despachado (incluyendo OCs sin despacho). " .
+            "Query: FROM purchase_orders po JOIN purchase_order_product pop ON pop.purchase_order_id=po.id AND pop.muestra=0 JOIN products p ON pop.product_id=p.id LEFT JOIN partials par ON par.product_order_id=pop.id AND par.type='real' AND par.deleted_at IS NULL WHERE po.order_creation_date BETWEEN X AND Y AND po.status != 'cancelled'. " .
+            "Fill rate = SUM(par.quantity)/SUM(pop.quantity)*100. " .
+            "⚠ Este es el fill rate correcto para responder '¿cuánto se cumplió del mes?'. Si el período está activo, el % será bajo porque hay OCs recientes sin despachar aún.\n" .
+            "Regla: si preguntan '¿cuál es el fill rate del período/mes?' → usar versión 2 (real). Si preguntan '¿qué fill rate tuvo lo que se despachó?' → usar versión 1. " .
+            "ANÁLISIS DE CRECIMIENTO DE PRODUCTOS (mes vs mes anterior): NUNCA hagas una sola query mezclando productos nuevos con productos establecidos — el resultado es inútil porque el 100% de un producto de 5kg distorsiona el ranking. " .
+            "SIEMPRE genera 3 queries separadas con CTEs o subqueries: " .
+            "1) CRECIMIENTO REAL: WHERE kilos_mes_anterior > 0 AND kilos_mes_actual > kilos_mes_anterior ORDER BY crecimiento_kilos DESC — productos con demanda establecida que aceleran. " .
+            "2) PRODUCTOS NUEVOS DEL MES: WHERE kilos_mes_anterior = 0 AND kilos_mes_actual > 0 ORDER BY kilos_mes_actual DESC — entradas nuevas. " .
+            "3) CAÍDAS: WHERE kilos_mes_anterior > 0 AND kilos_mes_actual < kilos_mes_anterior ORDER BY crecimiento_kilos ASC — productos en riesgo. " .
+            "Presenta las 3 tablas en el mismo bloque SQL usando UNION ALL con una columna 'segmento' que identifique cada grupo, o como 3 queries separadas con comentarios. " .
             "TENDENCIAS DIARIAS: usa tabla order_statistics (date, commercial_dispatched_value_usd, dispatched_orders_count, total_orders_created, dispatch_fulfillment_rate_usd, pending_dispatch_value_usd, extended_stats JSON) — es un snapshot pre-calculado por día, más eficiente que agregar partials. " .
             "CRÍTICO GROUP BY (MariaDB ONLY_FULL_GROUP_BY): TODOS los campos no-agregados del SELECT deben estar en el GROUP BY. " .
             "Si el SELECT tiene c.client_name, c.executive → el GROUP BY DEBE tener c.id, c.client_name, c.executive. " .
             "Puedes agrupar por c.executive (no por el alias 'ejecutiva') y mostrar el alias solo en el SELECT. " .
             "NUNCA omitas columnas del SELECT en el GROUP BY aunque parezcan redundantes con el id. " .
+            "⚠ CRÍTICO ALIAS EN GROUP BY / ORDER BY: en MariaDB los alias definidos en el SELECT NO están disponibles en GROUP BY ni en ORDER BY. " .
+            "Si usas CASE WHEN ... END AS tipo_orden en el SELECT, el GROUP BY NO puede usar 'tipo_orden' — dará 'Unknown column'. " .
+            "PATRÓN CORRECTO: envuelve la query en una subquery y agrupa por el alias en la capa externa: " .
+            "SELECT tipo_orden, COUNT(...), SUM(...) FROM (SELECT ..., CASE WHEN ... END AS tipo_orden FROM ...) base GROUP BY tipo_orden ORDER BY valor_usd DESC. " .
+            "O repite la expresión CASE completa en el GROUP BY (evitar si es larga). " .
             "⚠ PROHIBIDO: subquery correlacionada en SELECT cuando hay GROUP BY — SIEMPRE da error ONLY_FULL_GROUP_BY en MariaDB. " .
             "PATRÓN OBLIGATORIO para primer despacho por OC: usa JOIN con subquery pre-calculada: " .
             "JOIN (SELECT order_id, MIN(dispatch_date) AS first_dispatch FROM partials WHERE type='real' AND deleted_at IS NULL GROUP BY order_id) fd ON fd.order_id = po.id — luego usa fd.first_dispatch en el SELECT/HAVING. " .
@@ -539,6 +616,49 @@ class MonthlyReportController extends Controller
             return $limitResponse;
         }
 
+        // === DEEPSEEK PATH ===
+        if (str_starts_with($model, 'deepseek')) {
+            // Reconstruir historial completo desde la sesión (DeepSeek es stateless, sin thread_id)
+            $apiMessages = [];
+            if ($session) {
+                foreach ($session->messages as $msg) {
+                    $role = $msg['role'] === 'assistant' ? 'assistant' : 'user';
+                    $apiMessages[] = ['role' => $role, 'content' => $msg['content']];
+                }
+            }
+            // Agregar el nuevo mensaje del usuario (el contexto inicial ya está en la primera entrada del historial)
+            $apiMessages[] = ['role' => 'user', 'content' => $request->message];
+
+            try {
+                $result = $this->callDeepSeekApi($apiMessages);
+
+                if (!$result['success']) {
+                    return response()->json(['success' => false, 'message' => 'Error en DeepSeek'], 500);
+                }
+
+                $aiMessage = $result['content'];
+                $now       = now()->toDateTimeString();
+
+                if ($session) {
+                    $messages   = $session->messages ?? [];
+                    $messages[] = ['role' => 'user',      'content' => $request->message, 'time' => $now];
+                    $messages[] = ['role' => 'assistant', 'content' => $aiMessage,         'time' => $now];
+                    $session->update(['messages' => $messages]);
+                }
+
+                return response()->json([
+                    'success'   => true,
+                    'message'   => $aiMessage,
+                    'thread_id' => $request->thread_id,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('[Chat][DeepSeek] chatMessage exception: ' . $e->getMessage());
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+            }
+        }
+
+        // === NODE PROXY PATH (servidor Node intermedio) ===
+        /*
         try {
             $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
                 ->timeout(120)
@@ -556,7 +676,6 @@ class MonthlyReportController extends Controller
             $aiMessage = trim($resp->json('choices.0.message.content', ''));
             $now       = now()->toDateTimeString();
 
-            // Persistir mensajes en la sesión si se proveyó session_id
             if ($session) {
                 $messages   = $session->messages ?? [];
                 $messages[] = ['role' => 'user',      'content' => $request->message, 'time' => $now];
@@ -573,6 +692,9 @@ class MonthlyReportController extends Controller
             Log::error('[Chat] chatMessage exception: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
+        */
+
+        return response()->json(['success' => false, 'message' => 'Modelo no soportado en este endpoint'], 422);
     }
 
     /**
@@ -634,6 +756,122 @@ class MonthlyReportController extends Controller
     {
         ChatSession::where('user_id', auth()->id())->delete();
         return response()->json(['success' => true]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DeepSeek API (llamada directa, sin servidor Node intermedio)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Envía una conversación a DeepSeek y retorna la respuesta.
+     * El primer mensaje (prompt inicial con schema SQL) se beneficia del prefix caching
+     * automático de DeepSeek cuando el prefijo es idéntico entre llamadas.
+     *
+     * @param  array<int, array{role: string, content: string}>  $messages
+     * @return array{success: bool, content: string}
+     */
+    private function callDeepSeekApi(array $messages): array
+    {
+        $key = config('custom.deepseek_api_key');
+
+        $resp = Http::withHeaders([
+                'Authorization' => "Bearer {$key}",
+                'Content-Type'  => 'application/json',
+            ])
+            ->timeout(120)
+            ->post('https://api.deepseek.com/chat/completions', [
+                'model'    => 'deepseek-chat',
+                'messages' => $messages,
+            ]);
+
+        if (!$resp->successful()) {
+            Log::error('[Chat][DeepSeek] Error API: ' . $resp->body());
+            return ['success' => false, 'content' => ''];
+        }
+
+        // Loguear stats de cache para verificar que el prefix caching está funcionando.
+        // DeepSeek cachea automáticamente el prefijo cuando el primer mensaje no cambia.
+        $usage = $resp->json('usage', []);
+        Log::info('[Chat][DeepSeek] Tokens — prompt: ' . ($usage['prompt_tokens'] ?? '?')
+            . ', completion: ' . ($usage['completion_tokens'] ?? '?')
+            . ', cache_hit: ' . ($usage['prompt_cache_hit_tokens'] ?? 0)
+            . ', cache_miss: ' . ($usage['prompt_cache_miss_tokens'] ?? 0));
+
+        return [
+            'success' => true,
+            'content' => $this->parseStructuredResponse(trim($resp->json('choices.0.message.content', ''))),
+        ];
+    }
+
+    /**
+     * Normaliza la respuesta de la IA para garantizar que los bloques SQL
+     * estén siempre en el formato que espera el frontend (<pre><code class="language-sql">).
+     *
+     * Convierte:
+     *   ```sql\nSELECT...\n```  →  <pre><code class="language-sql">SELECT...</code></pre>
+     *   ```\nSELECT...\n```     →  igual (bloques genéricos con contenido SQL)
+     *   SQL plano sin wrapper   →  wrapeado si empieza con SELECT/WITH/--
+     */
+    /**
+     * Parsea la respuesta estructurada JSON de la IA y la convierte al HTML
+     * que espera el frontend (con <pre><code class="language-sql"> para las queries).
+     *
+     * Formato esperado de la IA:
+     *   {"html":"<p>...</p>","sql":"SELECT ...","showing":"campo1","available":"campo2"}
+     *
+     * Fallbacks en orden si el JSON no es válido:
+     *   1. Quitar wrapper ```json...``` y reintentar
+     *   2. Detectar bloques ```sql...``` en la respuesta
+     *   3. Detectar SQL plano (empieza con SELECT/WITH/--)
+     *   4. Devolver el contenido tal cual
+     */
+    private function parseStructuredResponse(string $content): string
+    {
+        $json = trim($content);
+
+        // Quitar wrapper ```json...``` si la IA lo puso igual
+        if (preg_match('/^```(?:json)?\s*\r?\n([\s\S]*?)\r?\n?```$/i', $json, $m)) {
+            $json = trim($m[1]);
+        }
+
+        $data = json_decode($json, true);
+
+        if (is_array($data)) {
+            $html = trim($data['html'] ?? '');
+            $sql  = isset($data['sql']) && $data['sql'] !== null ? trim($data['sql']) : null;
+
+            $result = $html;
+
+            if ($sql) {
+                $result .= '<pre><code class="language-sql">' . $sql . '</code></pre>';
+            }
+
+            if (!empty($data['showing'])) {
+                $result .= '<p><small>Mostrando: <strong>' . htmlspecialchars($data['showing'], ENT_QUOTES) . '</strong>.</small></p>';
+            }
+            if (!empty($data['available'])) {
+                $result .= '<p><small>Puedes pedirme que también muestre: ' . htmlspecialchars($data['available'], ENT_QUOTES) . '.</small></p>';
+            }
+
+            return $result;
+        }
+
+        // Fallback 1: bloques markdown ```sql...```
+        $content = preg_replace_callback(
+            '/```(?:sql)?\s*\r?\n([\s\S]*?)\r?\n?```/i',
+            function ($m) {
+                $sql = trim($m[1]);
+                return $sql ? '<pre><code class="language-sql">' . $sql . '</code></pre>' : '';
+            },
+            $content
+        );
+
+        // Fallback 2: respuesta que ES directamente SQL plano
+        if (!str_contains($content, '<') && preg_match('/^\s*(SELECT|WITH\s|--)/i', $content)) {
+            $content = '<pre><code class="language-sql">' . trim($content) . '</code></pre>';
+        }
+
+        return $content;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -723,8 +961,9 @@ class MonthlyReportController extends Controller
 
         $sql = trim($request->input('sql'));
 
-        // Solo SELECT y CTEs (WITH ... SELECT) permitidos
-        if (!preg_match('/^\s*(SELECT|WITH)\s/i', $sql)) {
+        // Solo SELECT y CTEs (WITH ... SELECT) permitidos.
+        // Se permiten comentarios SQL (-- ...) antes de la query.
+        if (!preg_match('/^\s*(--[^\n]*\n\s*)*(SELECT|WITH)\s/is', $sql)) {
             return response()->json(['success' => false, 'message' => 'Solo se permiten consultas SELECT'], 422);
         }
 
@@ -1262,7 +1501,11 @@ PROMPT;
                 SUM((CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity) as value_usd,
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
-                    COALESCE(NULLIF(pt.trm,0), NULLIF(po.trm,0), NULLIF(td.value,0), 4000)
+                    (CASE
+                        WHEN pt.trm >= 3400 THEN pt.trm
+                        WHEN td.value IS NOT NULL THEN td.value
+                        ELSE 4000
+                    END)
                 ) as value_cop
             ")
             ->first();
@@ -1339,11 +1582,11 @@ PROMPT;
             if (!$isSample) {
                 $price = ($first->order_product_price > 0) ? $first->order_product_price : ($first->product_price ?? 0);
                 $trm   = 4000.0;
-                if ($realPartial && !empty($partialTrm) && $partialTrm > 3800) {
+                if ($realPartial && !empty($partialTrm) && $partialTrm >= 3400) {
                     $trm = (float) $partialTrm;
                 } elseif (isset($trmData[$plannedDate])) {
                     $trm = (float) $trmData[$plannedDate];
-                } elseif (!empty($first->order_trm) && $first->order_trm > 3800) {
+                } elseif (!empty($first->order_trm) && $first->order_trm >= 3400) {
                     $trm = (float) $first->order_trm;
                 }
 
@@ -1971,6 +2214,191 @@ PROMPT;
         }
 
         return $md;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PROMPT V2 — versión comprimida (~40% menos tokens)
+    // Para activar: en chatStartV2, reemplazar $prompt = ... por
+    //   $prompt = $this->buildChatPromptV2($startDate, $endDate, $trmHoyStr);
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Prompt optimizado (~8-9k tokens vs ~14k del v1).
+     * Elimina redundancias entre secciones y comprime prosa en reglas directas.
+     */
+    private function buildChatPromptV2(string $startDate, string $endDate, string $trmHoyStr): string
+    {
+        return
+            "Eres un asistente de análisis comercial para Finearom (Colombia, fragancias/materias primas).\n" .
+            "PERÍODO: {$startDate} al {$endDate}. TRM hoy: {$trmHoyStr} COP/USD.\n\n" .
+
+            "## ROLES\n" .
+            "- **FRANCY** (pedidos): crea OC → estado pending. Campos: cliente, productos, kg, precio USD/kg, TRM, fecha entrega, is_muestra, is_new_win.\n" .
+            "- **MARLON** (logística): revisa pending → pone observaciones + fechas estimadas (partials type=temporal) → mueve a processing. OC processing >7 días sin despacho = REZAGADA.\n" .
+            "- **ALEXA** (despacho): registra despachos reales → crea partials type=real (dispatch_date, invoice_number, tracking_number, transporter, trm, kg) → OC pasa a parcial_status (parcial) o completed (todo).\n" .
+            "- **EJECUTIVAS**: Monica Castano, Juliana Pardo, Claudia Cueter, Maria Ortega, Camila Quintero, Daniela Aristizabal. Campo: clients.executive (email). Para mostrar: REPLACE(SUBSTRING_INDEX(executive,'@',1),'.',' ').\n\n" .
+
+            "## FLUJO OC\n" .
+            "pending (Francy) → processing (Marlon) → parcial_status|completed (Alexa) | cancelled (Francy/Marlon solo)\n\n" .
+
+            "## REGLAS CRÍTICAS DE FILTROS\n" .
+            "1. **Status vs fecha creación**: WHERE po.status IN ('pending','processing','parcial_status') → NUNCA agregar order_creation_date BETWEEN. Solo agregar BETWEEN cuando el usuario pide órdenes *creadas* en un período.\n" .
+            "2. **Despachos del período**: SIEMPRE filtrar par.type='real' AND par.dispatch_date BETWEEN fechas AND par.deleted_at IS NULL AND pop.muestra=0.\n" .
+            "3. **Soft delete partials**: SIEMPRE par.deleted_at IS NULL. Alexa borra+recrea partials al actualizar; sin este filtro hay duplicados.\n" .
+            "4. **Muestras**: excluir con pop.muestra=0 y po.is_muestra=0 en cálculos de valor/kilos.\n" .
+            "5. **Cartera snapshot**: SIEMPRE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera). Sin esto traes histórico.\n" .
+            "6. **TRM cascada**: COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date<=CURDATE() ORDER BY date DESC LIMIT 1), 4000). El +0 es necesario (trm es string en MariaDB).\n" .
+            "7. **Precio efectivo**: COALESCE(NULLIF(pop.price,0), p.price, 0). Siempre requiere JOIN products p.\n" .
+            "8. **Kilos pedidos vs despachados**: pop.quantity=pedido, par.quantity=real despachado. NUNCA mezclar roles.\n" .
+            "9. **Cartera saldos**: saldo_contable/saldo_vencido son strings con punto decimal. CAST(saldo_contable AS DECIMAL(15,2)). NUNCA REPLACE.\n" .
+            "10. **Ejecutiva en cartera**: filtrar por clients.executive (JOIN por nit), NO por cartera.vendedor (es el de SIIGO, puede diferir).\n\n" .
+
+            "## MÉTRICAS — CÓMO CALCULAR\n" .
+            "- **Despachado período**: part. type=real, dispatch_date BETWEEN, deleted_at IS NULL, muestra=0.\n" .
+            "- **Creado período**: order_creation_date BETWEEN en purchase_orders (sin tocar partials).\n" .
+            "- **Stats ejecutiva**: partir SIEMPRE desde partials con dispatch_date en período → JOIN pop, po, clients. GROUP BY c.executive. Incluye OCs de cualquier mes.\n" .
+            "- **Fill rate**: SUM(par.quantity)/SUM(pop.quantity)*100 (en kg). Base: partials reales del período.\n" .
+            "- **Cumplimiento USD**: despachado_usd/total_oc_usd*100. despachado=par.qty*precio, total_oc=pop.qty*precio.\n" .
+            "- **Valor COP**: qty * precio * TRM_cascada.\n" .
+            "- **Pipeline**: SUM partials type=temporal, deleted_at IS NULL (valor planeado sin despachar).\n" .
+            "- **New win OC**: COUNT DISTINCT po.id WHERE is_new_win=1 AND order_creation_date BETWEEN.\n" .
+            "- **Rezagadas**: status=processing AND order_creation_date <= DATE_SUB(CURDATE(), INTERVAL 7 DAY).\n" .
+            "- **Lead time real**: DATEDIFF(MIN(par.dispatch_date type=real), po.order_creation_date) por OC.\n" .
+            "- **On-time por línea**: par.dispatch_date <= pop.delivery_date. NUNCA usar po.required_delivery_date ni pop.required_delivery_date (no existe en pop).\n" .
+            "- **Deuda neta cartera**: SUM(saldo_contable) - SUM(recaudos.valor_cancelado) por nit. JOIN recaudos ON numero_factura=cartera.documento.\n" .
+            "- **Kilos pendientes en parcial_status**: SUM(pop.quantity) - SUM(par.quantity type=real, deleted_at IS NULL).\n\n" .
+
+            "## TÉRMINOS ESPAÑOL → BD\n" .
+            "pendiente=pending | en proceso/procesando=processing | parcial=parcial_status | completada/despachada=completed | cancelada=cancelled\n\n" .
+
+            "## MAPEO CARTERA\n" .
+            "dias>0=por vencer | dias<0=vencida hace ABS(dias) días. Para mora: ABS(ca.dias) WHERE dias<0.\n" .
+            "catera_type: nacional | internacional.\n\n" .
+
+            "## ESQUEMA BD\n" . $this->getDbSchemaCompact($startDate, $endDate) . "\n\n" .
+
+            "## FORMATO DE RESPUESTA — OBLIGATORIO\n" .
+            "Responde SIEMPRE con un objeto JSON válido, sin texto antes ni después, sin wrapper de backticks.\n" .
+            "Estructura: {\"html\":\"<p>explicación</p>\",\"sql\":\"SELECT...\",\"showing\":\"campo1, campo2\",\"available\":\"campo3\"}\n" .
+            "- \"html\": HTML limpio. Sin markdown, sin LaTeX.\n" .
+            "- \"sql\": query completa sin escapar. null si no hay query.\n" .
+            "- \"showing\"/\"available\": nombres en español legibles. Omitir si sql=null.\n" .
+            "- GROUP BY: todos los campos no-agregados del SELECT en GROUP BY. Agrupa por c.executive (no alias).\n" .
+            "- Nunca id en SELECT. Siempre NIT junto al nombre del cliente.\n" .
+            "- Aliases: client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, fill_rate_pct, fecha_despacho, numero_oc.\n" .
+            "- Bienvenida: html con saludo + período + 3-4 ejemplos. sql=null.";
+    }
+
+    /**
+     * Esquema comprimido para prompt v2. Mantiene todos los campos críticos,
+     * elimina comentarios redundantes con las reglas ya explicadas en el prompt.
+     */
+    private function getDbSchemaCompact(string $startDate, string $endDate): string
+    {
+        return <<<SCHEMA
+### clients
+id, client_name, nit(UNIQUE), executive(email), status(active|inactive), city, operation_type(nacional|extranjero)
+client_type: AA>A>B>C (prioridad/lead time) | pareto/balance/none (portafolio legacy)
+lead_time(INT días), payment_method(1=Contado,2=Crédito), payment_day, credit_term
+purchase_frequency, estimated_monthly_quantity, iva, retefuente, reteiva, ica
+portfolio_contact_email, dispatch_confirmation_email, purchasing_contact_email, logistics_contact_email
+
+### branch_offices
+id, client_id→clients.id, name, nit, delivery_address, delivery_city
+
+### purchase_orders
+id, client_id→clients.id, order_consecutive(ej:2258-4500302325)
+status: pending|processing|parcial_status|completed|cancelled
+order_creation_date(date), dispatch_date(date—estimado Marlon), required_delivery_date(date—solicitado cliente)
+trm, is_new_win(0/1), is_muestra(0/1), observations, created_at
+
+### purchase_order_product
+id, purchase_order_id→purchase_orders.id, product_id→products.id
+quantity(kg pedidos), price(USD/kg—puede ser NULL en OCs antiguas), new_win(0/1), muestra(0/1)
+delivery_date(date—fecha acordada por línea, usar para on-time), branch_office_id→branch_offices.id
+cierre_cartera(DATETIME), status
+⚠ required_delivery_date NO existe en esta tabla. On-time = par.dispatch_date <= pop.delivery_date.
+
+### products
+id, code, product_name, price(USD/kg catálogo fallback), client_id→clients.id
+categories(JSON array, ej:["Floral","Amaderado"])
+Filtrar por categoría: JSON_SEARCH(LOWER(p.categories),'one','%floral%') IS NOT NULL
+⚠ productos son POR CLIENTE. Precio negociado → pop.price. Precio efectivo → COALESCE(NULLIF(pop.price,0),p.price,0)
+
+### product_price_history
+id, product_id→products.id, price(DECIMAL USD/kg), effective_date, created_by→users.id
+
+### partials (despachos)
+id, order_id→purchase_orders.id, product_order_id→purchase_order_product.id, product_id→products.id
+quantity(kg), type(temporal=estimado|real=despachado), dispatch_date(date)
+trm, invoice_number, pdf_invoice, tracking_number, transporter, deleted_at(soft delete)
+⚠ Alexa borra+recrea todos los partials al actualizar → SIEMPRE deleted_at IS NULL
+
+### cartera (snapshot SIIGO)
+id, nit, nombre_empresa, fecha_cartera(date snapshot—filtrar MAX)
+documento(VARCHAR nro.factura—join recaudos.numero_factura), fecha(emisión), vence(vencimiento)
+dias(INT: >0=por vencer, <0=vencida), saldo_contable(STRING COP), saldo_vencido(STRING COP)
+vendedor, nombre_vendedor(SIIGO—puede diferir de clients.executive), catera_type(nacional|internacional|NULL)
+ciudad, cuenta, descripcion_cuenta
+
+### recaudos (pagos COP)
+id, nit(BIGINT), cliente, fecha_recaudo(DATETIME), numero_factura(VARCHAR)
+valor_cancelado(DECIMAL COP), fecha_vencimiento(DATETIME), dias(mora al pagar), numero_recibo
+
+### trm_daily
+id, date, value(DECIMAL COP/USD), is_weekend(0/1), is_holiday(0/1)
+
+### order_statistics (snapshot diario pre-calculado—usar para tendencias)
+date(UNIQUE), total_orders_created, orders_pending, orders_processing, orders_completed, orders_parcial_status, orders_new_win
+total_orders_value_usd/cop, dispatched_orders_count, commercial_dispatched_value_usd/cop
+orders_commercial/sample/mixed, pending_dispatch_value_usd/cop, planned_dispatch_value_usd/cop, planned_orders_count
+dispatch_fulfillment_rate_usd(%), avg_days_order_to_first_dispatch
+unique_clients_with_orders/dispatches, extended_stats(JSON)
+
+## RELACIONES
+clients→purchase_orders (client_id) | purchase_orders→purchase_order_product (purchase_order_id)
+purchase_order_product→products (product_id) | purchase_order_product→branch_offices (branch_office_id)
+purchase_orders→partials (order_id) | partials→purchase_order_product (product_order_id)
+clients→branch_offices (client_id) | clients.nit↔cartera.nit | clients.nit↔recaudos.nit
+cartera.documento↔recaudos.numero_factura | products→product_price_history (product_id)
+
+## QUERIES DE REFERENCIA
+
+Stats ejecutiva (base=partials período):
+SELECT REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') ejecutiva,
+  SUM(pop.quantity) kilos_pedidos, SUM(par.quantity) kilos_despachados,
+  ROUND(SUM(par.quantity*COALESCE(NULLIF(pop.price,0),p.price,0)),2) despachado_usd,
+  ROUND(SUM(par.quantity*COALESCE(NULLIF(pop.price,0),p.price,0))/NULLIF(SUM(pop.quantity*COALESCE(NULLIF(pop.price,0),p.price,0)),0)*100,1) cumplimiento_pct
+FROM partials par
+JOIN purchase_order_product pop ON par.product_order_id=pop.id AND pop.muestra=0
+JOIN products p ON pop.product_id=p.id
+JOIN purchase_orders po ON par.order_id=po.id
+JOIN clients c ON po.client_id=c.id
+WHERE par.type='real' AND par.dispatch_date BETWEEN '{$startDate}' AND '{$endDate}' AND par.deleted_at IS NULL
+GROUP BY c.executive ORDER BY despachado_usd DESC;
+
+Cartera agrupada por cliente:
+SELECT ca.nit, ca.nombre_empresa,
+  SUM(CAST(ca.saldo_contable AS DECIMAL(15,2))) saldo_cop,
+  SUM(CAST(ca.saldo_vencido AS DECIMAL(15,2))) vencido_cop
+FROM cartera ca WHERE ca.fecha_cartera=(SELECT MAX(fecha_cartera) FROM cartera)
+GROUP BY ca.nit, ca.nombre_empresa ORDER BY saldo_cop DESC;
+
+Facturas vencidas:
+SELECT nit, nombre_empresa, documento, ABS(dias) dias_mora, CAST(saldo_contable AS DECIMAL(15,2)) saldo_cop
+FROM cartera WHERE fecha_cartera=(SELECT MAX(fecha_cartera) FROM cartera) AND dias<0 ORDER BY dias ASC;
+
+Deuda neta (saldo menos pagos):
+SELECT ca.nit, ca.nombre_empresa,
+  GREATEST(SUM(CAST(ca.saldo_contable AS DECIMAL(15,2)))-COALESCE(SUM(r.valor_cancelado),0),0) deuda_neta
+FROM cartera ca LEFT JOIN recaudos r ON r.numero_factura=ca.documento AND r.nit=ca.nit
+WHERE ca.fecha_cartera=(SELECT MAX(fecha_cartera) FROM cartera)
+GROUP BY ca.nit, ca.nombre_empresa ORDER BY deuda_neta DESC;
+
+Evolución diaria (snapshot—eficiente):
+SELECT date, commercial_dispatched_value_usd, dispatched_orders_count, dispatch_fulfillment_rate_usd fill_rate_pct
+FROM order_statistics WHERE date BETWEEN '{$startDate}' AND '{$endDate}' ORDER BY date;
+SCHEMA;
     }
 
     private function getDbSchema(): string

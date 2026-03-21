@@ -24,5 +24,10 @@ class TrmDaily extends Model
         'is_weekend' => 'boolean',
         'is_holiday' => 'boolean',
     ];
+
+    public static function existsForDate(string $date): bool
+    {
+        return static::where('date', $date)->exists();
+    }
 }
 
