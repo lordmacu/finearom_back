@@ -1617,7 +1617,11 @@ PROMPT;
                 SUM(CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END * pop.quantity) as value_usd,
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
-                    COALESCE(NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
+                    (CASE
+                        WHEN po.trm >= 3400 THEN po.trm
+                        WHEN td.value IS NOT NULL THEN td.value
+                        ELSE 4000
+                    END)
                 ) as value_cop
             ")
             ->first();

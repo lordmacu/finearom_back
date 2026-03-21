@@ -1515,7 +1515,11 @@ class DashboardController extends Controller
                 ) as value_usd,
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
-                    COALESCE(td.value, 4000)
+                    (CASE
+                        WHEN po.trm >= 3400 THEN po.trm
+                        WHEN td.value IS NOT NULL THEN td.value
+                        ELSE 4000
+                    END)
                 ) as value_cop
             ")
             ->groupBy('c.executive')
@@ -1588,7 +1592,15 @@ class DashboardController extends Controller
 
     /**
      * Tiempo de entrega por tipo de cliente (AA, A, B, C).
-     * Compara: fecha ingreso OC → fecha entrega solicitada → fecha real de despacho.
+     *
+     * Fechas del flujo real:
+     *  - Francy pone delivery_date por producto en purchase_order_product
+     *  - Marlon puede ajustar con partials temporales
+     *  - Alexa confirma con partials reales
+     *
+     * Usamos MIN(pop.delivery_date) por orden como "fecha solicitada por Francy"
+     * y MIN(real partial dispatch_date) como "fecha real de Alexa".
+     * % a tiempo = primer despacho real <= fecha solicitada por Francy.
      */
     private function calculateLeadTimeByClientType(string $startDate, string $endDate): array
     {
@@ -1598,25 +1610,31 @@ class DashboardController extends Controller
                     c.client_type,
                     COUNT(DISTINCT po.id)                                                          AS total_orders,
                     COUNT(DISTINCT CASE WHEN p.first_dispatch IS NOT NULL THEN po.id END)          AS dispatched_orders,
-                    ROUND(AVG(CASE WHEN po.required_delivery_date IS NOT NULL
-                        THEN DATEDIFF(po.required_delivery_date, po.order_creation_date) END), 1)  AS avg_days_requested,
+                    ROUND(AVG(CASE WHEN od.min_delivery IS NOT NULL
+                        THEN DATEDIFF(od.min_delivery, po.order_creation_date) END), 1)            AS avg_days_requested,
                     ROUND(AVG(CASE WHEN p.first_dispatch IS NOT NULL
                         THEN DATEDIFF(p.first_dispatch, po.order_creation_date) END), 1)           AS avg_days_real,
                     ROUND(
                         100.0 * SUM(CASE WHEN p.first_dispatch IS NOT NULL
-                                          AND po.required_delivery_date IS NOT NULL
-                                          AND p.first_dispatch <= po.required_delivery_date THEN 1 ELSE 0 END)
+                                          AND od.min_delivery IS NOT NULL
+                                          AND p.first_dispatch <= od.min_delivery THEN 1 ELSE 0 END)
                         / NULLIF(COUNT(CASE WHEN p.first_dispatch IS NOT NULL
-                                            AND po.required_delivery_date IS NOT NULL THEN 1 END), 0)
+                                            AND od.min_delivery IS NOT NULL THEN 1 END), 0)
                     , 1)                                                                           AS on_time_pct
                 FROM purchase_orders po
                 JOIN clients c ON po.client_id = c.id
                 LEFT JOIN (
                     SELECT order_id, MIN(dispatch_date) AS first_dispatch
                     FROM partials
-                    WHERE type = 'real' AND dispatch_date IS NOT NULL
+                    WHERE type = 'real' AND dispatch_date IS NOT NULL AND deleted_at IS NULL
                     GROUP BY order_id
                 ) p ON p.order_id = po.id
+                LEFT JOIN (
+                    SELECT purchase_order_id, MIN(delivery_date) AS min_delivery
+                    FROM purchase_order_product
+                    WHERE delivery_date IS NOT NULL
+                    GROUP BY purchase_order_id
+                ) od ON od.purchase_order_id = po.id
                 WHERE po.order_creation_date BETWEEN ? AND ?
                   AND c.client_type IN ('AA', 'A', 'B', 'C')
                   AND (po.is_muestra = 0 OR po.is_muestra IS NULL)
