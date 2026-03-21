@@ -13,6 +13,7 @@ use App\Services\Cartera\CarteraPeriod;
 use App\Services\Cartera\CarteraImportService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class CarteraController extends Controller
@@ -29,6 +30,7 @@ class CarteraController extends Controller
             'executives',
             'customers',
             'invoiceHistory',
+            'weeklyProjection',
         ]);
 
         $this->middleware('can:cartera import')->only(['import']);
@@ -101,6 +103,23 @@ class CarteraController extends Controller
                 'documento' => $documento,
                 'total' => count($rows),
             ],
+        ]);
+    }
+
+    /**
+     * Proyección semanal de cobro: 3 semanas calendario desde hoy.
+     *
+     * Devuelve clientes nacionales agrupados con columnas por semana,
+     * clientes exterior como lista plana, sección crítica (vencidos) y totales.
+     */
+    public function weeklyProjection(Request $request): JsonResponse
+    {
+        $filters = $this->carteraQuery->filtersFromParams($request->query());
+        $data = $this->carteraQuery->weeklyProjection($filters);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $data,
         ]);
     }
 

@@ -328,3 +328,78 @@ Agrega a `email_dispatch_queues` los NITs seleccionados para ser enviados por un
 **type_queue permitido**:
 - `balance_notification` (Enviar Cartera)
 - `order_block` (Enviar Bloqueo)
+---
+
+## 10) Proyeccion semanal de cobro
+
+Devuelve la proyeccion de cobro para las proximas 3 semanas calendario desde hoy (zona America/Bogota).
+
+Para cada factura del ultimo snapshot con saldo > 0, la fecha esperada de pago se calcula como
+`vence + 15 dias` y se clasifica en la semana correspondiente.
+
+**Endpoint**: `GET /api/cartera/weekly-projection`
+
+**Permiso requerido**: `cartera view`
+
+**Query params**: ninguno requerido (los filtros de ejecutiva/cliente no aplican a esta vista)
+
+**Respuesta Exitosa** (200 OK):
+```json
+{
+  "success": true,
+  "data": {
+    "snapshot_date": "2026-03-21",
+    "weeks": [
+      { "label": "16 - 22 MAR", "start": "2026-03-16", "end": "2026-03-22" },
+      { "label": "23 - 29 MAR", "start": "2026-03-23", "end": "2026-03-29" },
+      { "label": "30 MAR - 5 ABR", "start": "2026-03-30", "end": "2026-04-05" }
+    ],
+    "nacional": [
+      {
+        "nit": "900123456",
+        "client_name": "NEROLI S.A.S.",
+        "catera_type": "nacional",
+        "weeks": [
+          { "dias": -2, "saldo": 46691802, "facturas": 1 },
+          null,
+          null
+        ],
+        "total": 46691802
+      }
+    ],
+    "exterior": [
+      {
+        "nit": "EXT001",
+        "client_name": "CLIENTE EXTERIOR",
+        "dias": 12,
+        "saldo": 30242,
+        "week_index": 0
+      }
+    ],
+    "critical": [
+      {
+        "nit": "900999888",
+        "client_name": "CLIENTE EN MORA",
+        "catera_type": "nacional",
+        "dias": -95,
+        "saldo": 35897844,
+        "facturas": 2
+      }
+    ],
+    "totals": {
+      "nacional_by_week": [146556455, 20750516, 71065500],
+      "exterior": 93757,
+      "critical": 180000000
+    }
+  }
+}
+```
+
+**Notas**:
+- `weeks`: array fijo de 3 elementos — semana actual + proximas 2 (lunes a domingo).
+- `nacional.weeks`: array de 3 posiciones; `null` si el cliente no tiene facturas en esa semana.
+- `exterior`: lista plana con `week_index` (0/1/2) indicando en que semana cae el pago esperado.
+- `critical`: facturas con `dias < 0` (vencidas), agrupadas por NIT, ordenadas por saldo desc.
+  Pueden aparecer clientes que ya estan en alguna semana (son independientes).
+- `totals.nacional_by_week`: suma de saldos nacionales por semana (indices 0/1/2).
+- Los saldos son numeros enteros (redondeados a 0 decimales).

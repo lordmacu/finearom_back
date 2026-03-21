@@ -484,6 +484,198 @@ class CarteraQuery
     }
 
     /**
+     * Proyección semanal de cobro: 3 semanas calendario desde hoy (America/Bogota).
+     *
+     * Para cada factura del último snapshot con saldo > 0, calcula la fecha esperada de pago
+     * como vence + 15 días y la ubica en la semana correspondiente.
+     *
+     * - nacional: agrupado por nit, columnas por semana
+     * - exterior: listado plano con week_index
+     * - critical: facturas vencidas (dias < 0) ordenadas por saldo desc
+     *
+     * @param array<string,mixed> $filters  (no se usan filtros de ejecutiva/cliente en esta vista)
+     * @return array<string,mixed>
+     */
+    public function weeklyProjection(array $filters): array
+    {
+        $snapshotDate = $this->latestSnapshotDate(null);
+        $today = Carbon::now('America/Bogota');
+        $monday = $today->copy()->startOfWeek(Carbon::MONDAY);
+
+        // Build 3 week ranges
+        $weekRanges = [];
+        for ($i = 0; $i < 3; $i++) {
+            $start = $monday->copy()->addWeeks($i);
+            $end = $start->copy()->endOfWeek(Carbon::SUNDAY);
+            $weekRanges[] = [
+                'label' => $this->formatWeekLabel($start, $end),
+                'start' => $start->toDateString(),
+                'end'   => $end->toDateString(),
+            ];
+        }
+
+        $window_start = $weekRanges[0]['start'];
+        $window_end   = $weekRanges[2]['end'];
+
+        // All rows in the 3-week window (by expected payment date = vence + 15 days)
+        $rows = DB::table('cartera as car')
+            ->where('car.fecha_cartera', $snapshotDate)
+            ->whereRaw("CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '\$', '') AS DECIMAL(20,2)) > 0")
+            ->whereRaw("DATE_ADD(car.vence, INTERVAL 15 DAY) BETWEEN ? AND ?", [$window_start, $window_end])
+            ->selectRaw("
+                car.nit,
+                car.nombre_empresa,
+                car.catera_type,
+                car.dias,
+                DATE_ADD(car.vence, INTERVAL 15 DAY) as expected_payment,
+                CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '\$', '') AS DECIMAL(20,2)) as saldo
+            ")
+            ->get();
+
+        // Critical: overdue invoices (dias < 0), any expected payment date
+        $criticalRows = DB::table('cartera as car')
+            ->where('car.fecha_cartera', $snapshotDate)
+            ->where('car.dias', '<', 0)
+            ->whereRaw("CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '\$', '') AS DECIMAL(20,2)) > 0")
+            ->selectRaw("
+                car.nit,
+                car.nombre_empresa,
+                car.catera_type,
+                MIN(car.dias) as dias,
+                SUM(CAST(REPLACE(REPLACE(car.saldo_contable, ',', ''), '\$', '') AS DECIMAL(20,2))) as saldo,
+                COUNT(*) as facturas
+            ")
+            ->groupBy('car.nit', 'car.nombre_empresa', 'car.catera_type')
+            ->orderByDesc('saldo')
+            ->get();
+
+        // Group weekly rows by nit + catera_type
+        $byClient = [];
+        foreach ($rows as $row) {
+            $key = $row->nit . '|' . ($row->catera_type ?: 'nacional');
+            if (! isset($byClient[$key])) {
+                $byClient[$key] = [
+                    'nit'         => $row->nit,
+                    'client_name' => $row->nombre_empresa,
+                    'catera_type' => $row->catera_type ?: 'nacional',
+                    'weeks'       => [null, null, null],
+                    'total'       => 0.0,
+                ];
+            }
+
+            // Determine week index
+            $weekIdx = null;
+            for ($i = 0; $i < 3; $i++) {
+                if ($row->expected_payment >= $weekRanges[$i]['start'] && $row->expected_payment <= $weekRanges[$i]['end']) {
+                    $weekIdx = $i;
+                    break;
+                }
+            }
+
+            if ($weekIdx !== null) {
+                if ($byClient[$key]['weeks'][$weekIdx] === null) {
+                    $byClient[$key]['weeks'][$weekIdx] = ['dias' => (int) $row->dias, 'saldo' => 0.0, 'facturas' => 0];
+                }
+                $byClient[$key]['weeks'][$weekIdx]['saldo'] += (float) $row->saldo;
+                $byClient[$key]['weeks'][$weekIdx]['facturas']++;
+                // Keep the most representative dias (closest to 0 or most negative)
+                $byClient[$key]['weeks'][$weekIdx]['dias'] = (int) $row->dias;
+                $byClient[$key]['total'] += (float) $row->saldo;
+            }
+        }
+
+        // Round saldos
+        foreach ($byClient as &$client) {
+            $client['total'] = round($client['total'], 0);
+            foreach ($client['weeks'] as &$week) {
+                if ($week !== null) {
+                    $week['saldo'] = round($week['saldo'], 0);
+                }
+            }
+        }
+        unset($client, $week);
+
+        // Split nacional / exterior and sort by total desc
+        $nacional = collect($byClient)
+            ->filter(fn ($c) => $c['catera_type'] !== 'internacional')
+            ->sortByDesc('total')
+            ->values()
+            ->all();
+
+        $exterior = collect($byClient)
+            ->filter(fn ($c) => $c['catera_type'] === 'internacional')
+            ->sortByDesc('total')
+            ->map(function ($c) use ($weekRanges) {
+                // Flatten exterior: find the first non-null week
+                $weekIndex = null;
+                $dias = 0;
+                $saldo = 0.0;
+                for ($i = 0; $i < 3; $i++) {
+                    if ($c['weeks'][$i] !== null) {
+                        $weekIndex = $i;
+                        $dias = $c['weeks'][$i]['dias'];
+                        $saldo = $c['weeks'][$i]['saldo'];
+                        break;
+                    }
+                }
+                return [
+                    'nit'         => $c['nit'],
+                    'client_name' => $c['client_name'],
+                    'dias'        => $dias,
+                    'saldo'       => $saldo,
+                    'week_index'  => $weekIndex,
+                ];
+            })
+            ->values()
+            ->all();
+
+        // Totals by week for nacional
+        $nacionalByWeek = [0.0, 0.0, 0.0];
+        foreach ($nacional as $client) {
+            for ($i = 0; $i < 3; $i++) {
+                if ($client['weeks'][$i] !== null) {
+                    $nacionalByWeek[$i] += $client['weeks'][$i]['saldo'];
+                }
+            }
+        }
+
+        $totalExterior = collect($exterior)->sum('saldo');
+        $totalCritical = $criticalRows->sum('saldo');
+
+        return [
+            'snapshot_date' => $snapshotDate,
+            'weeks'         => $weekRanges,
+            'nacional'      => $nacional,
+            'exterior'      => $exterior,
+            'critical'      => $criticalRows->map(fn ($r) => [
+                'nit'         => $r->nit,
+                'client_name' => $r->nombre_empresa,
+                'catera_type' => $r->catera_type ?: 'nacional',
+                'dias'        => (int) $r->dias,
+                'saldo'       => round((float) $r->saldo, 0),
+                'facturas'    => (int) $r->facturas,
+            ])->values()->all(),
+            'totals' => [
+                'nacional_by_week' => array_map(fn ($v) => round($v, 0), $nacionalByWeek),
+                'exterior'         => round((float) $totalExterior, 0),
+                'critical'         => round((float) $totalCritical, 0),
+            ],
+        ];
+    }
+
+    /// Formatea el label de una semana calendario en español abreviado.
+    /// Si inicio y fin son del mismo mes: "16 - 22 MAR"
+    /// Si cruzan mes: "30 MAR - 5 ABR"
+    private function formatWeekLabel(Carbon $start, Carbon $end): string
+    {
+        $months = ['', 'ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+        if ($start->month === $end->month) {
+            return $start->day . ' - ' . $end->day . ' ' . $months[$start->month];
+        }
+        return $start->day . ' ' . $months[$start->month] . ' - ' . $end->day . ' ' . $months[$end->month];
+    }
+
+    /**
      * @param \Illuminate\Support\Collection<int,object> $rows
      * @return array<int,array<string,mixed>>
      */
