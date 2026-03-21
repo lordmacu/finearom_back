@@ -30,6 +30,7 @@ use App\Http\Controllers\RecaudoImportController;
 use App\Http\Controllers\ProformaController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\IaForecastController;
+use App\Http\Controllers\SalesHistoryController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectFileController;
 use App\Http\Controllers\ProjectWorkflowController;
@@ -263,19 +264,30 @@ Route::middleware('auth:sanctum')->group(function () {
     // Process emails para formularios de órdenes de compra
     Route::get('/process/emails', [ProcessEmailController::class, 'getEmailsByType']);
 
-    // IA Forecast
-    Route::prefix('ia/forecast')->group(function () {
-        Route::get('batch-processing', [IaForecastController::class, 'batchProcessing']);
-        Route::post('analyze-all', [IaForecastController::class, 'analyzeAll']);
-        Route::post('force-restart-all', [IaForecastController::class, 'forceRestartAll']);
-        Route::post('retry-errors', [IaForecastController::class, 'retryErrors']);
-        Route::get('clients', [IaForecastController::class, 'clients']);
-        Route::get('clients/{clientId}/products', [IaForecastController::class, 'products']);
-        Route::get('clients/{clientId}/processing', [IaForecastController::class, 'processing']);
-        Route::post('clients/{clientId}/analyze', [IaForecastController::class, 'analyzeClient']);
-        Route::get('clients/{clientId}/products/{productoId}', [IaForecastController::class, 'show']);
-        Route::post('clients/{clientId}/products/{productoId}/analyze', [IaForecastController::class, 'analyze']);
+    // ============================================================================
+    // HISTORIAL DE VENTAS
+    // ============================================================================
+    Route::prefix('sales-history')->group(function () {
+        Route::get('status', [SalesHistoryController::class, 'status']);
+        Route::get('clients', [SalesHistoryController::class, 'clients']);
+        Route::get('products', [SalesHistoryController::class, 'products']);
+        Route::get('chart', [SalesHistoryController::class, 'chart']);
+        Route::post('import', [SalesHistoryController::class, 'import']);
     });
+
+    // IA Forecast (MVP - comentado, reemplazado por Historial de Ventas)
+    // Route::prefix('ia/forecast')->group(function () {
+    //     Route::get('batch-processing', [IaForecastController::class, 'batchProcessing']);
+    //     Route::post('analyze-all', [IaForecastController::class, 'analyzeAll']);
+    //     Route::post('force-restart-all', [IaForecastController::class, 'forceRestartAll']);
+    //     Route::post('retry-errors', [IaForecastController::class, 'retryErrors']);
+    //     Route::get('clients', [IaForecastController::class, 'clients']);
+    //     Route::get('clients/{clientId}/products', [IaForecastController::class, 'products']);
+    //     Route::get('clients/{clientId}/processing', [IaForecastController::class, 'processing']);
+    //     Route::post('clients/{clientId}/analyze', [IaForecastController::class, 'analyzeClient']);
+    //     Route::get('clients/{clientId}/products/{productoId}', [IaForecastController::class, 'show']);
+    //     Route::post('clients/{clientId}/products/{productoId}/analyze', [IaForecastController::class, 'analyze']);
+    // });
 
     // ============================================================================
     // PROYECTOS
