@@ -3,6 +3,7 @@
 namespace App\Exceptions;
 
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Illuminate\Http\Request;
 use Throwable;
 
 class Handler extends ExceptionHandler
@@ -26,5 +27,18 @@ class Handler extends ExceptionHandler
         $this->reportable(function (Throwable $e) {
             //
         });
+    }
+
+    /**
+     * Forzar respuesta JSON para todas las rutas /api/*
+     * Evita que Laravel devuelva HTML (Whoops) en errores de API.
+     */
+    public function render($request, Throwable $e)
+    {
+        if ($request->is('api/*') || $request->expectsJson()) {
+            $request->headers->set('Accept', 'application/json');
+        }
+
+        return parent::render($request, $e);
     }
 }

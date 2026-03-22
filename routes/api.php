@@ -82,6 +82,9 @@ Route::post('/purchase-order-portal/verify-code', [PurchaseOrderAuthController::
 // Rutas protegidas (requieren autenticación)
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
+
+    // IA — mejora de texto genérica (reutilizable en cualquier módulo)
+    Route::post('/ai/enhance-text', [\App\Http\Controllers\AIController::class, 'enhanceText']);
     Route::get('/user', [AuthController::class, 'user']);
 
     // Google Tasks — OAuth + crear tareas
@@ -162,6 +165,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Configuración del sistema (Admin)
     Route::get('/settings/admin-configuration', [SettingsController::class, 'adminConfiguration']);
     Route::put('/settings/processes', [SettingsController::class, 'updateProcesses']);
+    Route::get('/settings/forecast-email', [\App\Http\Controllers\ForecastEmailConfigController::class, 'show']);
+    Route::put('/settings/forecast-email', [\App\Http\Controllers\ForecastEmailConfigController::class, 'update']);
+    Route::post('/settings/forecast-email/test', [\App\Http\Controllers\ForecastEmailConfigController::class, 'sendTest']);
     Route::put('/settings/template-pedido', [SettingsController::class, 'updateTemplatePedido']);
     Route::get('/settings/backups', [SettingsController::class, 'listBackups']);
     Route::post('/settings/backups', [SettingsController::class, 'createBackup']);
@@ -216,6 +222,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/purchase-orders/export', [PurchaseOrderExportController::class, 'export']);
     Route::get('/purchase-orders/products/export', [PurchaseOrderProductExportController::class, 'export']);
     Route::get('/purchase-orders/get-trm', [PurchaseOrderController::class, 'getTrm']);
+    Route::get('/purchase-orders/forecast-check', [PurchaseOrderController::class, 'forecastCheck']);
     Route::get('/purchase-orders/php-config', [PurchaseOrderController::class, 'getPhpConfig']);
     Route::post('/purchase-orders/import', [PurchaseOrderImportController::class, 'import']);
     Route::post('/purchase-orders', [PurchaseOrderController::class, 'store']);
@@ -272,6 +279,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('clients', [SalesHistoryController::class, 'clients']);
         Route::get('products', [SalesHistoryController::class, 'products']);
         Route::get('chart', [SalesHistoryController::class, 'chart']);
+        Route::get('forecast', [SalesHistoryController::class, 'forecast']);
+        Route::post('manual-forecast', [SalesHistoryController::class, 'saveManualForecast']);
         Route::post('import', [SalesHistoryController::class, 'import']);
     });
 

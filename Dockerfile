@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
     libfreetype6-dev \
     libsodium-dev \
     libcurl4-openssl-dev \
+    python3 \
+    python3-pip \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install \
         pdo_mysql \
@@ -24,6 +26,7 @@ RUN apt-get update && apt-get install -y \
         curl \
         sodium \
         opcache \
+    && pip3 install pandas openpyxl pymysql --break-system-packages \
     && a2enmod rewrite \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

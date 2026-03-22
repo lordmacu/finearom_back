@@ -2326,6 +2326,75 @@ class PurchaseOrderController extends Controller
     }
 
     /**
+     * Verifica el pronóstico manual del mes para un cliente+producto.
+     * Retorna: pronóstico, ya despachado en el mes y disponible.
+     * Usado en el formulario de OC para alertar cuando se excede el pronóstico.
+     */
+    public function forecastCheck(Request $request): JsonResponse
+    {
+        $request->validate([
+            'client_id'  => ['required', 'integer'],
+            'product_id' => ['required', 'integer'],
+        ]);
+
+        $now = \Carbon\Carbon::now('America/Bogota');
+        $meses = [1=>'ENERO',2=>'FEBRERO',3=>'MARZO',4=>'ABRIL',5=>'MAYO',6=>'JUNIO',
+                  7=>'JULIO',8=>'AGOSTO',9=>'SEPTIEMBRE',10=>'OCTUBRE',11=>'NOVIEMBRE',12=>'DICIEMBRE'];
+        $mes = $meses[$now->month];
+        $año = (string) $now->year;
+
+        // Obtener nit del cliente y code del producto
+        $client  = \DB::table('clients')->where('id', $request->client_id)->select('nit')->first();
+        $product = \DB::table('products')->where('id', $request->product_id)->select('code')->first();
+
+        if (!$client || !$product) {
+            return response()->json(['success' => false, 'message' => 'Cliente o producto no encontrado'], 404);
+        }
+
+        // Pronóstico manual del mes actual
+        $forecast = \DB::table('sales_forecasts')
+            ->where('nit', $client->nit)
+            ->where('codigo', $product->code)
+            ->where('modelo', 'manual')
+            ->where('año', $año)
+            ->where('mes', $mes)
+            ->value('cantidad_forecast');
+
+        if ($forecast === null) {
+            return response()->json([
+                'success'     => true,
+                'has_forecast' => false,
+            ]);
+        }
+
+        // Ya despachado este mes para este cliente+producto (desde partials reales)
+        $vendido = (float) \DB::table('partials as pt')
+            ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
+            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->where('po.client_id', $request->client_id)
+            ->where('p.id', $request->product_id)
+            ->where('pt.type', 'real')
+            ->whereNull('pt.deleted_at')
+            ->where('pop.muestra', 0)
+            ->whereBetween('pt.dispatch_date', [
+                $now->copy()->startOfMonth()->toDateString(),
+                $now->copy()->endOfMonth()->toDateString(),
+            ])
+            ->sum('pt.quantity');
+
+        return response()->json([
+            'success'      => true,
+            'has_forecast' => true,
+            'pronostico'   => (int) $forecast,
+            'vendido'      => round($vendido, 2),
+            'disponible'   => max(0, $forecast - $vendido),
+            'mes'          => $mes,
+            'año'          => $año,
+        ]);
+    }
+
+    /**
      * Get TRM (Tasa Representativa del Mercado) for a specific date
      * Usa el TrmService centralizado con sistema de fallback completo
      */

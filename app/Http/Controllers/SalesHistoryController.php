@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use PhpOffice\PhpSpreadsheet\IOFactory;
+use Illuminate\Support\Facades\Log;
 
 class SalesHistoryController extends Controller
 {
@@ -31,100 +31,45 @@ class SalesHistoryController extends Controller
      */
     public function import(Request $request): JsonResponse
     {
+        Log::info('[SalesHistory] Import iniciado', [
+            'user'      => auth()->id(),
+            'file_name' => $request->file('file')?->getClientOriginalName(),
+            'file_size' => $request->file('file')?->getSize(),
+        ]);
+
         $request->validate([
             'file' => ['required', 'file', 'mimes:xlsx,xls', 'max:51200'], // 50 MB
         ]);
 
-        set_time_limit(300);
+        // Guardar el archivo en /tmp con nombre único
+        $tmpPath = $request->file('file')->storeAs('', uniqid('sales_') . '.xlsx', 'local');
+        $fullPath = storage_path('app/' . $tmpPath);
 
-        $path = $request->file('file')->getRealPath();
+        Log::info('[SalesHistory] Archivo guardado', ['path' => $fullPath]);
 
-        try {
-            // ReadDataOnly=true: omite estilos, formatos y fórmulas → 3-5x más rápido
-            $reader = IOFactory::createReader('Xlsx');
-            $reader->setReadDataOnly(true);
-            $spreadsheet = $reader->load($path);
-            $sheet       = $spreadsheet->getActiveSheet();
+        $scriptPath = base_path('scripts/import_sales_history.py');
+        $python     = $this->resolvePython();
 
-            // false, false, false → sin calcular fórmulas, sin formatear, sin cabeceras de columna
-            $rows = $sheet->toArray(null, false, false, false);
-        } catch (\Throwable $e) {
-            return response()->json(['message' => 'Error al leer el archivo: ' . $e->getMessage()], 422);
+        Log::info('[SalesHistory] Ejecutando Python', ['python' => $python, 'script' => $scriptPath]);
+
+        $command    = escapeshellcmd("$python $scriptPath " . escapeshellarg($fullPath)) . ' 2>&1';
+        $output     = shell_exec($command);
+
+        // Limpiar archivo temporal
+        @unlink($fullPath);
+
+        Log::info('[SalesHistory] Salida Python', ['output' => $output]);
+
+        if (!$output || !str_contains($output, 'OK:')) {
+            Log::error('[SalesHistory] Error en script Python', ['output' => $output]);
+            return response()->json(['message' => 'Error al importar: ' . trim($output ?? 'Sin respuesta del script')], 500);
         }
 
-        // Quitar la fila de encabezado
-        array_shift($rows);
+        // Extraer el total de la última línea "OK:79541"
+        preg_match('/OK:(\d+)/', $output, $matches);
+        $total = (int) ($matches[1] ?? 0);
 
-        if (empty($rows)) {
-            return response()->json(['message' => 'El archivo no contiene datos'], 422);
-        }
-
-        // Liberar memoria del spreadsheet antes de procesar
-        $spreadsheet->disconnectWorksheets();
-        unset($spreadsheet);
-
-        // Truncar y re-insertar dentro de una transacción
-        // Deshabilitar query log para evitar acumulación en memoria
-        DB::disableQueryLog();
-        DB::table('sales_history')->truncate();
-
-        $batch = [];
-        $now   = now()->toDateTimeString();
-        $chunk = 2000;
-
-        DB::transaction(function () use ($rows, $now, $chunk, &$batch) {
-            foreach ($rows as $row) {
-                // Columnas del Excel (0-indexed):
-                // 0=NIT, 1=CODIGO BUSQUEDA, 2=CLIENTE, 3=EJECUTIVO, 4=CLIENTE2,
-                // 5=CATEGORIA, 6=CODIGO, 7=REFERENCIA, 8=REF-CODIGO,
-                // 9=AÑO, 10=MES, 11=VENTA, 12=CANTIDAD, 13=NEWWIN, 14=ESTADO
-
-                $nit    = trim((string) ($row[0] ?? ''));
-                $codigo = trim((string) ($row[6] ?? ''));
-                $año    = trim((string) ($row[9] ?? ''));
-                $mes    = strtoupper(trim((string) ($row[10] ?? '')));
-
-                // Saltar filas sin datos mínimos
-                if ($nit === '' || $codigo === '' || $año === '' || $mes === '') {
-                    continue;
-                }
-
-                // Normalizar categoría (FINE FRAGANCE → FINE FRAGRANCE)
-                $categoria = trim((string) ($row[5] ?? ''));
-                if ($categoria === 'FINE FRAGANCE') {
-                    $categoria = 'FINE FRAGRANCE';
-                }
-
-                $batch[] = [
-                    'nit'          => $nit,
-                    'cliente'      => trim((string) ($row[2] ?? '')),
-                    'ejecutivo'    => trim((string) ($row[3] ?? '')) ?: null,
-                    'cliente_tipo' => trim((string) ($row[4] ?? '')) ?: null,
-                    'categoria'    => $categoria ?: null,
-                    'codigo'       => $codigo,
-                    'referencia'   => trim((string) ($row[7] ?? '')),
-                    'año'          => $año,
-                    'mes'          => $mes,
-                    'venta'        => (int) ($row[11] ?? 0),
-                    'cantidad'     => (int) ($row[12] ?? 0),
-                    'newwin'       => ($row[13] === 'NEW WIN'),
-                    'estado'       => trim((string) ($row[14] ?? '')) ?: null,
-                    'created_at'   => $now,
-                    'updated_at'   => $now,
-                ];
-
-                if (count($batch) >= $chunk) {
-                    DB::table('sales_history')->insert($batch);
-                    $batch = [];
-                }
-            }
-
-            if (!empty($batch)) {
-                DB::table('sales_history')->insert($batch);
-            }
-        });
-
-        $total = DB::table('sales_history')->count();
+        Log::info('[SalesHistory] Import finalizado', ['total_en_tabla' => $total]);
 
         return response()->json([
             'message' => 'Importación completada exitosamente',
@@ -133,15 +78,30 @@ class SalesHistoryController extends Controller
     }
 
     /**
+     * Encuentra el binario de Python disponible en el sistema.
+     */
+    private function resolvePython(): string
+    {
+        foreach (['python3', 'python'] as $bin) {
+            $path = trim(shell_exec("which $bin 2>/dev/null") ?? '');
+            if ($path) {
+                return $path;
+            }
+        }
+        return 'python3';
+    }
+
+    /**
      * GET /sales-history/clients
      * Retorna la lista de clientes únicos.
      */
     public function clients(): JsonResponse
     {
-        $clients = DB::table('sales_history')
-            ->select('nit', 'cliente', 'cliente_tipo')
-            ->groupBy('nit', 'cliente', 'cliente_tipo')
-            ->orderBy('cliente')
+        $clients = DB::table('sales_history as sh')
+            ->join('clients as c', DB::raw('c.nit COLLATE utf8mb4_general_ci'), '=', 'sh.nit')
+            ->select('sh.nit', 'c.client_name as cliente', 'c.client_type as cliente_tipo')
+            ->groupBy('sh.nit', 'c.client_name', 'c.client_type')
+            ->orderBy('c.client_name')
             ->get();
 
         return response()->json(['data' => $clients]);
@@ -155,11 +115,12 @@ class SalesHistoryController extends Controller
     {
         $request->validate(['nit' => ['required', 'string']]);
 
-        $products = DB::table('sales_history')
-            ->select('codigo', 'referencia', 'categoria')
-            ->where('nit', $request->nit)
-            ->groupBy('codigo', 'referencia', 'categoria')
-            ->orderBy('referencia')
+        $products = DB::table('sales_history as sh')
+            ->join('products as p', DB::raw('p.code COLLATE utf8mb4_general_ci'), '=', 'sh.codigo')
+            ->select('sh.codigo', 'p.product_name as referencia', 'p.categories as categoria')
+            ->where('sh.nit', $request->nit)
+            ->groupBy('sh.codigo', 'p.product_name', 'p.categories')
+            ->orderBy('p.product_name')
             ->get();
 
         return response()->json(['data' => $products]);
@@ -210,11 +171,13 @@ class SalesHistoryController extends Controller
             $cantidades[] = (int) $row->cantidad;
         }
 
-        // Info del producto/cliente
-        $info = DB::table('sales_history')
-            ->select('cliente', 'referencia', 'categoria')
-            ->where('nit', $request->nit)
-            ->where('codigo', $request->codigo)
+        // Info del producto/cliente via JOIN
+        $info = DB::table('sales_history as sh')
+            ->leftJoin('clients as c', DB::raw('c.nit COLLATE utf8mb4_general_ci'), '=', 'sh.nit')
+            ->leftJoin('products as p', DB::raw('p.code COLLATE utf8mb4_general_ci'), '=', 'sh.codigo')
+            ->select('c.client_name as cliente', 'p.product_name as referencia', 'p.categories as categoria')
+            ->where('sh.nit', $request->nit)
+            ->where('sh.codigo', $request->codigo)
             ->first();
 
         return response()->json([
@@ -224,6 +187,99 @@ class SalesHistoryController extends Controller
                 'cantidades' => $cantidades,
                 'info'       => $info,
             ],
+        ]);
+    }
+
+    /**
+     * GET /sales-history/forecast?nit=xxx&codigo=yyy[&modelo=holt_winters]
+     * Retorna los pronósticos guardados para un cliente+producto.
+     */
+    public function forecast(Request $request): JsonResponse
+    {
+        $request->validate([
+            'nit'    => ['required', 'string'],
+            'codigo' => ['required', 'string'],
+            'modelo' => ['nullable', 'string'],
+        ]);
+
+        $query = DB::table('sales_forecasts')
+            ->where('nit', $request->nit)
+            ->where('codigo', $request->codigo);
+
+        if ($request->filled('modelo')) {
+            $query->where('modelo', $request->modelo);
+        }
+
+        $rows = $query->orderByRaw("año ASC, FIELD(mes,'ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE') ASC")
+            ->get();
+
+        // Agrupar por modelo → array de 4 meses
+        $byModel = [];
+        foreach ($rows as $row) {
+            $byModel[$row->modelo][] = [
+                'año'               => $row->año,
+                'mes'               => $row->mes,
+                'cantidad_forecast' => (int) $row->cantidad_forecast,
+                'lower_bound'       => (int) $row->lower_bound,
+                'upper_bound'       => (int) $row->upper_bound,
+                'confianza'         => $row->confianza,
+            ];
+        }
+
+        $generatedAt = DB::table('sales_forecasts')
+            ->where('nit', $request->nit)
+            ->where('codigo', $request->codigo)
+            ->value('generated_at');
+
+        return response()->json([
+            'data' => [
+                'modelos'      => $byModel,
+                'generated_at' => $generatedAt,
+            ],
+        ]);
+    }
+
+    /**
+     * POST /sales-history/manual-forecast
+     * Guarda o actualiza pronósticos manuales para un cliente+producto.
+     */
+    public function saveManualForecast(Request $request): JsonResponse
+    {
+        $request->validate([
+            'nit'            => ['required', 'string'],
+            'codigo'         => ['required', 'string'],
+            'forecasts'      => ['required', 'array', 'min:1'],
+            'forecasts.*.año' => ['required', 'string'],
+            'forecasts.*.mes' => ['required', 'string'],
+            'forecasts.*.cantidad' => ['required', 'integer', 'min:0'],
+        ]);
+
+        $nit    = $request->nit;
+        $codigo = $request->codigo;
+        $now    = now()->toDateTimeString();
+
+        foreach ($request->forecasts as $f) {
+            DB::table('sales_forecasts')->updateOrInsert(
+                [
+                    'nit'    => $nit,
+                    'codigo' => $codigo,
+                    'modelo' => 'manual',
+                    'año'    => $f['año'],
+                    'mes'    => strtoupper($f['mes']),
+                ],
+                [
+                    'cantidad_forecast' => (int) $f['cantidad'],
+                    'lower_bound'       => null,
+                    'upper_bound'       => null,
+                    'confianza'         => 'alta',
+                    'generated_at'      => $now,
+                ]
+            );
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pronóstico manual guardado',
         ]);
     }
 
