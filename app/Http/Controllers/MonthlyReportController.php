@@ -211,9 +211,363 @@ class MonthlyReportController extends Controller
             ->value('value');
         $trmHoyStr = $trmHoy ? number_format((float)$trmHoy, 2) : '4000.00';
 
-        $prompt =
+        $periodContext = $this->buildPeriodContext($startDate, $endDate, $today, $trmHoyStr);
+
+        $periodLabel = Carbon::parse($startDate)->locale('es')->isoFormat('MMMM YYYY');
+
+        $model = $request->get('model', 'gpt-4.1');
+
+        if ($limitResponse = $this->checkAndIncrementModelLimit($model)) {
+            return $limitResponse;
+        }
+
+        // === DEEPSEEK PATH ===
+        if (str_starts_with($model, 'deepseek')) {
+            try {
+                $result = $this->callDeepSeekApi([
+                    ['role' => 'system', 'content' => $this->buildSystemPrompt()],
+                    ['role' => 'user',   'content' => $periodContext],
+                ]);
+
+                if (!$result['success']) {
+                    return response()->json(['success' => false, 'message' => 'Error conectando con DeepSeek'], 500);
+                }
+
+                $threadId   = (string) \Illuminate\Support\Str::uuid();
+                $welcomeMsg = $result['content'] ?: 'Listo, puedes hacerme preguntas sobre el período.';
+                $now        = now()->toDateTimeString();
+
+                $session = ChatSession::create([
+                    'user_id'      => auth()->id(),
+                    'thread_id'    => $threadId,
+                    'period_label' => ucfirst($periodLabel),
+                    'period_start' => $startDate,
+                    'period_end'   => $endDate,
+                    'messages'     => [
+                        ['role' => 'assistant', 'content' => $welcomeMsg, 'time' => $now],
+                    ],
+                ]);
+
+                return response()->json([
+                    'success'    => true,
+                    'session_id' => $session->id,
+                    'thread_id'  => $threadId,
+                    'message'    => $welcomeMsg,
+                    'period'     => $period,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('[Chat][DeepSeek] chatStartV2 exception: ' . $e->getMessage());
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+            }
+        }
+
+        // === NODE PROXY PATH (servidor Node intermedio) ===
+        /*
+        try {
+            $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
+                ->timeout(60)
+                ->post("{$aiUrl}/v1/chat/completions", [
+                    'model'    => $model,
+                    'messages' => [['role' => 'user', 'content' => $prompt]],
+                ]);
+
+            if (!$resp->successful()) {
+                Log::error('[Chat] Error en chatStartV2: ' . $resp->body());
+                return response()->json(['success' => false, 'message' => 'Error conectando con IA'], 500);
+            }
+
+            $threadId   = $resp->json('thread_id');
+            $welcomeMsg = trim($resp->json('choices.0.message.content', 'Listo, puedes hacerme preguntas sobre el período.'));
+            $now        = now()->toDateTimeString();
+
+            $session = ChatSession::create([
+                'user_id'      => auth()->id(),
+                'thread_id'    => $threadId,
+                'period_label' => ucfirst($periodLabel),
+                'period_start' => $startDate,
+                'period_end'   => $endDate,
+                'messages'     => [
+                    ['role' => 'assistant', 'content' => $welcomeMsg, 'time' => $now],
+                ],
+            ]);
+
+            return response()->json([
+                'success'    => true,
+                'session_id' => $session->id,
+                'thread_id'  => $threadId,
+                'message'    => $welcomeMsg,
+                'period'     => $period,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('[Chat] chatStartV2 exception: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+        */
+
+        return response()->json(['success' => false, 'message' => 'Modelo no soportado en este endpoint'], 422);
+    }
+
+    /**
+     * Envía un mensaje del usuario al hilo existente y devuelve la respuesta de la IA.
+     */
+    public function chatMessage(Request $request): JsonResponse|\Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $request->validate([
+            'thread_id'  => 'required|string',
+            'message'    => 'required|string|max:2000',
+            'session_id' => 'nullable|integer',
+            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5,deepseek-chat',
+        ]);
+
+        $aiUrl = config('custom.ai_server_url');
+        $aiKey = config('custom.ai_server_key');
+
+        // Cargar sesión para obtener el período real
+        $session = null;
+        $periodStart = 'INICIO';
+        $periodEnd   = 'FIN';
+        if ($request->session_id) {
+            $session = ChatSession::where('id', $request->session_id)
+                ->where('user_id', auth()->id())
+                ->first();
+            if ($session) {
+                $periodStart = $session->period_start?->toDateString() ?? 'INICIO';
+                $periodEnd   = $session->period_end?->toDateString()   ?? 'FIN';
+            }
+        }
+
+
+        $model = $request->get('model', 'gpt-4.1');
+
+        if ($limitResponse = $this->checkAndIncrementModelLimit($model)) {
+            return $limitResponse;
+        }
+
+        // === DEEPSEEK PATH (streaming SSE) ===
+        if (str_starts_with($model, 'deepseek')) {
+            // Reconstruir historial saltando mensajes hidden (prompt inicial de sesiones antiguas)
+            $sessionMessages = [];
+            if ($session) {
+                foreach ($session->messages as $msg) {
+                    if (!empty($msg['hidden'])) continue;
+                    $role = $msg['role'] === 'assistant' ? 'assistant' : 'user';
+                    $sessionMessages[] = ['role' => $role, 'content' => $msg['content']];
+                }
+            }
+
+            // Truncar historial: mantener últimos 20 mensajes
+            if (count($sessionMessages) > 20) {
+                $sessionMessages = array_slice($sessionMessages, -20);
+            }
+
+            // TRM actual para el contexto de período
+            $trmNow    = DB::table('trm_daily')->where('date', '<=', now('America/Bogota')->toDateString())->orderByDesc('date')->value('value');
+            $trmNowStr = $trmNow ? number_format((float)$trmNow, 2) : '4000.00';
+
+            // System (estático/cacheable) + período + historial + nuevo mensaje
+            $apiMessages = array_merge(
+                [
+                    ['role' => 'system', 'content' => $this->buildSystemPrompt()],
+                    ['role' => 'user',   'content' => $this->buildPeriodContext($periodStart, $periodEnd, now('America/Bogota')->toDateString(), $trmNowStr)],
+                ],
+                $sessionMessages,
+                [['role' => 'user', 'content' => $request->message]]
+            );
+
+            $key         = config('custom.deepseek_api_key');
+            $sessionRef  = $session;
+            $userMessage = $request->message;
+            $payload     = json_encode([
+                'model'       => 'deepseek-chat',
+                'messages'    => $apiMessages,
+                'temperature' => 0.1,
+                'max_tokens'  => 3000,
+                'stream'      => true,
+            ]);
+
+            return response()->stream(function () use ($key, $payload, $sessionRef, $userMessage) {
+                // Limpiar output buffering para que echo llegue al cliente inmediatamente
+                while (ob_get_level() > 0) {
+                    ob_end_clean();
+                }
+
+                $fullContent = '';
+                $lineBuffer  = '';
+
+                // Usamos curl directo porque su WRITEFUNCTION dispara en tiempo real,
+                // a diferencia de Guzzle que puede bufferear el body completo en PHP-FPM.
+                $ch = curl_init('https://api.deepseek.com/chat/completions');
+                curl_setopt_array($ch, [
+                    CURLOPT_POST           => true,
+                    CURLOPT_POSTFIELDS     => $payload,
+                    CURLOPT_HTTPHEADER     => [
+                        'Authorization: Bearer ' . $key,
+                        'Content-Type: application/json',
+                    ],
+                    CURLOPT_TIMEOUT        => 120,
+                    CURLOPT_SSL_VERIFYPEER => true,
+                    CURLOPT_WRITEFUNCTION  => function ($ch, $chunk) use (&$fullContent, &$lineBuffer) {
+                        $lineBuffer .= $chunk;
+
+                        while (($pos = strpos($lineBuffer, "\n")) !== false) {
+                            $line       = trim(substr($lineBuffer, 0, $pos));
+                            $lineBuffer = substr($lineBuffer, $pos + 1);
+
+                            if (!str_starts_with($line, 'data: ')) continue;
+
+                            $data = substr($line, 6);
+                            if ($data === '[DONE]') continue; // se maneja al finalizar curl_exec
+
+                            $json  = json_decode($data, true);
+                            $token = $json['choices'][0]['delta']['content'] ?? '';
+
+                            if ($token !== '') {
+                                $fullContent .= $token;
+                                echo "data: " . json_encode(['token' => $token]) . "\n\n";
+                                flush();
+                            }
+                        }
+
+                        return strlen($chunk); // obligatorio para que curl no aborte
+                    },
+                ]);
+
+                curl_exec($ch);
+                curl_close($ch);
+
+                // Guardar en sesión al terminar
+                if ($sessionRef && $fullContent) {
+                    $now  = now()->toDateTimeString();
+                    $msgs = $sessionRef->messages ?? [];
+                    $msgs[] = ['role' => 'user',      'content' => $userMessage,  'time' => $now];
+                    $msgs[] = ['role' => 'assistant', 'content' => $fullContent,  'time' => $now];
+                    $sessionRef->update(['messages' => $msgs]);
+                }
+
+                // done con content como safety net
+                echo "data: " . json_encode(['done' => true, 'content' => $fullContent]) . "\n\n";
+                flush();
+            }, 200, [
+                'Content-Type'      => 'text/event-stream',
+                'Cache-Control'     => 'no-cache',
+                'X-Accel-Buffering' => 'no',
+                'Connection'        => 'keep-alive',
+            ]);
+        }
+
+        // === NODE PROXY PATH (servidor Node intermedio) ===
+        /*
+        try {
+            $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
+                ->timeout(120)
+                ->post("{$aiUrl}/v1/chat/completions", [
+                    'model'     => $model,
+                    'messages'  => [['role' => 'user', 'content' => $schemaHint . $request->message]],
+                    'thread_id' => $request->thread_id,
+                ]);
+
+            if (!$resp->successful()) {
+                Log::error('[Chat] Error en chatMessage: ' . $resp->body());
+                return response()->json(['success' => false, 'message' => 'Error en IA'], 500);
+            }
+
+            $aiMessage = trim($resp->json('choices.0.message.content', ''));
+            $now       = now()->toDateTimeString();
+
+            if ($session) {
+                $messages   = $session->messages ?? [];
+                $messages[] = ['role' => 'user',      'content' => $request->message, 'time' => $now];
+                $messages[] = ['role' => 'assistant', 'content' => $aiMessage,         'time' => $now];
+                $session->update(['messages' => $messages]);
+            }
+
+            return response()->json([
+                'success'   => true,
+                'message'   => $aiMessage,
+                'thread_id' => $resp->json('thread_id'),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('[Chat] chatMessage exception: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+        */
+
+        return response()->json(['success' => false, 'message' => 'Modelo no soportado en este endpoint'], 422);
+    }
+
+    /**
+     * Lista las últimas sesiones de chat del usuario autenticado.
+     */
+    public function chatSessions(): JsonResponse
+    {
+        $sessions = ChatSession::where('user_id', auth()->id())
+            ->orderByDesc('created_at')
+            ->limit(30)
+            ->get(['id', 'period_label', 'period_start', 'period_end', 'thread_id', 'created_at', 'messages'])
+            ->map(fn($s) => [
+                'id'            => $s->id,
+                'period_label'  => $s->period_label,
+                'period_start'  => $s->period_start?->toDateString(),
+                'period_end'    => $s->period_end?->toDateString(),
+                'thread_id'     => $s->thread_id,
+                'created_at'    => $s->created_at->toDateTimeString(),
+                'message_count' => count($s->messages ?? []),
+            ]);
+
+        return response()->json(['success' => true, 'data' => $sessions]);
+    }
+
+    /**
+     * Carga los mensajes de una sesión específica.
+     */
+    public function chatSessionMessages(ChatSession $session): JsonResponse
+    {
+        abort_if($session->user_id !== auth()->id(), 403);
+
+        return response()->json([
+            'success'  => true,
+            'session'  => [
+                'id'           => $session->id,
+                'period_label' => $session->period_label,
+                'period_start' => $session->period_start?->toDateString(),
+                'period_end'   => $session->period_end?->toDateString(),
+                'thread_id'    => $session->thread_id,
+                'messages'     => $session->messages ?? [],
+            ],
+        ]);
+    }
+
+    /**
+     * Elimina una sesión de chat del usuario autenticado.
+     */
+    public function chatSessionDelete(ChatSession $session): JsonResponse
+    {
+        abort_if($session->user_id !== auth()->id(), 403);
+        $session->delete();
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Elimina todas las sesiones de chat del usuario autenticado.
+     */
+    public function chatSessionDeleteAll(): JsonResponse
+    {
+        ChatSession::where('user_id', auth()->id())->delete();
+        return response()->json(['success' => true]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DeepSeek API (llamada directa, sin servidor Node intermedio)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Retorna el prompt de sistema estático para DeepSeek (sin variables dinámicas de período/TRM).
+     * Al ser idéntico en cada llamada, DeepSeek lo cachea automáticamente (prefix caching).
+     */
+    private function buildSystemPrompt(): string
+    {
+        return
             "Eres un asistente de análisis comercial para Finearom, empresa colombiana que comercializa fragancias y materias primas para la industria cosmética.\n\n" .
-            "PERÍODO ACTIVO: {$startDate} al {$endDate} (TRM de hoy: {$trmHoyStr} COP/USD).\n\n" .
             "ROLES EN FINEAROM Y QUÉ HACE CADA UNO:\n\n" .
             "FRANCY (Coordinadora de pedidos):\n" .
             "- Recibe los pedidos de las ejecutivas comerciales y los crea en el sistema como órdenes de compra (OC).\n" .
@@ -391,7 +745,8 @@ class MonthlyReportController extends Controller
             "→ Hacer LEFT JOIN branch_offices bo ON pop.branch_office_id = bo.id → usar bo.delivery_city, bo.name\n\n" .
             "FORMATO DE RESPUESTA — OBLIGATORIO:\n" .
             "Responde SIEMPRE con un objeto JSON válido, sin texto antes ni después, sin wrapper de backticks.\n" .
-            "Estructura exacta:\n" .
+            "⚠ CRÍTICO PARA STREAMING: el campo \"html\" DEBE ser SIEMPRE el PRIMER campo del JSON — nunca muevas \"sql\" al inicio.\n" .
+            "Estructura exacta (orden fijo e inamovible):\n" .
             "{\"html\":\"<p>explicación breve en HTML</p>\",\"sql\":\"SELECT ...\",\"showing\":\"campo1, campo2\",\"available\":\"campo3, campo4\"}\n\n" .
             "Reglas del JSON:\n" .
             "- \"html\": explicación en HTML limpio. Sin LaTeX, sin markdown, sin backticks. Para preguntas sin datos: solo el html, sql=null.\n" .
@@ -411,356 +766,17 @@ class MonthlyReportController extends Controller
             "     HAVING (SELECT MIN(po_all.order_creation_date) FROM purchase_orders po_all WHERE po_all.client_id = c.id) >= 'FECHA_INICIO'\n" .
             "  → Esto garantiza que el cliente no tiene ninguna orden anterior a esa fecha en todo el sistema.\n\n" .
             "- El mensaje de bienvenida: html con saludo breve + período activo + 3-4 ejemplos de preguntas. sql=null.";
-
-        $periodLabel = Carbon::parse($startDate)->locale('es')->isoFormat('MMMM YYYY');
-
-        $model = $request->get('model', 'gpt-4.1');
-
-        if ($limitResponse = $this->checkAndIncrementModelLimit($model)) {
-            return $limitResponse;
-        }
-
-        // === DEEPSEEK PATH ===
-        if (str_starts_with($model, 'deepseek')) {
-            try {
-                $result = $this->callDeepSeekApi([
-                    ['role' => 'user', 'content' => $prompt],
-                ]);
-
-                if (!$result['success']) {
-                    return response()->json(['success' => false, 'message' => 'Error conectando con DeepSeek'], 500);
-                }
-
-                $threadId   = (string) \Illuminate\Support\Str::uuid();
-                $welcomeMsg = $result['content'] ?: 'Listo, puedes hacerme preguntas sobre el período.';
-                $now        = now()->toDateTimeString();
-
-                $session = ChatSession::create([
-                    'user_id'      => auth()->id(),
-                    'thread_id'    => $threadId,
-                    'period_label' => ucfirst($periodLabel),
-                    'period_start' => $startDate,
-                    'period_end'   => $endDate,
-                    'messages'     => [
-                        // Contexto inicial guardado para reconstruir historial en mensajes posteriores
-                        ['role' => 'user',      'content' => $prompt,     'hidden' => true],
-                        ['role' => 'assistant', 'content' => $welcomeMsg, 'time'   => $now],
-                    ],
-                ]);
-
-                return response()->json([
-                    'success'    => true,
-                    'session_id' => $session->id,
-                    'thread_id'  => $threadId,
-                    'message'    => $welcomeMsg,
-                    'period'     => $period,
-                ]);
-            } catch (\Throwable $e) {
-                Log::error('[Chat][DeepSeek] chatStartV2 exception: ' . $e->getMessage());
-                return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-            }
-        }
-
-        // === NODE PROXY PATH (servidor Node intermedio) ===
-        /*
-        try {
-            $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
-                ->timeout(60)
-                ->post("{$aiUrl}/v1/chat/completions", [
-                    'model'    => $model,
-                    'messages' => [['role' => 'user', 'content' => $prompt]],
-                ]);
-
-            if (!$resp->successful()) {
-                Log::error('[Chat] Error en chatStartV2: ' . $resp->body());
-                return response()->json(['success' => false, 'message' => 'Error conectando con IA'], 500);
-            }
-
-            $threadId   = $resp->json('thread_id');
-            $welcomeMsg = trim($resp->json('choices.0.message.content', 'Listo, puedes hacerme preguntas sobre el período.'));
-            $now        = now()->toDateTimeString();
-
-            $session = ChatSession::create([
-                'user_id'      => auth()->id(),
-                'thread_id'    => $threadId,
-                'period_label' => ucfirst($periodLabel),
-                'period_start' => $startDate,
-                'period_end'   => $endDate,
-                'messages'     => [
-                    ['role' => 'assistant', 'content' => $welcomeMsg, 'time' => $now],
-                ],
-            ]);
-
-            return response()->json([
-                'success'    => true,
-                'session_id' => $session->id,
-                'thread_id'  => $threadId,
-                'message'    => $welcomeMsg,
-                'period'     => $period,
-            ]);
-        } catch (\Throwable $e) {
-            Log::error('[Chat] chatStartV2 exception: ' . $e->getMessage());
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-        }
-        */
-
-        return response()->json(['success' => false, 'message' => 'Modelo no soportado en este endpoint'], 422);
     }
 
     /**
-     * Envía un mensaje del usuario al hilo existente y devuelve la respuesta de la IA.
+     * Retorna el contexto dinámico del período activo (TRM, fechas).
+     * Se envía como primer mensaje 'user' después del system prompt.
      */
-    public function chatMessage(Request $request): JsonResponse
+    private function buildPeriodContext(string $startDate, string $endDate, string $today, string $trmHoyStr): string
     {
-        $request->validate([
-            'thread_id'  => 'required|string',
-            'message'    => 'required|string|max:2000',
-            'session_id' => 'nullable|integer',
-            'model'      => 'nullable|string|in:gpt-4.1,claude-sonnet-4-5,deepseek-chat',
-        ]);
-
-        $aiUrl = config('custom.ai_server_url');
-        $aiKey = config('custom.ai_server_key');
-
-        // Cargar sesión para obtener el período real
-        $session = null;
-        $periodStart = 'INICIO';
-        $periodEnd   = 'FIN';
-        if ($request->session_id) {
-            $session = ChatSession::where('id', $request->session_id)
-                ->where('user_id', auth()->id())
-                ->first();
-            if ($session) {
-                $periodStart = $session->period_start?->toDateString() ?? 'INICIO';
-                $periodEnd   = $session->period_end?->toDateString()   ?? 'FIN';
-            }
-        }
-
-        // Recordatorio compacto para que la IA no pierda contexto entre turnos
-        $schemaHint = "Recuerda: eres el asistente de análisis de Finearom. " .
-            "Base de datos: MariaDB 11.4 — soporta CTEs (WITH), window functions (SUM/ROW_NUMBER OVER), y FIELD() para ordenamiento personalizado. Úsalos cuando aporten claridad (ej: Pareto con pct acumulado, rankings). " .
-            "Período activo de esta sesión: {$periodStart} al {$periodEnd}. " .
-            "REGLA DE FECHAS: usa SIEMPRE '{$periodStart}' y '{$periodEnd}' como filtro por defecto en todas las queries. " .
-            "⚠ NUNCA hardcodees otras fechas distintas al período activo — el usuario cambiará el período cuando quiera ver otro rango. " .
-            "EXCEPCIÓN 1: si el usuario menciona fechas distintas en su mensaje, esas fechas SOBREESCRIBEN el período activo SOLO para esa consulta. " .
-            "EXCEPCIÓN 2: para preguntas sobre órdenes 'estancadas', 'sin despacho hace X días', 'sin movimiento' — NO uses BETWEEN sobre order_creation_date; usa solo DATEDIFF(CURDATE(), po.order_creation_date) > X sin filtro de período. " .
-            "Base de datos MariaDB. Tablas principales: " .
-            "purchase_orders (id, client_id, order_consecutive, status, order_creation_date, dispatch_date, trm, is_new_win, is_muestra), " .
-            "clients (id, client_name, nit, executive, client_type, city), " .
-            "purchase_order_product (id, purchase_order_id, product_id, quantity kg pedidos, price USD/kg nullable, new_win, muestra, branch_office_id FK→branch_offices), " .
-            "branch_offices (id, client_id, name, nit, delivery_address, delivery_city — sucursal de entrega por línea), " .
-            "products (id, code, product_name, price USD/kg — precio catálogo fallback), " .
-            "partials (id, order_id, product_order_id, quantity kg despachados, type 'temporal'=Marlon estimó|'real'=Alexa despachó, dispatch_date, trm, invoice_number, tracking_number, transporter, deleted_at SOFT DELETE), " .
-            "cartera (nit, nombre_empresa, saldo_contable VARCHAR decimal '26857379.12' — CAST directo sin REPLACE, saldo_vencido VARCHAR mismo formato — CAST(saldo_vencido AS DECIMAL(15,2)), dias INT negativo=vencido, fecha_cartera — filtrar siempre por MAX(fecha_cartera)), " .
-            "recaudos (nit BIGINT, cliente, numero_factura, fecha_recaudo, valor_cancelado COP — datos importados desde SIIGO, pueden no estar actualizados al mes en curso; cruzar con cartera.documento=recaudos.numero_factura), " .
-            "trm_daily (date, value COP/USD). " .
-            "REGLA de filtro por período: si la pregunta es sobre órdenes DESPACHADAS/FACTURADAS → usa partials: par.type='real' AND par.dispatch_date BETWEEN '{$periodStart}' AND '{$periodEnd}' AND par.deleted_at IS NULL AND pop.muestra=0. " .
-            "Si la pregunta es sobre órdenes CREADAS → usa purchase_orders directo: po.order_creation_date BETWEEN '{$periodStart}' AND '{$periodEnd}' (sin JOIN a partials). " .
-            "Si la pregunta es sobre órdenes ACTIVAS por STATUS (processing, parcial_status, pending) → NO uses order_creation_date BETWEEN — las órdenes activas pueden ser de cualquier fecha. Solo filtra por el status. " .
-            "Para mostrar ejecutiva como nombre (no email): GROUP BY c.executive, SELECT REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva. " .
-            "CRÍTICO de cantidades: usa SIEMPRE par.quantity (kilos despachados), NO pop.quantity (kilos pedidos). " .
-            "CRÍTICO de precio: pop.price puede ser NULL en órdenes antiguas. SIEMPRE usa COALESCE(NULLIF(pop.price,0), p.price, 0) y haz JOIN products p ON pop.product_id=p.id. " .
-            "Precio efectivo = COALESCE(NULLIF(pop.price,0), p.price, 0). " .
-            "Valor USD despachado = par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0). " .
-            "CRÍTICO de TRM (cascada 4 niveles): COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000). El +0 convierte string a número. " .
-            "Valor COP despachado = par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(par.trm+0,0), NULLIF(po.trm+0,0), (SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000). " .
-            "EXCEPCIÓN pop.quantity vs par.quantity: para 'Total OC' (denominador de cumplimiento) usa pop.quantity (pedido). Solo usa par.quantity para lo despachado. " .
-            "CRÍTICO de cartera: saldo_contable ya es decimal normal con punto ('26857379.12'). Usar: CAST(saldo_contable AS DECIMAL(15,2)). NUNCA uses REPLACE para quitar puntos — destruyes el decimal. " .
-            "CARTERA POR EJECUTIVA: NO filtres por cartera.vendedor — usa JOIN cartera ca ON ca.nit = clients.nit y filtra por clients.executive. " .
-            "CARTERA GROUP BY: cartera tiene UNA FILA POR FACTURA. Si agrupas por nit/cliente → usa SUM(CAST(saldo_contable AS DECIMAL(15,2))). Si listas facturas individuales → sin GROUP BY, usa CAST directo. NUNCA mezcles saldo_contable sin agregar en un SELECT con GROUP BY. " .
-            "ON-TIME: usa SIEMPRE pop.delivery_date (en purchase_order_product). NUNCA po.required_delivery_date — da 0%. pop.required_delivery_date NO EXISTE. " .
-            "⚠ ON-TIME numerador y denominador deben medir la misma unidad: por LÍNEA → SUM(CASE WHEN par.dispatch_date<=pop.delivery_date THEN 1 ELSE 0 END)/COUNT(par.id); por OC → COUNT(DISTINCT CASE WHEN...po.id)/COUNT(DISTINCT po.id). NUNCA mezcles líneas con órdenes — da >100%. " .
-            "FILL RATE — hay dos versiones con significados distintos, usar la correcta según el contexto:\n" .
-            "1) FILL RATE DE DESPACHO (cumplimiento de lo que se despachó): parte desde partials con dispatch_date en el período. " .
-            "Mide: de las líneas que ya tienen despacho real, qué % de la cantidad pedida se despachó. " .
-            "Query: FROM partials par JOIN purchase_order_product pop ON par.product_order_id=pop.id AND pop.muestra=0 WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN X AND Y. " .
-            "Fill rate = SUM(par.quantity)/SUM(pop.quantity)*100. " .
-            "⚠ Limitación: excluye OCs sin ningún despacho — sobreestima el cumplimiento real. Usar para análisis de lo despachado.\n" .
-            "2) FILL RATE REAL DEL MES (cumplimiento de lo pedido): parte desde purchase_orders con order_creation_date en el período + LEFT JOIN partials. " .
-            "Mide: de todo lo pedido en el mes, qué % fue despachado (incluyendo OCs sin despacho). " .
-            "Query: FROM purchase_orders po JOIN purchase_order_product pop ON pop.purchase_order_id=po.id AND pop.muestra=0 JOIN products p ON pop.product_id=p.id LEFT JOIN partials par ON par.product_order_id=pop.id AND par.type='real' AND par.deleted_at IS NULL WHERE po.order_creation_date BETWEEN X AND Y AND po.status != 'cancelled'. " .
-            "Fill rate = SUM(par.quantity)/SUM(pop.quantity)*100. " .
-            "⚠ Este es el fill rate correcto para responder '¿cuánto se cumplió del mes?'. Si el período está activo, el % será bajo porque hay OCs recientes sin despachar aún.\n" .
-            "Regla: si preguntan '¿cuál es el fill rate del período/mes?' → usar versión 2 (real). Si preguntan '¿qué fill rate tuvo lo que se despachó?' → usar versión 1. " .
-            "ANÁLISIS DE CRECIMIENTO DE PRODUCTOS (mes vs mes anterior): NUNCA hagas una sola query mezclando productos nuevos con productos establecidos — el resultado es inútil porque el 100% de un producto de 5kg distorsiona el ranking. " .
-            "SIEMPRE genera 3 queries separadas con CTEs o subqueries: " .
-            "1) CRECIMIENTO REAL: WHERE kilos_mes_anterior > 0 AND kilos_mes_actual > kilos_mes_anterior ORDER BY crecimiento_kilos DESC — productos con demanda establecida que aceleran. " .
-            "2) PRODUCTOS NUEVOS DEL MES: WHERE kilos_mes_anterior = 0 AND kilos_mes_actual > 0 ORDER BY kilos_mes_actual DESC — entradas nuevas. " .
-            "3) CAÍDAS: WHERE kilos_mes_anterior > 0 AND kilos_mes_actual < kilos_mes_anterior ORDER BY crecimiento_kilos ASC — productos en riesgo. " .
-            "Presenta las 3 tablas en el mismo bloque SQL usando UNION ALL con una columna 'segmento' que identifique cada grupo, o como 3 queries separadas con comentarios. " .
-            "TENDENCIAS DIARIAS: usa tabla order_statistics (date, commercial_dispatched_value_usd, dispatched_orders_count, total_orders_created, dispatch_fulfillment_rate_usd, pending_dispatch_value_usd, extended_stats JSON) — es un snapshot pre-calculado por día, más eficiente que agregar partials. " .
-            "CRÍTICO GROUP BY (MariaDB ONLY_FULL_GROUP_BY): TODOS los campos no-agregados del SELECT deben estar en el GROUP BY. " .
-            "Si el SELECT tiene c.client_name, c.executive → el GROUP BY DEBE tener c.id, c.client_name, c.executive. " .
-            "Puedes agrupar por c.executive (no por el alias 'ejecutiva') y mostrar el alias solo en el SELECT. " .
-            "NUNCA omitas columnas del SELECT en el GROUP BY aunque parezcan redundantes con el id. " .
-            "⚠ CRÍTICO ALIAS EN GROUP BY / ORDER BY: en MariaDB los alias definidos en el SELECT NO están disponibles en GROUP BY ni en ORDER BY. " .
-            "Si usas CASE WHEN ... END AS tipo_orden en el SELECT, el GROUP BY NO puede usar 'tipo_orden' — dará 'Unknown column'. " .
-            "PATRÓN CORRECTO: envuelve la query en una subquery y agrupa por el alias en la capa externa: " .
-            "SELECT tipo_orden, COUNT(...), SUM(...) FROM (SELECT ..., CASE WHEN ... END AS tipo_orden FROM ...) base GROUP BY tipo_orden ORDER BY valor_usd DESC. " .
-            "O repite la expresión CASE completa en el GROUP BY (evitar si es larga). " .
-            "⚠ PROHIBIDO: subquery correlacionada en SELECT cuando hay GROUP BY — SIEMPRE da error ONLY_FULL_GROUP_BY en MariaDB. " .
-            "PATRÓN OBLIGATORIO para primer despacho por OC: usa JOIN con subquery pre-calculada: " .
-            "JOIN (SELECT order_id, MIN(dispatch_date) AS first_dispatch FROM partials WHERE type='real' AND deleted_at IS NULL GROUP BY order_id) fd ON fd.order_id = po.id — luego usa fd.first_dispatch en el SELECT/HAVING. " .
-            "NUNCA escribas (SELECT MIN(par2.dispatch_date) FROM partials par2 WHERE par2.order_id = po.id ...) dentro del SELECT o HAVING cuando tienes GROUP BY. " .
-            "PRESENTACIÓN: NUNCA incluyas columnas de id (id, client_id, product_id, purchase_order_id, etc.) en el SELECT — son números internos irrelevantes para el usuario. " .
-            "Cuando muestres nombre de cliente (c.client_name o ca.nombre_empresa) SIEMPRE incluye también c.nit o ca.nit en la misma query. " .
-            "CRÍTICO de formato: NO generes tablas HTML — el sistema renderiza los resultados del SQL automáticamente. Escribe solo un párrafo corto explicativo + el bloque SQL. NO uses LaTeX ni markdown (no \\times, no **texto**). " .
-            "Para cualquier lista/ranking/tabla SIEMPRE incluye SQL en: <pre><code class=\"language-sql\">SQL</code></pre>. " .
-            "ALIASES: usa estos nombres en SELECT AS para que la tabla se muestre correctamente: client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, total_kilos, dispatched_kilos, fecha_despacho, fecha_creacion, numero_oc, saldo_cop, deuda_neta. " .
-            "ESTADOS (mapeo español → BD): 'pendiente/pendientes/creada' → 'pending'; 'procesando/en proceso/procesado/en procesamiento' → 'processing'; 'parcial/despacho parcial' → 'parcial_status'; 'completada/completa/entregada/despachada' → 'completed'; 'cancelada/anulada' → 'cancelled'. " .
-            "Después del SQL agrega siempre en español legible (NUNCA nombres de columna BD): '<p><small>Mostrando: X, Y, Z. Puedes pedirme que también muestre: ...</small></p>'.\n\nMensaje del usuario: ";
-
-        $model = $request->get('model', 'gpt-4.1');
-
-        if ($limitResponse = $this->checkAndIncrementModelLimit($model)) {
-            return $limitResponse;
-        }
-
-        // === DEEPSEEK PATH ===
-        if (str_starts_with($model, 'deepseek')) {
-            // Reconstruir historial completo desde la sesión (DeepSeek es stateless, sin thread_id)
-            $apiMessages = [];
-            if ($session) {
-                foreach ($session->messages as $msg) {
-                    $role = $msg['role'] === 'assistant' ? 'assistant' : 'user';
-                    $apiMessages[] = ['role' => $role, 'content' => $msg['content']];
-                }
-            }
-            // Agregar el nuevo mensaje del usuario (el contexto inicial ya está en la primera entrada del historial)
-            $apiMessages[] = ['role' => 'user', 'content' => $request->message];
-
-            try {
-                $result = $this->callDeepSeekApi($apiMessages);
-
-                if (!$result['success']) {
-                    return response()->json(['success' => false, 'message' => 'Error en DeepSeek'], 500);
-                }
-
-                $aiMessage = $result['content'];
-                $now       = now()->toDateTimeString();
-
-                if ($session) {
-                    $messages   = $session->messages ?? [];
-                    $messages[] = ['role' => 'user',      'content' => $request->message, 'time' => $now];
-                    $messages[] = ['role' => 'assistant', 'content' => $aiMessage,         'time' => $now];
-                    $session->update(['messages' => $messages]);
-                }
-
-                return response()->json([
-                    'success'   => true,
-                    'message'   => $aiMessage,
-                    'thread_id' => $request->thread_id,
-                ]);
-            } catch (\Throwable $e) {
-                Log::error('[Chat][DeepSeek] chatMessage exception: ' . $e->getMessage());
-                return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-            }
-        }
-
-        // === NODE PROXY PATH (servidor Node intermedio) ===
-        /*
-        try {
-            $resp = Http::withHeaders(['X-Api-Key' => $aiKey])
-                ->timeout(120)
-                ->post("{$aiUrl}/v1/chat/completions", [
-                    'model'     => $model,
-                    'messages'  => [['role' => 'user', 'content' => $schemaHint . $request->message]],
-                    'thread_id' => $request->thread_id,
-                ]);
-
-            if (!$resp->successful()) {
-                Log::error('[Chat] Error en chatMessage: ' . $resp->body());
-                return response()->json(['success' => false, 'message' => 'Error en IA'], 500);
-            }
-
-            $aiMessage = trim($resp->json('choices.0.message.content', ''));
-            $now       = now()->toDateTimeString();
-
-            if ($session) {
-                $messages   = $session->messages ?? [];
-                $messages[] = ['role' => 'user',      'content' => $request->message, 'time' => $now];
-                $messages[] = ['role' => 'assistant', 'content' => $aiMessage,         'time' => $now];
-                $session->update(['messages' => $messages]);
-            }
-
-            return response()->json([
-                'success'   => true,
-                'message'   => $aiMessage,
-                'thread_id' => $resp->json('thread_id'),
-            ]);
-        } catch (\Throwable $e) {
-            Log::error('[Chat] chatMessage exception: ' . $e->getMessage());
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-        }
-        */
-
-        return response()->json(['success' => false, 'message' => 'Modelo no soportado en este endpoint'], 422);
+        return "Período activo de esta sesión: {$startDate} al {$endDate}.\n" .
+               "TRM de hoy ({$today}): {$trmHoyStr} COP/USD — usar SOLO para convertir valores de cartera a USD si se piden. Las órdenes tienen su propia TRM individual.";
     }
-
-    /**
-     * Lista las últimas sesiones de chat del usuario autenticado.
-     */
-    public function chatSessions(): JsonResponse
-    {
-        $sessions = ChatSession::where('user_id', auth()->id())
-            ->orderByDesc('created_at')
-            ->limit(30)
-            ->get(['id', 'period_label', 'period_start', 'period_end', 'thread_id', 'created_at', 'messages'])
-            ->map(fn($s) => [
-                'id'            => $s->id,
-                'period_label'  => $s->period_label,
-                'period_start'  => $s->period_start?->toDateString(),
-                'period_end'    => $s->period_end?->toDateString(),
-                'thread_id'     => $s->thread_id,
-                'created_at'    => $s->created_at->toDateTimeString(),
-                'message_count' => count($s->messages ?? []),
-            ]);
-
-        return response()->json(['success' => true, 'data' => $sessions]);
-    }
-
-    /**
-     * Carga los mensajes de una sesión específica.
-     */
-    public function chatSessionMessages(ChatSession $session): JsonResponse
-    {
-        abort_if($session->user_id !== auth()->id(), 403);
-
-        return response()->json([
-            'success'  => true,
-            'session'  => [
-                'id'           => $session->id,
-                'period_label' => $session->period_label,
-                'period_start' => $session->period_start?->toDateString(),
-                'period_end'   => $session->period_end?->toDateString(),
-                'thread_id'    => $session->thread_id,
-                'messages'     => $session->messages ?? [],
-            ],
-        ]);
-    }
-
-    /**
-     * Elimina una sesión de chat del usuario autenticado.
-     */
-    public function chatSessionDelete(ChatSession $session): JsonResponse
-    {
-        abort_if($session->user_id !== auth()->id(), 403);
-        $session->delete();
-        return response()->json(['success' => true]);
-    }
-
-    /**
-     * Elimina todas las sesiones de chat del usuario autenticado.
-     */
-    public function chatSessionDeleteAll(): JsonResponse
-    {
-        ChatSession::where('user_id', auth()->id())->delete();
-        return response()->json(['success' => true]);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // DeepSeek API (llamada directa, sin servidor Node intermedio)
-    // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * Envía una conversación a DeepSeek y retorna la respuesta.
@@ -780,8 +796,11 @@ class MonthlyReportController extends Controller
             ])
             ->timeout(120)
             ->post('https://api.deepseek.com/chat/completions', [
-                'model'    => 'deepseek-chat',
-                'messages' => $messages,
+                'model'       => 'deepseek-chat',
+                'messages'    => $messages,
+                'temperature' => 0.1,
+                'max_tokens'  => 3000,
+                'stream'      => false,
             ]);
 
         if (!$resp->successful()) {

@@ -210,7 +210,7 @@ class ProcessEmailDispatch implements ShouldQueue
     {
         $cartera = Cartera::with(['client'])
             ->where('fecha_cartera', $fecha)
-            ->whereHas('client', fn ($q) => $q->where('nit', $nit))
+            ->where('nit', $nit)
             ->get();
 
         if ($cartera->isEmpty()) {

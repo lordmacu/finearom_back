@@ -9,12 +9,32 @@ Lee credenciales de DB desde variables de entorno (Docker) o .env de Laravel.
 import sys
 import os
 import re
+import signal
 import warnings
 import numpy as np
 import pandas as pd
 import pymysql
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+
+# ── Timeout por modelo ────────────────────────────────────────────────────────
+MODEL_TIMEOUT = 10  # segundos máximos por modelo/serie
+
+class ModelTimeout(Exception):
+    pass
+
+def _timeout_handler(signum, frame):
+    raise ModelTimeout("Timeout")
+
+def run_with_timeout(fn, *args, **kwargs):
+    """Ejecuta fn con un timeout. Si supera MODEL_TIMEOUT segundos lanza ModelTimeout."""
+    signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.alarm(MODEL_TIMEOUT)
+    try:
+        result = fn(*args, **kwargs)
+    finally:
+        signal.alarm(0)
+    return result
 
 # Solo suprimir advertencias de convergencia de statsmodels — no advertencias
 # de NumPy (overflow, nan) que indican problemas reales en los datos
@@ -24,7 +44,6 @@ warnings.filterwarnings('ignore', message='Maximum Likelihood')
 
 # ── Credenciales DB ───────────────────────────────────────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ENV_PATH   = os.path.join(SCRIPT_DIR, "..", ".env")
 
 def parse_env(path):
     env = {}
@@ -42,12 +61,18 @@ def parse_env(path):
         pass
     return env
 
-env     = parse_env(ENV_PATH)
+# Leer backend/.env y raíz — si backend tiene valor vacío, usar el de raíz
+env_backend = parse_env(os.path.join(SCRIPT_DIR, "..", ".env"))
+env_root    = parse_env(os.path.join(SCRIPT_DIR, "..", "..", ".env"))
+env = { k: (env_backend.get(k) or env_root.get(k) or '')
+        for k in set(list(env_backend) + list(env_root)) }
+
 DB_HOST = os.environ.get("DB_HOST") or env.get("DB_HOST", "127.0.0.1")
 DB_PORT = int(os.environ.get("DB_PORT") or env.get("DB_PORT", 3306))
 DB_NAME = os.environ.get("DB_DATABASE") or env.get("DB_DATABASE", "finearom")
 DB_USER = os.environ.get("DB_USERNAME") or env.get("DB_USERNAME", "root")
 DB_PASS = os.environ.get("DB_PASSWORD") or env.get("DB_PASSWORD", "")
+
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 MES_NUM = {
@@ -196,7 +221,7 @@ def forecast_holt_winters(series, n=4):
     )
     fit  = model.fit(optimized=True, remove_bias=True)
     pred = np.maximum(np.asarray(fit.forecast(n)), 0)
-    sim  = fit.simulate(n, repetitions=500, error='add')
+    sim  = fit.simulate(n, repetitions=100, error='add')
     lb   = np.maximum(np.percentile(sim, 10, axis=1), 0)
     ub   = np.maximum(np.percentile(sim, 90, axis=1), 0)
     # FIX: garantizar coherencia lb <= pred <= ub
@@ -366,6 +391,85 @@ def forecast_xgboost(series, nit, codigo, n=4):
     return preds, preds * 0.8, preds * 1.2
 
 
+# ── Modelo: Prophet ───────────────────────────────────────────────────────────
+def forecast_prophet(series, start_period, n=4):
+    import logging
+    logging.getLogger('prophet').setLevel(logging.ERROR)
+    logging.getLogger('cmdstanpy').setLevel(logging.ERROR)
+    from prophet import Prophet
+
+    min_y = int(start_period) // 100
+    min_m = int(start_period) % 100
+
+    dates = []
+    y, m = min_y, min_m
+    for _ in range(len(series)):
+        dates.append(f'{y}-{m:02d}-01')
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+
+    df_p = pd.DataFrame({'ds': pd.to_datetime(dates), 'y': np.maximum(series, 0).tolist()})
+
+    yearly = len(series) >= 12
+    # Multiplicativo solo si la media es > 0 para evitar división por cero
+    s_mode = 'multiplicative' if df_p['y'].mean() > 0 else 'additive'
+    model  = Prophet(
+        yearly_seasonality=yearly,
+        weekly_seasonality=False,
+        daily_seasonality=False,
+        seasonality_mode=s_mode,
+        uncertainty_samples=200,
+    )
+    model.fit(df_p)
+
+    future   = model.make_future_dataframe(periods=n, freq='MS')
+    forecast = model.predict(future)
+
+    pred = np.maximum(forecast['yhat'].values[-n:], 0)
+    lb   = np.maximum(forecast['yhat_lower'].values[-n:], 0)
+    ub   = np.maximum(forecast['yhat_upper'].values[-n:], 0)
+    lb   = np.minimum(lb, pred)
+    ub   = np.maximum(ub, pred)
+    return pred, lb, ub
+
+
+# ── Modelo: AutoARIMA ─────────────────────────────────────────────────────────
+def forecast_auto_arima(series, start_period, n=4):
+    from pmdarima import auto_arima
+
+    s   = np.maximum(series, 0)
+    # Periodo estacional: 12 si hay 24+ meses, 6 si hay 12+, 1 (sin estacionalidad) si menos
+    m   = 12 if len(s) >= 24 else (6 if len(s) >= 12 else 1)
+
+    model = auto_arima(
+        s,
+        seasonal=m > 1,
+        m=m,
+        stepwise=True,
+        suppress_warnings=True,
+        error_action='ignore',
+        information_criterion='aic',
+        max_p=3, max_q=3, max_P=2, max_Q=2,
+    )
+    pred, conf = model.predict(n_periods=n, return_conf_int=True, alpha=0.2)
+    pred = np.maximum(pred, 0)
+    lb   = np.maximum(conf[:, 0], 0)
+    ub   = np.maximum(conf[:, 1], 0)
+    lb   = np.minimum(lb, pred)
+    ub   = np.maximum(ub, pred)
+    return pred, lb, ub
+
+
+# ── Modelo: Ensemble (promedio de todos los modelos exitosos) ─────────────────
+def compute_ensemble(successful_preds, n=4):
+    all_pred = np.array([v[0] for v in successful_preds.values()])
+    all_lb   = np.array([v[1] for v in successful_preds.values()])
+    all_ub   = np.array([v[2] for v in successful_preds.values()])
+    return all_pred.mean(axis=0), all_lb.mean(axis=0), all_ub.mean(axis=0)
+
+
 # ── Procesar todas las series (secuencial — statsmodels no es fork-safe) ──────
 print("Generando pronósticos...", flush=True)
 groups_list = list(df.groupby(['nit', 'codigo']))
@@ -390,27 +494,33 @@ for idx, ((nit, codigo), grp) in enumerate(groups_list):
         continue
 
     if primary_model == 'holt_winters':
-        models_to_run = ['holt_winters', 'theta', 'xgboost']
+        individual_models = ['holt_winters', 'theta', 'xgboost']
     elif primary_model == 'croston':
-        models_to_run = ['croston', 'xgboost']
-    else:
-        models_to_run = ['theta', 'xgboost']
+        individual_models = ['croston', 'xgboost']
+    else:  # theta
+        individual_models = ['theta', 'xgboost']
 
-    for model_name in models_to_run:
+    # Correr cada modelo individualmente y colectar los exitosos
+    successful_preds = {}
+    for model_name in individual_models:
         try:
             if model_name == 'holt_winters':
-                pred, lb, ub = forecast_holt_winters(series)
+                pred, lb, ub = run_with_timeout(forecast_holt_winters, series)
             elif model_name == 'croston':
-                pred, lb, ub = forecast_croston(series)
+                pred, lb, ub = run_with_timeout(forecast_croston, series)
             elif model_name == 'theta':
-                pred, lb, ub = forecast_theta(series, start_period=start_period)
+                pred, lb, ub = run_with_timeout(forecast_theta, series, start_period=start_period)
             elif model_name == 'xgboost':
-                pred, lb, ub = forecast_xgboost(series, nit, codigo)
+                pred, lb, ub = run_with_timeout(forecast_xgboost, series, nit, codigo)
+            elif model_name == 'prophet':
+                pred, lb, ub = run_with_timeout(forecast_prophet, series, start_period)
+            elif model_name == 'auto_arima':
+                pred, lb, ub = run_with_timeout(forecast_auto_arima, series, start_period)
             else:
                 raise ValueError(f"Modelo desconocido: {model_name}")
 
-            # Modelos secundarios tienen confianza 'media'
             model_confianza = confianza if model_name == primary_model else 'media'
+            successful_preds[model_name] = (pred, lb, ub)
 
             for i, fm in enumerate(future_months):
                 results.append({
@@ -426,9 +536,38 @@ for idx, ((nit, codigo), grp) in enumerate(groups_list):
                     'generated_at':      GENERATED_AT,
                 })
             ok += 1
+        except ModelTimeout:
+            # Timeout silencioso — el modelo se saltea, no cuenta como error crítico
+            key = f"{model_name}:Timeout"
+            if key not in error_samples:
+                error_samples[key] = f"Superó {MODEL_TIMEOUT}s — serie omitida"
         except Exception as e:
             errors += 1
             key = f"{model_name}:{type(e).__name__}"
+            if key not in error_samples:
+                error_samples[key] = str(e)[:200]
+
+    # Ensemble: promedio de todos los modelos exitosos (mínimo 2)
+    if len(successful_preds) >= 2:
+        try:
+            ens_pred, ens_lb, ens_ub = compute_ensemble(successful_preds)
+            for i, fm in enumerate(future_months):
+                results.append({
+                    'nit':               nit,
+                    'codigo':            codigo,
+                    'modelo':            'ensemble',
+                    'año':               str(fm['año']),
+                    'mes':               fm['mes'],
+                    'cantidad_forecast': max(int(round(ens_pred[i])), 0),
+                    'lower_bound':       max(int(round(ens_lb[i])), 0),
+                    'upper_bound':       max(int(round(ens_ub[i])), 0),
+                    'confianza':         'alta',
+                    'generated_at':      GENERATED_AT,
+                })
+            ok += 1
+        except Exception as e:
+            errors += 1
+            key = f"ensemble:{type(e).__name__}"
             if key not in error_samples:
                 error_samples[key] = str(e)[:200]
 
