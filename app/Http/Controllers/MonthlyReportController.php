@@ -856,14 +856,23 @@ class MonthlyReportController extends Controller
     {
         $dhl = app(DhlService::class);
 
-        // 1. Número de guía directo (10 dígitos)
-        if (preg_match('/\b(\d{10})\b/', $message, $matches)) {
-            $result = $dhl->trackShipment($matches[1]);
-            if (!$result['success']) {
-                if (!empty($result['not_found'])) return ['has_dhl' => false, 'text' => ''];
-                return ['has_dhl' => false, 'text' => "Error técnico al consultar DHL: {$result['error']}"];
+        // 1. Número de guía directo (10-12 dígitos)
+        // DHL = 10 dígitos | Coordinadora = 11 dígitos | Aldia/FedEx = 12 dígitos
+        if (preg_match('/\b(\d{10,12})\b/', $message, $matches)) {
+            $trackingNumber = $matches[1];
+            $isDhl = strlen($trackingNumber) === 10;
+
+            if ($isDhl) {
+                $result = $dhl->trackShipment($trackingNumber);
+                if (!$result['success']) {
+                    if (!empty($result['not_found'])) return ['has_dhl' => false, 'text' => ''];
+                    return ['has_dhl' => false, 'text' => "Error técnico al consultar DHL: {$result['error']}"];
+                }
+                return ['has_dhl' => true, 'text' => $dhl->formatForChat($result['data'])];
             }
-            return ['has_dhl' => true, 'text' => $dhl->formatForChat($result['data'])];
+
+            // Coordinadora/Aldia/FedEx — solo buscar en Finearom, sin llamar DHL
+            return ['has_dhl' => false, 'text' => ''];
         }
 
         // 2. Número de OC — 4 dígitos + guión + dígitos/guiones
@@ -889,22 +898,25 @@ class MonthlyReportController extends Controller
                 "  Fecha creación: {$order->order_creation_date}",
             ]);
 
-            $trackingNumbers = DB::table('partials')
+            // Solo llamar DHL para guías cuyo transportador sea DHL (10 dígitos exactos)
+            $dhlTrackings = DB::table('partials')
                 ->where('order_id', $order->id)
                 ->where('type', 'real')
                 ->whereNull('deleted_at')
                 ->whereNotNull('tracking_number')
                 ->where('tracking_number', '!=', '')
+                ->whereRaw("LOWER(transporter) = 'dhl'")
+                ->whereRaw("tracking_number REGEXP '^[0-9]{10}$'")
                 ->pluck('tracking_number')
                 ->unique()
                 ->values();
 
-            if ($trackingNumbers->isEmpty()) {
+            if ($dhlTrackings->isEmpty()) {
                 return ['has_dhl' => false, 'text' => $orderInfo];
             }
 
             $dhlLines = [];
-            foreach ($trackingNumbers as $tracking) {
+            foreach ($dhlTrackings as $tracking) {
                 $result = $dhl->trackShipment($tracking);
                 if (!$result['success']) {
                     if (empty($result['not_found'])) {
