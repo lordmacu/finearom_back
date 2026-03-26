@@ -917,19 +917,26 @@ class MonthlyReportController extends Controller
                 return implode("\n", $parts);
             }
 
-            $parts[] = "\nGuías DHL registradas:";
+            $dhlResults = [];
             foreach ($trackingNumbers as $tracking) {
                 $result = $dhl->trackShipment($tracking);
                 if (!$result['success']) {
-                    // 404 = guía no activa aún en DHL, omitir silenciosamente
                     if (empty($result['not_found'])) {
-                        $parts[] = "\n--- Guía {$tracking} ---";
-                        $parts[] = "No se pudo consultar en DHL: {$result['error']}";
+                        // Error real (no 404): sí informar
+                        $dhlResults[] = "--- Guía {$tracking} ---\nError al consultar DHL: {$result['error']}";
                     }
+                    // 404: omitir silenciosamente
                     continue;
                 }
-                $parts[] = "\n--- Guía {$tracking} ---";
-                $parts[] = $dhl->formatForChat($result['data']);
+                $dhlResults[] = "--- Guía {$tracking} ---\n" . $dhl->formatForChat($result['data']);
+            }
+
+            if (empty($dhlResults)) {
+                // Todas las guías dieron 404 — no mencionar DHL
+                $parts[] = "Guías registradas en Finearom: " . $trackingNumbers->implode(', ') . " (sin datos de seguimiento en DHL aún).";
+            } else {
+                $parts[] = "\nSeguimiento DHL:";
+                foreach ($dhlResults as $r) $parts[] = "\n" . $r;
             }
 
             return implode("\n", $parts);
