@@ -762,40 +762,37 @@ class MonthlyReportController extends Controller
             "2. SIEMPRE genera SQL para buscar esa guía usando UNION ALL — una fila por cada FASE del ciclo de vida de la orden.\n" .
             "   Columnas fijas en las tres partes del UNION: fase, fecha, numero_oc, estado_oc, cliente, nit, ejecutiva, factura, guia, transportador, kilos\n" .
             "   NOTA: el campo del nombre del cliente en la tabla clients es c.client_name (NO c.name).\n" .
-            "   SQL obligatorio cuando hay número de guía (UNION ALL de 3 partes):\n\n" .
-            "   -- Obtener la OC a partir de la guía\n" .
-            "   WITH oc AS (\n" .
-            "     SELECT po.id AS po_id, po.order_consecutive, po.order_creation_date, po.status,\n" .
-            "            c.client_name AS cliente, c.nit,\n" .
-            "            REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva\n" .
-            "     FROM partials par\n" .
-            "     JOIN purchase_orders po ON po.id = par.order_id\n" .
-            "     JOIN clients c ON c.id = po.client_id\n" .
-            "     WHERE par.tracking_number = '{NUMERO_GUIA}'\n" .
-            "       AND par.type = 'real' AND par.deleted_at IS NULL\n" .
-            "     LIMIT 1\n" .
-            "   )\n" .
-            "   -- Fase 1: Creación\n" .
-            "   SELECT 'creación' AS fase, oc.order_creation_date AS fecha,\n" .
-            "     oc.order_consecutive AS numero_oc, oc.status AS estado_oc,\n" .
-            "     oc.cliente, oc.nit, oc.ejecutiva,\n" .
+            "   SQL obligatorio cuando hay número de guía (UNION ALL sin CTE — MariaDB no materializa CTEs referenciados múltiples veces):\n\n" .
+            "   -- Fase 1: Creación de la OC\n" .
+            "   SELECT 'creación' AS fase, po.order_creation_date AS fecha,\n" .
+            "     po.order_consecutive AS numero_oc, po.status AS estado_oc,\n" .
+            "     c.client_name AS cliente, c.nit,\n" .
+            "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva,\n" .
             "     NULL AS factura, NULL AS guia, NULL AS transportador, NULL AS kilos\n" .
-            "   FROM oc\n" .
+            "   FROM purchase_orders po\n" .
+            "   JOIN clients c ON c.id = po.client_id\n" .
+            "   WHERE po.id = (SELECT order_id FROM partials WHERE tracking_number='{NUMERO_GUIA}' AND type='real' AND deleted_at IS NULL LIMIT 1)\n" .
             "   UNION ALL\n" .
-            "   -- Fase 2: Estimado por Marlon (temporal) — una fila por cada partial temporal\n" .
-            "   SELECT 'estimado (Marlon)' AS fase, par_t.dispatch_date AS fecha,\n" .
-            "     oc.order_consecutive, oc.status, oc.cliente, oc.nit, oc.ejecutiva,\n" .
+            "   -- Fase 2: Estimados por Marlon — una fila por cada partial temporal\n" .
+            "   SELECT 'estimado (Marlon)', par_t.dispatch_date,\n" .
+            "     po.order_consecutive, po.status, c.client_name, c.nit,\n" .
+            "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),\n" .
             "     NULL, NULL, NULL, par_t.quantity\n" .
-            "   FROM oc\n" .
-            "   JOIN partials par_t ON par_t.order_id = oc.po_id\n" .
+            "   FROM partials par_t\n" .
+            "   JOIN purchase_orders po ON po.id = par_t.order_id\n" .
+            "   JOIN clients c ON c.id = po.client_id\n" .
+            "   WHERE par_t.order_id = (SELECT order_id FROM partials WHERE tracking_number='{NUMERO_GUIA}' AND type='real' AND deleted_at IS NULL LIMIT 1)\n" .
             "     AND par_t.type = 'temporal' AND par_t.deleted_at IS NULL\n" .
             "   UNION ALL\n" .
-            "   -- Fase 3: Despacho real por Alexa — una fila por cada partial real\n" .
-            "   SELECT 'despacho real (Alexa)' AS fase, par_r.dispatch_date AS fecha,\n" .
-            "     oc.order_consecutive, oc.status, oc.cliente, oc.nit, oc.ejecutiva,\n" .
+            "   -- Fase 3: Despachos reales por Alexa — una fila por cada partial real\n" .
+            "   SELECT 'despacho real (Alexa)', par_r.dispatch_date,\n" .
+            "     po.order_consecutive, po.status, c.client_name, c.nit,\n" .
+            "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),\n" .
             "     par_r.invoice_number, par_r.tracking_number, par_r.transporter, par_r.quantity\n" .
-            "   FROM oc\n" .
-            "   JOIN partials par_r ON par_r.order_id = oc.po_id\n" .
+            "   FROM partials par_r\n" .
+            "   JOIN purchase_orders po ON po.id = par_r.order_id\n" .
+            "   JOIN clients c ON c.id = po.client_id\n" .
+            "   WHERE par_r.tracking_number = '{NUMERO_GUIA}'\n" .
             "     AND par_r.type = 'real' AND par_r.deleted_at IS NULL\n" .
             "   ORDER BY fecha ASC\n\n" .
             "- En \"showing\": fase, fecha, número de OC, cliente, estado, factura, guía, kilos.\n" .
