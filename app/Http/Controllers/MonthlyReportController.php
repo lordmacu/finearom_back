@@ -759,21 +759,36 @@ class MonthlyReportController extends Controller
             "SEGUIMIENTO DHL — GUÍAS DE DESPACHO:\n" .
             "Cuando el usuario pregunte por una guía de envío (número de 10 dígitos) SIEMPRE debes hacer DOS cosas a la vez:\n" .
             "1. Si en el mensaje hay una sección [DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]: interpreta y explica el estado en el campo \"html\" (dónde está, último movimiento, si fue entregado, ubicación actual). Si hay error de DHL: explícalo brevemente.\n" .
-            "2. SIEMPRE genera SQL para buscar esa guía en la base de datos de Finearom. El campo es partials.tracking_number.\n" .
+            "2. SIEMPRE genera SQL para buscar esa guía en la base de datos de Finearom mostrando el PROCESO COMPLETO de la orden (timeline).\n" .
+            "   El resultado debe tener estas columnas EN ESTE ORDEN EXACTO (real primero, luego temporal, luego creación):\n" .
+            "   - Columnas del despacho REAL (par_real): fecha_despacho_real, factura, guia, transportador, kilos_despachados\n" .
+            "   - Columnas del despacho ESTIMADO (par_temp): fecha_estimada_despacho (de Marlon)\n" .
+            "   - Columnas de la orden: fecha_creacion, numero_oc, estado_oc, cliente, nit, ejecutiva\n" .
             "   SQL obligatorio cuando hay número de guía:\n" .
-            "   SELECT po.order_consecutive AS numero_oc, c.name AS cliente, c.nit,\n" .
-            "     par.tracking_number AS guia, par.transporter AS transportador,\n" .
-            "     par.dispatch_date AS fecha_despacho, par.invoice_number AS factura,\n" .
-            "     par.quantity AS kilos_despachados, po.status AS estado_oc,\n" .
-            "     c.executive AS ejecutiva\n" .
-            "   FROM partials par\n" .
-            "   JOIN purchase_orders po ON po.id = par.order_id\n" .
+            "   SELECT\n" .
+            "     par_real.dispatch_date        AS fecha_despacho_real,\n" .
+            "     par_real.invoice_number       AS factura,\n" .
+            "     par_real.tracking_number      AS guia,\n" .
+            "     par_real.transporter          AS transportador,\n" .
+            "     par_real.quantity             AS kilos_despachados,\n" .
+            "     MIN(par_temp.dispatch_date)   AS fecha_estimada_despacho,\n" .
+            "     po.order_creation_date        AS fecha_creacion,\n" .
+            "     po.order_consecutive          AS numero_oc,\n" .
+            "     po.status                     AS estado_oc,\n" .
+            "     c.name                        AS cliente,\n" .
+            "     c.nit,\n" .
+            "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva\n" .
+            "   FROM partials par_real\n" .
+            "   JOIN purchase_orders po ON po.id = par_real.order_id\n" .
             "   JOIN clients c ON c.id = po.client_id\n" .
-            "   WHERE par.tracking_number = '{NUMERO_GUIA}'\n" .
-            "     AND par.type = 'real' AND par.deleted_at IS NULL\n" .
-            "- En \"showing\": número de OC, cliente, guía, fecha de despacho, factura, kilos, estado.\n" .
-            "- En \"available\": ejecutiva, transportador, NIT.\n" .
-            "- El html debe incluir TANTO el resumen DHL (o el error) COMO una nota indicando que abajo se muestra la OC asociada en Finearom.";
+            "   LEFT JOIN partials par_temp ON par_temp.order_id = po.id\n" .
+            "     AND par_temp.type = 'temporal' AND par_temp.deleted_at IS NULL\n" .
+            "   WHERE par_real.tracking_number = '{NUMERO_GUIA}'\n" .
+            "     AND par_real.type = 'real' AND par_real.deleted_at IS NULL\n" .
+            "   GROUP BY par_real.id, po.id, c.id\n" .
+            "- En \"showing\": fecha despacho real, fecha estimada, fecha creación, OC, cliente, estado, guía, factura, kilos.\n" .
+            "- En \"available\": transportador, NIT, ejecutiva.\n" .
+            "- El html debe incluir TANTO el resumen DHL (o el error) COMO una nota indicando que abajo se muestra el proceso completo de la OC en Finearom.";
     }
 
     /**
