@@ -763,8 +763,8 @@ class MonthlyReportController extends Controller
             "   Columnas fijas en las tres partes del UNION: fase, fecha, numero_oc, estado_oc, cliente, nit, ejecutiva, factura, guia, transportador, kilos\n" .
             "   NOTA: el campo del nombre del cliente en la tabla clients es c.client_name (NO c.name).\n" .
             "   SQL obligatorio cuando hay número de guía (UNION ALL sin CTE — MariaDB no materializa CTEs referenciados múltiples veces):\n\n" .
-            "   -- Fase 1: Creación de la OC\n" .
-            "   SELECT 'creación' AS fase, po.order_creation_date AS fecha,\n" .
+            "   SQL obligatorio cuando hay número de guía — incluye fase_orden para ordenar creación→estimado→real independientemente de fechas:\n\n" .
+            "   SELECT 'creación' AS fase, 1 AS fase_orden, po.order_creation_date AS fecha,\n" .
             "     po.order_consecutive AS numero_oc, po.status AS estado_oc,\n" .
             "     c.client_name AS cliente, c.nit,\n" .
             "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva,\n" .
@@ -773,8 +773,7 @@ class MonthlyReportController extends Controller
             "   JOIN clients c ON c.id = po.client_id\n" .
             "   WHERE po.id = (SELECT order_id FROM partials WHERE tracking_number='{NUMERO_GUIA}' AND type='real' AND deleted_at IS NULL LIMIT 1)\n" .
             "   UNION ALL\n" .
-            "   -- Fase 2: Estimados por Marlon — una fila por cada partial temporal\n" .
-            "   SELECT 'estimado (Marlon)', par_t.dispatch_date,\n" .
+            "   SELECT 'estimado (Marlon)', 2, par_t.dispatch_date,\n" .
             "     po.order_consecutive, po.status, c.client_name, c.nit,\n" .
             "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),\n" .
             "     NULL, NULL, NULL, par_t.quantity\n" .
@@ -784,8 +783,7 @@ class MonthlyReportController extends Controller
             "   WHERE par_t.order_id = (SELECT order_id FROM partials WHERE tracking_number='{NUMERO_GUIA}' AND type='real' AND deleted_at IS NULL LIMIT 1)\n" .
             "     AND par_t.type = 'temporal' AND par_t.deleted_at IS NULL\n" .
             "   UNION ALL\n" .
-            "   -- Fase 3: Despachos reales por Alexa — una fila por cada partial real\n" .
-            "   SELECT 'despacho real (Alexa)', par_r.dispatch_date,\n" .
+            "   SELECT 'despacho real (Alexa)', 3, par_r.dispatch_date,\n" .
             "     po.order_consecutive, po.status, c.client_name, c.nit,\n" .
             "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),\n" .
             "     par_r.invoice_number, par_r.tracking_number, par_r.transporter, par_r.quantity\n" .
@@ -794,7 +792,7 @@ class MonthlyReportController extends Controller
             "   JOIN clients c ON c.id = po.client_id\n" .
             "   WHERE par_r.tracking_number = '{NUMERO_GUIA}'\n" .
             "     AND par_r.type = 'real' AND par_r.deleted_at IS NULL\n" .
-            "   ORDER BY fecha ASC\n\n" .
+            "   ORDER BY fase_orden ASC, fecha ASC\n\n" .
             "- En \"showing\": fase, fecha, número de OC, cliente, estado, factura, guía, kilos.\n" .
             "- En \"available\": transportador, NIT, ejecutiva.\n" .
             "- El html debe incluir TANTO el resumen DHL (o el error) COMO una nota indicando que abajo se muestra el proceso completo de la OC en Finearom.";
