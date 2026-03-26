@@ -761,12 +761,12 @@ class MonthlyReportController extends Controller
             "1. Si en el mensaje hay una sección [DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]: interpreta y explica el estado en el campo \"html\" (dónde está, último movimiento, si fue entregado, ubicación actual). Si hay error de DHL: explícalo brevemente.\n" .
             "2. SIEMPRE genera SQL para buscar esa guía usando UNION ALL — una fila por cada FASE del ciclo de vida de la orden.\n" .
             "   Columnas fijas en las tres partes del UNION: fase, fecha, numero_oc, estado_oc, cliente, nit, ejecutiva, factura, guia, transportador, kilos\n" .
-            "   NOTA: el campo del nombre del cliente en la tabla clients es c.name (NO c.client_name).\n" .
+            "   NOTA: el campo del nombre del cliente en la tabla clients es c.client_name (NO c.name).\n" .
             "   SQL obligatorio cuando hay número de guía (UNION ALL de 3 partes):\n\n" .
             "   -- Obtener la OC a partir de la guía\n" .
             "   WITH oc AS (\n" .
             "     SELECT po.id AS po_id, po.order_consecutive, po.order_creation_date, po.status,\n" .
-            "            c.name AS cliente, c.nit,\n" .
+            "            c.client_name AS cliente, c.nit,\n" .
             "            REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva\n" .
             "     FROM partials par\n" .
             "     JOIN purchase_orders po ON po.id = par.order_id\n" .
