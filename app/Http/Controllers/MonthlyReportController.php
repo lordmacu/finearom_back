@@ -764,8 +764,10 @@ class MonthlyReportController extends Controller
             "   NOTA: el campo del nombre del cliente en la tabla clients es c.client_name (NO c.name).\n" .
             "   SQL obligatorio cuando hay número de guía (UNION ALL sin CTE — MariaDB no materializa CTEs referenciados múltiples veces):\n\n" .
             "   SQL obligatorio cuando hay número de guía — incluye fase_orden para ordenar creación→estimado→real independientemente de fechas:\n\n" .
+            "   -- El estado_oc se infiere por fase (po.status es siempre el actual, no histórico):\n" .
+            "   -- creación → siempre 'pending' | estimado → siempre 'processing' | real → po.status actual\n" .
             "   SELECT 'creación' AS fase, 1 AS fase_orden, po.order_creation_date AS fecha,\n" .
-            "     po.order_consecutive AS numero_oc, po.status AS estado_oc,\n" .
+            "     po.order_consecutive AS numero_oc, 'pending' AS estado_oc,\n" .
             "     c.client_name AS cliente, c.nit,\n" .
             "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva,\n" .
             "     NULL AS factura, NULL AS guia, NULL AS transportador, NULL AS kilos\n" .
@@ -774,7 +776,7 @@ class MonthlyReportController extends Controller
             "   WHERE po.id = (SELECT order_id FROM partials WHERE tracking_number='{NUMERO_GUIA}' AND type='real' AND deleted_at IS NULL LIMIT 1)\n" .
             "   UNION ALL\n" .
             "   SELECT 'estimado (Marlon)', 2, par_t.dispatch_date,\n" .
-            "     po.order_consecutive, po.status, c.client_name, c.nit,\n" .
+            "     po.order_consecutive, 'processing', c.client_name, c.nit,\n" .
             "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),\n" .
             "     NULL, NULL, NULL, par_t.quantity\n" .
             "   FROM partials par_t\n" .
