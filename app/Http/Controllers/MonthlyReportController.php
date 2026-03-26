@@ -758,7 +758,7 @@ class MonthlyReportController extends Controller
             "  → Fila del TOTAL: COALESCE(MAX(ea.nombre_real), 'TOTAL') AS ejecutiva\n\n" .
             "SEGUIMIENTO DHL — GUÍAS DE DESPACHO:\n" .
             "Cuando el usuario pregunte por una GUÍA (número 10 dígitos) O por una ORDEN DE COMPRA (patrón YYYY-NNNN, ej: 2327-2699):\n" .
-            "1. DHL: SOLO menciona DHL si el mensaje contiene una sección [DATOS DE SEGUIMIENTO DHL — consultados en tiempo real] CON datos reales de tracking (estado, eventos, ubicación). Si esa sección NO aparece o no tiene datos de tracking: NO menciones DHL, guías, transportador ni seguimiento. Simplemente ignora el tema DHL por completo.\n" .
+            "1. DHL: ⚠ PROHIBIDO mencionar DHL, guías, tracking, seguimiento o transportador a menos que el mensaje del usuario contenga EXACTAMENTE la sección '[DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]' con eventos reales. Si esa sección no está presente: ignora completamente el tema de DHL. No digas 'no hay datos DHL', no digas 'sin seguimiento disponible', no menciones guías. Silencio total sobre DHL.\n" .
             "2. SIEMPRE genera el SQL de timeline UNION ALL. Adapta la subquery según el caso:\n" .
             "   - Por GUÍA: usa tracking_number='{NUMERO}' como se muestra abajo.\n" .
             "   - Por OC (formato variable: 2327-2699, 2320-2317-18159, 2301-10-2026, etc.): reemplaza la subquery de búsqueda por:\n" .
