@@ -759,38 +759,46 @@ class MonthlyReportController extends Controller
             "SEGUIMIENTO DHL — GUÍAS DE DESPACHO:\n" .
             "Cuando el usuario pregunte por una guía de envío (número de 10 dígitos) SIEMPRE debes hacer DOS cosas a la vez:\n" .
             "1. Si en el mensaje hay una sección [DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]: interpreta y explica el estado en el campo \"html\" (dónde está, último movimiento, si fue entregado, ubicación actual). Si hay error de DHL: explícalo brevemente.\n" .
-            "2. SIEMPRE genera SQL para buscar esa guía en la base de datos de Finearom mostrando el PROCESO COMPLETO de la orden (timeline).\n" .
-            "   El resultado debe tener estas columnas EN ESTE ORDEN EXACTO (real primero, luego temporal, luego creación):\n" .
-            "   - Columnas del despacho REAL (par_real): fecha_despacho_real, factura, guia, transportador, kilos_despachados\n" .
-            "   - Columnas del despacho ESTIMADO (par_temp): fecha_estimada_despacho (de Marlon)\n" .
-            "   - Columnas de la orden: fecha_creacion, numero_oc, estado_oc, cliente, nit, ejecutiva\n" .
-            "   SQL obligatorio cuando hay número de guía:\n" .
-            "   SELECT\n" .
-            "     par_real.dispatch_date        AS fecha_despacho_real,\n" .
-            "     par_real.invoice_number       AS factura,\n" .
-            "     par_real.tracking_number      AS guia,\n" .
-            "     par_real.transporter          AS transportador,\n" .
-            "     par_real.quantity             AS kilos_despachados,\n" .
-            "     MIN(par_temp.dispatch_date)   AS fecha_estimada_despacho,\n" .
-            "     po.order_creation_date        AS fecha_creacion,\n" .
-            "     po.order_consecutive          AS numero_oc,\n" .
-            "     po.status                     AS estado_oc,\n" .
-            "     c.name                        AS cliente,\n" .
-            "     c.nit,\n" .
-            "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva\n" .
-            "   FROM partials par_real\n" .
-            "   JOIN purchase_orders po ON po.id = par_real.order_id\n" .
-            "   JOIN clients c ON c.id = po.client_id\n" .
-            "   LEFT JOIN partials par_temp ON par_temp.order_id = po.id\n" .
-            "     AND par_temp.type = 'temporal' AND par_temp.deleted_at IS NULL\n" .
-            "   WHERE par_real.tracking_number = '{NUMERO_GUIA}'\n" .
-            "     AND par_real.type = 'real' AND par_real.deleted_at IS NULL\n" .
-            "   GROUP BY\n" .
-            "     par_real.id, par_real.dispatch_date, par_real.invoice_number,\n" .
-            "     par_real.tracking_number, par_real.transporter, par_real.quantity,\n" .
-            "     po.order_creation_date, po.order_consecutive, po.status,\n" .
-            "     c.name, c.nit, c.executive\n" .
-            "- En \"showing\": fecha despacho real, fecha estimada, fecha creación, OC, cliente, estado, guía, factura, kilos.\n" .
+            "2. SIEMPRE genera SQL para buscar esa guía usando UNION ALL — una fila por cada FASE del ciclo de vida de la orden.\n" .
+            "   Columnas fijas en las tres partes del UNION: fase, fecha, numero_oc, estado_oc, cliente, nit, ejecutiva, factura, guia, transportador, kilos\n" .
+            "   NOTA: el campo del nombre del cliente en la tabla clients es c.name (NO c.client_name).\n" .
+            "   SQL obligatorio cuando hay número de guía (UNION ALL de 3 partes):\n\n" .
+            "   -- Obtener la OC a partir de la guía\n" .
+            "   WITH oc AS (\n" .
+            "     SELECT po.id AS po_id, po.order_consecutive, po.order_creation_date, po.status,\n" .
+            "            c.name AS cliente, c.nit,\n" .
+            "            REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva\n" .
+            "     FROM partials par\n" .
+            "     JOIN purchase_orders po ON po.id = par.order_id\n" .
+            "     JOIN clients c ON c.id = po.client_id\n" .
+            "     WHERE par.tracking_number = '{NUMERO_GUIA}'\n" .
+            "       AND par.type = 'real' AND par.deleted_at IS NULL\n" .
+            "     LIMIT 1\n" .
+            "   )\n" .
+            "   -- Fase 1: Creación\n" .
+            "   SELECT 'creación' AS fase, oc.order_creation_date AS fecha,\n" .
+            "     oc.order_consecutive AS numero_oc, oc.status AS estado_oc,\n" .
+            "     oc.cliente, oc.nit, oc.ejecutiva,\n" .
+            "     NULL AS factura, NULL AS guia, NULL AS transportador, NULL AS kilos\n" .
+            "   FROM oc\n" .
+            "   UNION ALL\n" .
+            "   -- Fase 2: Estimado por Marlon (temporal) — una fila por cada partial temporal\n" .
+            "   SELECT 'estimado (Marlon)' AS fase, par_t.dispatch_date AS fecha,\n" .
+            "     oc.order_consecutive, oc.status, oc.cliente, oc.nit, oc.ejecutiva,\n" .
+            "     NULL, NULL, NULL, par_t.quantity\n" .
+            "   FROM oc\n" .
+            "   JOIN partials par_t ON par_t.order_id = oc.po_id\n" .
+            "     AND par_t.type = 'temporal' AND par_t.deleted_at IS NULL\n" .
+            "   UNION ALL\n" .
+            "   -- Fase 3: Despacho real por Alexa — una fila por cada partial real\n" .
+            "   SELECT 'despacho real (Alexa)' AS fase, par_r.dispatch_date AS fecha,\n" .
+            "     oc.order_consecutive, oc.status, oc.cliente, oc.nit, oc.ejecutiva,\n" .
+            "     par_r.invoice_number, par_r.tracking_number, par_r.transporter, par_r.quantity\n" .
+            "   FROM oc\n" .
+            "   JOIN partials par_r ON par_r.order_id = oc.po_id\n" .
+            "     AND par_r.type = 'real' AND par_r.deleted_at IS NULL\n" .
+            "   ORDER BY fecha ASC\n\n" .
+            "- En \"showing\": fase, fecha, número de OC, cliente, estado, factura, guía, kilos.\n" .
             "- En \"available\": transportador, NIT, ejecutiva.\n" .
             "- El html debe incluir TANTO el resumen DHL (o el error) COMO una nota indicando que abajo se muestra el proceso completo de la OC en Finearom.";
     }
