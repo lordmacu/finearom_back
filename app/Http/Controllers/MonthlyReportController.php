@@ -880,22 +880,42 @@ class MonthlyReportController extends Controller
         if (preg_match('/\b(\d{4}-[\d-]+)\b/', $message, $matches)) {
             $orderConsecutive = $matches[1];
 
+            // Obtener info básica de la OC (para confirmar que existe aunque no tenga guías)
+            $order = DB::table('purchase_orders as po')
+                ->join('clients as c', 'c.id', '=', 'po.client_id')
+                ->where('po.order_consecutive', $orderConsecutive)
+                ->select('po.id', 'po.order_consecutive', 'po.status', 'po.order_creation_date', 'c.client_name')
+                ->first();
+
+            if (!$order) {
+                return "La orden {$orderConsecutive} no existe en la base de datos de Finearom.";
+            }
+
+            $parts = [
+                "Orden encontrada en Finearom:",
+                "  Consecutivo: {$order->order_consecutive}",
+                "  Cliente: {$order->client_name}",
+                "  Estado actual: {$order->status}",
+                "  Fecha creación: {$order->order_creation_date}",
+            ];
+
+            // Buscar guías de envío (partials reales)
             $trackingNumbers = DB::table('partials')
-                ->join('purchase_orders', 'purchase_orders.id', '=', 'partials.order_id')
-                ->where('purchase_orders.order_consecutive', $orderConsecutive)
-                ->where('partials.type', 'real')
-                ->whereNull('partials.deleted_at')
-                ->whereNotNull('partials.tracking_number')
-                ->where('partials.tracking_number', '!=', '')
-                ->pluck('partials.tracking_number')
+                ->where('order_id', $order->id)
+                ->where('type', 'real')
+                ->whereNull('deleted_at')
+                ->whereNotNull('tracking_number')
+                ->where('tracking_number', '!=', '')
+                ->pluck('tracking_number')
                 ->unique()
                 ->values();
 
             if ($trackingNumbers->isEmpty()) {
-                return "La orden {$orderConsecutive} no tiene guías de envío registradas aún.";
+                $parts[] = "Guías DHL: ninguna registrada aún (la orden aún no ha sido despachada por Alexa).";
+                return implode("\n", $parts);
             }
 
-            $parts = ["Guías DHL encontradas para la orden {$orderConsecutive}:"];
+            $parts[] = "\nGuías DHL registradas:";
             foreach ($trackingNumbers as $tracking) {
                 $result = $dhl->trackShipment($tracking);
                 $parts[] = "\n--- Guía {$tracking} ---";
