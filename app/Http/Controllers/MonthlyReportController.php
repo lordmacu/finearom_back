@@ -367,17 +367,27 @@ class MonthlyReportController extends Controller
 
             // Detectar número de guía DHL e inyectar datos de tracking en tiempo real
             $userMessage    = $request->message;
-            $dhlContext     = $this->fetchDhlContextForMessage($userMessage);
-            $messageForApi  = $dhlContext
-                ? $userMessage . "\n\n[DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]:\n" . $dhlContext
-                : $userMessage;
+            $dhlResult     = $this->fetchDhlContextForMessage($userMessage);
+            if ($dhlResult === null) {
+                $messageForApi = $userMessage;
+                $dhlSystemNote = '';
+            } elseif ($dhlResult['has_dhl']) {
+                $messageForApi = $userMessage . "\n\n[DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]:\n" . $dhlResult['text'];
+                $dhlSystemNote = $this->buildDhlSystemNote();
+            } else {
+                $extra = $dhlResult['text'] ? "\n\n" . $dhlResult['text'] : '';
+                $messageForApi = $userMessage . $extra;
+                $dhlSystemNote = '';
+            }
 
-            // System (estático/cacheable) + período + historial + nuevo mensaje
+            // System estático + nota DHL dinámica (solo si hay datos DHL) + período + historial + mensaje
+            $systemMessages = [['role' => 'system', 'content' => $this->buildSystemPrompt()]];
+            if ($dhlSystemNote) {
+                $systemMessages[] = ['role' => 'system', 'content' => $dhlSystemNote];
+            }
             $apiMessages = array_merge(
-                [
-                    ['role' => 'system', 'content' => $this->buildSystemPrompt()],
-                    ['role' => 'user',   'content' => $this->buildPeriodContext($periodStart, $periodEnd, now('America/Bogota')->toDateString(), $trmNowStr)],
-                ],
+                $systemMessages,
+                [['role' => 'user', 'content' => $this->buildPeriodContext($periodStart, $periodEnd, now('America/Bogota')->toDateString(), $trmNowStr)]],
                 $sessionMessages,
                 [['role' => 'user', 'content' => $messageForApi]]
             );
@@ -756,52 +766,28 @@ class MonthlyReportController extends Controller
             "  → BIEN: GROUP BY pp.executive WITH ROLLUP  ← produce exactamente 5 filas (4 ejecutivas + 1 TOTAL)\n" .
             "  → Las otras columnas (nombre_real, clientes_con_vencido, etc.) van con MAX() o ANY_VALUE() en el SELECT\n" .
             "  → Fila del TOTAL: COALESCE(MAX(ea.nombre_real), 'TOTAL') AS ejecutiva\n\n" .
-            "SEGUIMIENTO DHL — GUÍAS DE DESPACHO:\n" .
-            "Cuando el usuario pregunte por una GUÍA (número 10 dígitos) O por una ORDEN DE COMPRA (patrón YYYY-NNNN, ej: 2327-2699):\n" .
-            "1. DHL: ⚠ PROHIBIDO mencionar DHL, guías, tracking, seguimiento o transportador a menos que el mensaje del usuario contenga EXACTAMENTE la sección '[DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]' con eventos reales. Si esa sección no está presente: ignora completamente el tema de DHL. No digas 'no hay datos DHL', no digas 'sin seguimiento disponible', no menciones guías. Silencio total sobre DHL.\n" .
-            "2. SIEMPRE genera el SQL de timeline UNION ALL. Adapta la subquery según el caso:\n" .
-            "   - Por GUÍA: usa tracking_number='{NUMERO}' como se muestra abajo.\n" .
-            "   - Por OC (formato variable: 2327-2699, 2320-2317-18159, 2301-10-2026, etc.): reemplaza la subquery de búsqueda por:\n" .
-            "     (SELECT id FROM purchase_orders WHERE order_consecutive='{NUMERO_OC}' LIMIT 1)\n" .
-            "     Y en la fase 3: WHERE par_r.order_id=(SELECT id FROM purchase_orders WHERE order_consecutive='{NUMERO_OC}' LIMIT 1) AND par_r.type='real' AND par_r.deleted_at IS NULL\n" .
-            "   Columnas fijas en las tres partes del UNION: fase, fecha, numero_oc, estado_oc, cliente, nit, ejecutiva, factura, guia, transportador, kilos\n" .
-            "   NOTA: el campo del nombre del cliente en la tabla clients es c.client_name (NO c.name).\n" .
-            "   SQL obligatorio cuando hay número de guía (UNION ALL sin CTE — MariaDB no materializa CTEs referenciados múltiples veces):\n\n" .
-            "   SQL obligatorio cuando hay número de guía — incluye fase_orden para ordenar creación→estimado→real independientemente de fechas:\n\n" .
-            "   -- El estado_oc se infiere por fase (po.status es siempre el actual, no histórico):\n" .
-            "   -- creación → siempre 'pending' | estimado → siempre 'processing' | real → po.status actual\n" .
-            "   SELECT 'creación' AS fase, 1 AS fase_orden, po.order_creation_date AS fecha,\n" .
-            "     po.order_consecutive AS numero_oc, 'pending' AS estado_oc,\n" .
-            "     c.client_name AS cliente, c.nit,\n" .
-            "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva,\n" .
-            "     NULL AS factura, NULL AS guia, NULL AS transportador, NULL AS kilos\n" .
-            "   FROM purchase_orders po\n" .
-            "   JOIN clients c ON c.id = po.client_id\n" .
-            "   WHERE po.id = (SELECT order_id FROM partials WHERE tracking_number='{NUMERO_GUIA}' AND type='real' AND deleted_at IS NULL LIMIT 1)\n" .
-            "   UNION ALL\n" .
-            "   SELECT 'estimado (Marlon)', 2, par_t.dispatch_date,\n" .
-            "     po.order_consecutive, 'processing', c.client_name, c.nit,\n" .
-            "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),\n" .
-            "     NULL, NULL, NULL, par_t.quantity\n" .
-            "   FROM partials par_t\n" .
-            "   JOIN purchase_orders po ON po.id = par_t.order_id\n" .
-            "   JOIN clients c ON c.id = po.client_id\n" .
-            "   WHERE par_t.order_id = (SELECT order_id FROM partials WHERE tracking_number='{NUMERO_GUIA}' AND type='real' AND deleted_at IS NULL LIMIT 1)\n" .
-            "     AND par_t.type = 'temporal' AND par_t.deleted_at IS NULL\n" .
-            "   UNION ALL\n" .
-            "   SELECT 'despacho real (Alexa)', 3, par_r.dispatch_date,\n" .
-            "     po.order_consecutive, po.status, c.client_name, c.nit,\n" .
-            "     REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),\n" .
-            "     par_r.invoice_number, par_r.tracking_number, par_r.transporter, par_r.quantity\n" .
-            "   FROM partials par_r\n" .
-            "   JOIN purchase_orders po ON po.id = par_r.order_id\n" .
-            "   JOIN clients c ON c.id = po.client_id\n" .
-            "   WHERE par_r.tracking_number = '{NUMERO_GUIA}'\n" .
-            "     AND par_r.type = 'real' AND par_r.deleted_at IS NULL\n" .
-            "   ORDER BY fase_orden DESC, fecha DESC\n\n" .
-            "- En \"showing\": fase, fecha, número de OC, cliente, estado, factura, guía, kilos.\n" .
-            "- En \"available\": transportador, NIT, ejecutiva.\n" .
-            "- El html debe incluir TANTO el resumen DHL (o el error) COMO una nota indicando que abajo se muestra el proceso completo de la OC en Finearom.";
+            "PROCESO DE ORDEN (timeline) — cuando el usuario mencione una GUÍA (10 dígitos) o una OC (YYYY-... ej: 2327-2699):\n" .
+            "Genera el SQL de timeline UNION ALL con fase_orden para ordenar: real(3) primero, estimado(2), creación(1) al final.\n" .
+            "NOTA: c.client_name (NO c.name). Estado inferido: creación='pending', estimado='processing', real=po.status actual.\n" .
+            "Por GUÍA: filtra con tracking_number='{NUMERO}' en las subqueries.\n" .
+            "Por OC: filtra con (SELECT id FROM purchase_orders WHERE order_consecutive='{OC}' LIMIT 1).\n" .
+            "SQL UNION ALL (3 partes, sin CTE):\n" .
+            "SELECT 'creación',1,po.order_creation_date,po.order_consecutive,'pending',c.client_name,c.nit,REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),NULL,NULL,NULL,NULL FROM purchase_orders po JOIN clients c ON c.id=po.client_id WHERE po.id=(SELECT order_id FROM partials WHERE tracking_number='{N}' AND type='real' AND deleted_at IS NULL LIMIT 1)\n" .
+            "UNION ALL SELECT 'estimado (Marlon)',2,par_t.dispatch_date,po.order_consecutive,'processing',c.client_name,c.nit,REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),NULL,NULL,NULL,par_t.quantity FROM partials par_t JOIN purchase_orders po ON po.id=par_t.order_id JOIN clients c ON c.id=po.client_id WHERE par_t.order_id=(SELECT order_id FROM partials WHERE tracking_number='{N}' AND type='real' AND deleted_at IS NULL LIMIT 1) AND par_t.type='temporal' AND par_t.deleted_at IS NULL\n" .
+            "UNION ALL SELECT 'despacho real (Alexa)',3,par_r.dispatch_date,po.order_consecutive,po.status,c.client_name,c.nit,REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),par_r.invoice_number,par_r.tracking_number,par_r.transporter,par_r.quantity FROM partials par_r JOIN purchase_orders po ON po.id=par_r.order_id JOIN clients c ON c.id=po.client_id WHERE par_r.tracking_number='{N}' AND par_r.type='real' AND par_r.deleted_at IS NULL\n" .
+            "ORDER BY fase_orden DESC, fecha DESC\n" .
+            "showing: fase, fecha, OC, cliente, estado, factura, guía, kilos. available: transportador, NIT, ejecutiva.";
+    }
+
+    /**
+     * Instrucciones DHL — solo se inyectan cuando hay datos reales de tracking.
+     */
+    private function buildDhlSystemNote(): string
+    {
+        return
+            "En este mensaje hay datos de seguimiento DHL reales (sección [DATOS DE SEGUIMIENTO DHL]).\n" .
+            "Interpreta y explica el estado en el html: dónde está el envío, último movimiento, si fue entregado.\n" .
+            "El html debe incluir el resumen DHL Y una nota de que abajo se muestra el proceso completo en Finearom.";
     }
 
     /**
@@ -859,10 +845,14 @@ class MonthlyReportController extends Controller
     }
 
     /**
-     * Detecta guía DHL (10 dígitos) o número de OC (YYYY-NNNN) en el mensaje
-     * y consulta el tracking en DHL. Retorna texto para inyectar al contexto, o null.
+     * Detecta guía DHL (10 dígitos) o número de OC (YYYY-NNNN) en el mensaje.
+     *
+     * Retorna:
+     *   null                          → nada detectado, no tocar el mensaje
+     *   ['has_dhl'=>true,  'text'=>…] → hay datos DHL reales → inyectar con header DHL
+     *   ['has_dhl'=>false, 'text'=>…] → OC/guía detectada pero sin datos DHL → inyectar info de orden sin mencionar DHL
      */
-    private function fetchDhlContextForMessage(string $message): ?string
+    private function fetchDhlContextForMessage(string $message): ?array
     {
         $dhl = app(DhlService::class);
 
@@ -870,19 +860,17 @@ class MonthlyReportController extends Controller
         if (preg_match('/\b(\d{10})\b/', $message, $matches)) {
             $result = $dhl->trackShipment($matches[1]);
             if (!$result['success']) {
-                // 404 = guía no encontrada: no decir nada de DHL, solo mostrar el timeline de Finearom
-                if (!empty($result['not_found'])) return null;
-                return "Error al consultar la guía {$matches[1]} en DHL: {$result['error']}";
+                if (!empty($result['not_found'])) return ['has_dhl' => false, 'text' => ''];
+                return ['has_dhl' => false, 'text' => "Error técnico al consultar DHL: {$result['error']}"];
             }
-            return $dhl->formatForChat($result['data']);
+            return ['has_dhl' => true, 'text' => $dhl->formatForChat($result['data'])];
         }
 
-        // 2. Número de OC — formato: 4 dígitos + guión + cualquier combinación de dígitos y guiones
+        // 2. Número de OC — 4 dígitos + guión + dígitos/guiones
         // Ejemplos: 2327-2699, 2320-2317-18159, 2301-10-2026, 2324-4500304578
         if (preg_match('/\b(\d{4}-[\d-]+)\b/', $message, $matches)) {
             $orderConsecutive = $matches[1];
 
-            // Obtener info básica de la OC (para confirmar que existe aunque no tenga guías)
             $order = DB::table('purchase_orders as po')
                 ->join('clients as c', 'c.id', '=', 'po.client_id')
                 ->where('po.order_consecutive', $orderConsecutive)
@@ -890,18 +878,17 @@ class MonthlyReportController extends Controller
                 ->first();
 
             if (!$order) {
-                return "La orden {$orderConsecutive} no existe en la base de datos de Finearom.";
+                return ['has_dhl' => false, 'text' => "La orden {$orderConsecutive} no existe en la base de datos de Finearom."];
             }
 
-            $parts = [
+            $orderInfo = implode("\n", [
                 "Orden encontrada en Finearom:",
                 "  Consecutivo: {$order->order_consecutive}",
                 "  Cliente: {$order->client_name}",
                 "  Estado actual: {$order->status}",
                 "  Fecha creación: {$order->order_creation_date}",
-            ];
+            ]);
 
-            // Buscar guías de envío (partials reales)
             $trackingNumbers = DB::table('partials')
                 ->where('order_id', $order->id)
                 ->where('type', 'real')
@@ -913,31 +900,26 @@ class MonthlyReportController extends Controller
                 ->values();
 
             if ($trackingNumbers->isEmpty()) {
-                $parts[] = "Guías DHL: ninguna registrada aún (la orden aún no ha sido despachada por Alexa).";
-                return implode("\n", $parts);
+                return ['has_dhl' => false, 'text' => $orderInfo];
             }
 
-            $dhlResults = [];
+            $dhlLines = [];
             foreach ($trackingNumbers as $tracking) {
                 $result = $dhl->trackShipment($tracking);
                 if (!$result['success']) {
                     if (empty($result['not_found'])) {
-                        // Error real (no 404): sí informar
-                        $dhlResults[] = "--- Guía {$tracking} ---\nError al consultar DHL: {$result['error']}";
+                        $dhlLines[] = "--- Guía {$tracking} ---\nError al consultar DHL: {$result['error']}";
                     }
-                    // 404: omitir silenciosamente
                     continue;
                 }
-                $dhlResults[] = "--- Guía {$tracking} ---\n" . $dhl->formatForChat($result['data']);
+                $dhlLines[] = "--- Guía {$tracking} ---\n" . $dhl->formatForChat($result['data']);
             }
 
-            if (!empty($dhlResults)) {
-                $parts[] = "\nSeguimiento DHL:";
-                foreach ($dhlResults as $r) $parts[] = "\n" . $r;
+            if (empty($dhlLines)) {
+                return ['has_dhl' => false, 'text' => $orderInfo];
             }
-            // Si todas las guías dieron 404: no mencionar DHL ni los números de guía
 
-            return implode("\n", $parts);
+            return ['has_dhl' => true, 'text' => $orderInfo . "\n\nSeguimiento DHL:\n" . implode("\n\n", $dhlLines)];
         }
 
         return null;
