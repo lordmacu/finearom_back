@@ -931,13 +931,11 @@ class MonthlyReportController extends Controller
                 $dhlResults[] = "--- Guía {$tracking} ---\n" . $dhl->formatForChat($result['data']);
             }
 
-            if (empty($dhlResults)) {
-                // Todas las guías dieron 404 — no mencionar DHL
-                $parts[] = "Guías registradas en Finearom: " . $trackingNumbers->implode(', ') . " (sin datos de seguimiento en DHL aún).";
-            } else {
+            if (!empty($dhlResults)) {
                 $parts[] = "\nSeguimiento DHL:";
                 foreach ($dhlResults as $r) $parts[] = "\n" . $r;
             }
+            // Si todas las guías dieron 404: no mencionar DHL ni los números de guía
 
             return implode("\n", $parts);
         }
