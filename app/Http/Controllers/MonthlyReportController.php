@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ChatSession;
 use App\Models\PurchaseOrder;
+use App\Services\DhlService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -364,6 +365,13 @@ class MonthlyReportController extends Controller
             $trmNow    = DB::table('trm_daily')->where('date', '<=', now('America/Bogota')->toDateString())->orderByDesc('date')->value('value');
             $trmNowStr = $trmNow ? number_format((float)$trmNow, 2) : '4000.00';
 
+            // Detectar número de guía DHL e inyectar datos de tracking en tiempo real
+            $userMessage    = $request->message;
+            $dhlContext     = $this->fetchDhlContextForMessage($userMessage);
+            $messageForApi  = $dhlContext
+                ? $userMessage . "\n\n[DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]:\n" . $dhlContext
+                : $userMessage;
+
             // System (estático/cacheable) + período + historial + nuevo mensaje
             $apiMessages = array_merge(
                 [
@@ -371,13 +379,12 @@ class MonthlyReportController extends Controller
                     ['role' => 'user',   'content' => $this->buildPeriodContext($periodStart, $periodEnd, now('America/Bogota')->toDateString(), $trmNowStr)],
                 ],
                 $sessionMessages,
-                [['role' => 'user', 'content' => $request->message]]
+                [['role' => 'user', 'content' => $messageForApi]]
             );
 
-            $key         = config('custom.deepseek_api_key');
-            $sessionRef  = $session;
-            $userMessage = $request->message;
-            $payload     = json_encode([
+            $key        = config('custom.deepseek_api_key');
+            $sessionRef = $session;
+            $payload    = json_encode([
                 'model'       => 'deepseek-chat',
                 'messages'    => $apiMessages,
                 'temperature' => 0.1,
@@ -748,7 +755,25 @@ class MonthlyReportController extends Controller
             "  → MAL: GROUP BY pp.executive, ea.nombre_real, cv.clientes_con_vencido, tc.total_clientes WITH ROLLUP  ← produce 17 filas para 4 ejecutivas\n" .
             "  → BIEN: GROUP BY pp.executive WITH ROLLUP  ← produce exactamente 5 filas (4 ejecutivas + 1 TOTAL)\n" .
             "  → Las otras columnas (nombre_real, clientes_con_vencido, etc.) van con MAX() o ANY_VALUE() en el SELECT\n" .
-            "  → Fila del TOTAL: COALESCE(MAX(ea.nombre_real), 'TOTAL') AS ejecutiva";
+            "  → Fila del TOTAL: COALESCE(MAX(ea.nombre_real), 'TOTAL') AS ejecutiva\n\n" .
+            "SEGUIMIENTO DHL — GUÍAS DE DESPACHO:\n" .
+            "Cuando el usuario pregunte por una guía de envío (número de 10 dígitos) SIEMPRE debes hacer DOS cosas a la vez:\n" .
+            "1. Si en el mensaje hay una sección [DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]: interpreta y explica el estado en el campo \"html\" (dónde está, último movimiento, si fue entregado, ubicación actual). Si hay error de DHL: explícalo brevemente.\n" .
+            "2. SIEMPRE genera SQL para buscar esa guía en la base de datos de Finearom. El campo es partials.tracking_number.\n" .
+            "   SQL obligatorio cuando hay número de guía:\n" .
+            "   SELECT po.order_consecutive AS numero_oc, c.name AS cliente, c.nit,\n" .
+            "     par.tracking_number AS guia, par.transporter AS transportador,\n" .
+            "     par.dispatch_date AS fecha_despacho, par.invoice_number AS factura,\n" .
+            "     par.quantity AS kilos_despachados, po.status AS estado_oc,\n" .
+            "     c.executive AS ejecutiva\n" .
+            "   FROM partials par\n" .
+            "   JOIN purchase_orders po ON po.id = par.order_id\n" .
+            "   JOIN clients c ON c.id = po.client_id\n" .
+            "   WHERE par.tracking_number = '{NUMERO_GUIA}'\n" .
+            "     AND par.type = 'real' AND par.deleted_at IS NULL\n" .
+            "- En \"showing\": número de OC, cliente, guía, fecha de despacho, factura, kilos, estado.\n" .
+            "- En \"available\": ejecutiva, transportador, NIT.\n" .
+            "- El html debe incluir TANTO el resumen DHL (o el error) COMO una nota indicando que abajo se muestra la OC asociada en Finearom.";
     }
 
     /**
@@ -803,6 +828,29 @@ class MonthlyReportController extends Controller
             'success' => true,
             'content' => $this->parseStructuredResponse(trim($resp->json('choices.0.message.content', ''))),
         ];
+    }
+
+    /**
+     * Detecta números de guía DHL en el mensaje del usuario y consulta el tracking.
+     * Retorna texto formateado para inyectar al contexto, o null si no hay guía.
+     */
+    private function fetchDhlContextForMessage(string $message): ?string
+    {
+        // Detectar número de guía: 10 dígitos standalone
+        // Acepta contexto explícito ("guia 1234567890") o solo el número
+        if (!preg_match('/\b(\d{10})\b/', $message, $matches)) {
+            return null;
+        }
+
+        $trackingNumber = $matches[1];
+        $dhl    = app(DhlService::class);
+        $result = $dhl->trackShipment($trackingNumber);
+
+        if (!$result['success']) {
+            return "No se pudo consultar la guía {$trackingNumber} en DHL: {$result['error']}";
+        }
+
+        return $dhl->formatForChat($result['data']);
     }
 
     /**

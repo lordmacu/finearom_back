@@ -11,4 +11,8 @@ return [
     'ai_server_key' => env('AI_SERVER_KEY', 'finearom-ai-2025'),
 
     'deepseek_api_key' => env('DEEPSEEK_API_KEY', ''),
+
+    'dhl_username' => env('DHL_USERNAME', ''),
+    'dhl_password' => env('DHL_PASSWORD', ''),
+    'dhl_base_url' => env('DHL_BASE_URL', 'https://express.api.dhl.com/mydhlapi'),
 ];

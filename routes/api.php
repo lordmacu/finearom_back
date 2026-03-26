@@ -506,6 +506,9 @@ Route::post('/dashboard/monthly-report/generate', [\App\Http\Controllers\Monthly
 Route::get('/dashboard/monthly-report/analyze', [\App\Http\Controllers\MonthlyReportController::class, 'analyze']);
 Route::get('/dashboard/monthly-report/analyze/stream', [\App\Http\Controllers\MonthlyReportController::class, 'stream']);
 Route::middleware('auth:sanctum')->group(function () {
+    // DHL Tracking
+    Route::get('/dhl/track/{trackingNumber}', [\App\Http\Controllers\DhlController::class, 'track']);
+
     Route::post('/dashboard/chat/start',             [\App\Http\Controllers\MonthlyReportController::class, 'chatStart']);
     Route::post('/dashboard/chat/start-v2',          [\App\Http\Controllers\MonthlyReportController::class, 'chatStartV2']);
     Route::post('/dashboard/chat/message',           [\App\Http\Controllers\MonthlyReportController::class, 'chatMessage']);

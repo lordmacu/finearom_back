@@ -440,15 +440,13 @@ class PurchaseOrderController extends Controller
             'products.*.new_win'   => ['nullable'],
             'products.*.muestra'   => ['nullable'],
             'products.*.delivery_date' => ['nullable', 'date'],
-            'products.*.branch_office_id' => ['nullable'],
+            'products.*.branch_office_id' => ['required'],
             'attachments'          => ['nullable', 'array'],
             'attachments.*'        => ['file', 'mimes:pdf'],
         ]);
 
         try {
             \DB::beginTransaction();
-
-            $clientChanged = (int) $purchaseOrder->client_id !== (int) $validated['client_id'];
 
             $purchaseOrder->order_consecutive = $validated['order_consecutive'];
             $purchaseOrder->client_id = $validated['client_id'];
@@ -504,14 +502,6 @@ class PurchaseOrderController extends Controller
                 } catch (\Throwable $e) {
                     Log::warning('GoogleDrive: fallo al subir adjuntos en update: ' . $e->getMessage());
                 }
-            }
-
-            // Si cambió el cliente, nullear branch_office_id de todas las líneas
-            // (las sucursales son del cliente anterior y ya no son válidas)
-            if ($clientChanged) {
-                \DB::table('purchase_order_product')
-                    ->where('purchase_order_id', $purchaseOrder->id)
-                    ->update(['branch_office_id' => null]);
             }
 
             $this->syncProductsForUpdate($purchaseOrder, $validated['products']);
