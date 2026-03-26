@@ -870,7 +870,9 @@ class MonthlyReportController extends Controller
         if (preg_match('/\b(\d{10})\b/', $message, $matches)) {
             $result = $dhl->trackShipment($matches[1]);
             if (!$result['success']) {
-                return "No se pudo consultar la guía {$matches[1]} en DHL: {$result['error']}";
+                // 404 = guía no encontrada: no decir nada de DHL, solo mostrar el timeline de Finearom
+                if (!empty($result['not_found'])) return null;
+                return "Error al consultar la guía {$matches[1]} en DHL: {$result['error']}";
             }
             return $dhl->formatForChat($result['data']);
         }
@@ -918,10 +920,16 @@ class MonthlyReportController extends Controller
             $parts[] = "\nGuías DHL registradas:";
             foreach ($trackingNumbers as $tracking) {
                 $result = $dhl->trackShipment($tracking);
+                if (!$result['success']) {
+                    // 404 = guía no activa aún en DHL, omitir silenciosamente
+                    if (empty($result['not_found'])) {
+                        $parts[] = "\n--- Guía {$tracking} ---";
+                        $parts[] = "No se pudo consultar en DHL: {$result['error']}";
+                    }
+                    continue;
+                }
                 $parts[] = "\n--- Guía {$tracking} ---";
-                $parts[] = $result['success']
-                    ? $dhl->formatForChat($result['data'])
-                    : "No se pudo consultar en DHL: {$result['error']}";
+                $parts[] = $dhl->formatForChat($result['data']);
             }
 
             return implode("\n", $parts);

@@ -32,6 +32,10 @@ class DhlService
                     'levelOfDetail' => 'all',
                 ]);
 
+            if ($response->status() === 404) {
+                return ['success' => false, 'not_found' => true, 'error' => 'Guía no encontrada en DHL'];
+            }
+
             if ($response->successful()) {
                 $data = $response->json();
 
