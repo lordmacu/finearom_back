@@ -792,7 +792,7 @@ class MonthlyReportController extends Controller
             "   JOIN clients c ON c.id = po.client_id\n" .
             "   WHERE par_r.tracking_number = '{NUMERO_GUIA}'\n" .
             "     AND par_r.type = 'real' AND par_r.deleted_at IS NULL\n" .
-            "   ORDER BY fase_orden ASC, fecha ASC\n\n" .
+            "   ORDER BY fase_orden DESC, fecha DESC\n\n" .
             "- En \"showing\": fase, fecha, número de OC, cliente, estado, factura, guía, kilos.\n" .
             "- En \"available\": transportador, NIT, ejecutiva.\n" .
             "- El html debe incluir TANTO el resumen DHL (o el error) COMO una nota indicando que abajo se muestra el proceso completo de la OC en Finearom.";
