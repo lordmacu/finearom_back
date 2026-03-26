@@ -757,9 +757,13 @@ class MonthlyReportController extends Controller
             "  → Las otras columnas (nombre_real, clientes_con_vencido, etc.) van con MAX() o ANY_VALUE() en el SELECT\n" .
             "  → Fila del TOTAL: COALESCE(MAX(ea.nombre_real), 'TOTAL') AS ejecutiva\n\n" .
             "SEGUIMIENTO DHL — GUÍAS DE DESPACHO:\n" .
-            "Cuando el usuario pregunte por una guía de envío (número de 10 dígitos) SIEMPRE debes hacer DOS cosas a la vez:\n" .
-            "1. Si en el mensaje hay una sección [DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]: interpreta y explica el estado en el campo \"html\" (dónde está, último movimiento, si fue entregado, ubicación actual). Si hay error de DHL: explícalo brevemente.\n" .
-            "2. SIEMPRE genera SQL para buscar esa guía usando UNION ALL — una fila por cada FASE del ciclo de vida de la orden.\n" .
+            "Cuando el usuario pregunte por una GUÍA (número 10 dígitos) O por una ORDEN DE COMPRA (patrón YYYY-NNNN, ej: 2327-2699) SIEMPRE debes hacer DOS cosas:\n" .
+            "1. Si hay sección [DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]: interpreta en el html (estado, ubicación, último movimiento). Si dice que no tiene guías: indícalo. Si hay error: explícalo brevemente.\n" .
+            "2. SIEMPRE genera el SQL de timeline UNION ALL. Adapta la subquery según el caso:\n" .
+            "   - Por GUÍA: usa tracking_number='{NUMERO}' como se muestra abajo.\n" .
+            "   - Por OC (formato variable: 2327-2699, 2320-2317-18159, 2301-10-2026, etc.): reemplaza la subquery de búsqueda por:\n" .
+            "     (SELECT id FROM purchase_orders WHERE order_consecutive='{NUMERO_OC}' LIMIT 1)\n" .
+            "     Y en la fase 3: WHERE par_r.order_id=(SELECT id FROM purchase_orders WHERE order_consecutive='{NUMERO_OC}' LIMIT 1) AND par_r.type='real' AND par_r.deleted_at IS NULL\n" .
             "   Columnas fijas en las tres partes del UNION: fase, fecha, numero_oc, estado_oc, cliente, nit, ejecutiva, factura, guia, transportador, kilos\n" .
             "   NOTA: el campo del nombre del cliente en la tabla clients es c.client_name (NO c.name).\n" .
             "   SQL obligatorio cuando hay número de guía (UNION ALL sin CTE — MariaDB no materializa CTEs referenciados múltiples veces):\n\n" .
@@ -855,26 +859,55 @@ class MonthlyReportController extends Controller
     }
 
     /**
-     * Detecta números de guía DHL en el mensaje del usuario y consulta el tracking.
-     * Retorna texto formateado para inyectar al contexto, o null si no hay guía.
+     * Detecta guía DHL (10 dígitos) o número de OC (YYYY-NNNN) en el mensaje
+     * y consulta el tracking en DHL. Retorna texto para inyectar al contexto, o null.
      */
     private function fetchDhlContextForMessage(string $message): ?string
     {
-        // Detectar número de guía: 10 dígitos standalone
-        // Acepta contexto explícito ("guia 1234567890") o solo el número
-        if (!preg_match('/\b(\d{10})\b/', $message, $matches)) {
-            return null;
+        $dhl = app(DhlService::class);
+
+        // 1. Número de guía directo (10 dígitos)
+        if (preg_match('/\b(\d{10})\b/', $message, $matches)) {
+            $result = $dhl->trackShipment($matches[1]);
+            if (!$result['success']) {
+                return "No se pudo consultar la guía {$matches[1]} en DHL: {$result['error']}";
+            }
+            return $dhl->formatForChat($result['data']);
         }
 
-        $trackingNumber = $matches[1];
-        $dhl    = app(DhlService::class);
-        $result = $dhl->trackShipment($trackingNumber);
+        // 2. Número de OC — formato: 4 dígitos + guión + cualquier combinación de dígitos y guiones
+        // Ejemplos: 2327-2699, 2320-2317-18159, 2301-10-2026, 2324-4500304578
+        if (preg_match('/\b(\d{4}-[\d-]+)\b/', $message, $matches)) {
+            $orderConsecutive = $matches[1];
 
-        if (!$result['success']) {
-            return "No se pudo consultar la guía {$trackingNumber} en DHL: {$result['error']}";
+            $trackingNumbers = DB::table('partials')
+                ->join('purchase_orders', 'purchase_orders.id', '=', 'partials.order_id')
+                ->where('purchase_orders.order_consecutive', $orderConsecutive)
+                ->where('partials.type', 'real')
+                ->whereNull('partials.deleted_at')
+                ->whereNotNull('partials.tracking_number')
+                ->where('partials.tracking_number', '!=', '')
+                ->pluck('partials.tracking_number')
+                ->unique()
+                ->values();
+
+            if ($trackingNumbers->isEmpty()) {
+                return "La orden {$orderConsecutive} no tiene guías de envío registradas aún.";
+            }
+
+            $parts = ["Guías DHL encontradas para la orden {$orderConsecutive}:"];
+            foreach ($trackingNumbers as $tracking) {
+                $result = $dhl->trackShipment($tracking);
+                $parts[] = "\n--- Guía {$tracking} ---";
+                $parts[] = $result['success']
+                    ? $dhl->formatForChat($result['data'])
+                    : "No se pudo consultar en DHL: {$result['error']}";
+            }
+
+            return implode("\n", $parts);
         }
 
-        return $dhl->formatForChat($result['data']);
+        return null;
     }
 
     /**
