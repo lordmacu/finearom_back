@@ -785,7 +785,11 @@ class MonthlyReportController extends Controller
             "     AND par_temp.type = 'temporal' AND par_temp.deleted_at IS NULL\n" .
             "   WHERE par_real.tracking_number = '{NUMERO_GUIA}'\n" .
             "     AND par_real.type = 'real' AND par_real.deleted_at IS NULL\n" .
-            "   GROUP BY par_real.id, po.id, c.id\n" .
+            "   GROUP BY\n" .
+            "     par_real.id, par_real.dispatch_date, par_real.invoice_number,\n" .
+            "     par_real.tracking_number, par_real.transporter, par_real.quantity,\n" .
+            "     po.order_creation_date, po.order_consecutive, po.status,\n" .
+            "     c.name, c.nit, c.executive\n" .
             "- En \"showing\": fecha despacho real, fecha estimada, fecha creación, OC, cliente, estado, guía, factura, kilos.\n" .
             "- En \"available\": transportador, NIT, ejecutiva.\n" .
             "- El html debe incluir TANTO el resumen DHL (o el error) COMO una nota indicando que abajo se muestra el proceso completo de la OC en Finearom.";
