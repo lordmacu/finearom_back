@@ -2743,7 +2743,7 @@ WHERE po.status IN ('pending','processing','parcial_status')
     (SELECT par_t.dispatch_date FROM partials par_t WHERE par_t.order_id = po.id AND par_t.type='temporal' AND par_t.deleted_at IS NULL ORDER BY par_t.dispatch_date DESC LIMIT 1),
     po.dispatch_date
   ) BETWEEN '2026-03-01' AND '2026-03-31'
-GROUP BY po.id, c.client_name, po.status
+GROUP BY po.id, po.order_consecutive, c.client_name, po.status
 ORDER BY fecha_despacho_estimada;
 
 Lead time real por tipo de cliente (AA/A/B/C):
@@ -2800,7 +2800,7 @@ JOIN clients c ON po.client_id = c.id
 JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
 JOIN products p ON pop.product_id = p.id
 WHERE po.status = 'pending' AND pop.muestra = 0
-GROUP BY po.id, c.client_name, po.order_creation_date, po.status
+GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date, po.status
 ORDER BY po.order_creation_date DESC;
 
 Todas las OC creadas en el período (lo que ingresó Francy):
@@ -2812,7 +2812,7 @@ JOIN clients c ON po.client_id = c.id
 JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
 JOIN products p ON pop.product_id = p.id
 WHERE po.order_creation_date BETWEEN '2026-03-01' AND '2026-03-31' AND pop.muestra = 0
-GROUP BY po.id, c.client_name, po.order_creation_date, po.status, po.is_new_win, po.is_muestra
+GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date, po.status, po.is_new_win, po.is_muestra
 ORDER BY po.order_creation_date DESC;
 
 ### MARLON — Revisión y fechas estimadas de despacho
@@ -2826,7 +2826,7 @@ JOIN clients c ON po.client_id = c.id
 JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
 JOIN products p ON pop.product_id = p.id
 WHERE po.status = 'pending' AND pop.muestra = 0
-GROUP BY po.id, c.client_name, po.order_creation_date
+GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date
 ORDER BY dias_esperando DESC;
 
 OC en processing (Marlon revisó, Alexa aún no despacha):
@@ -2839,7 +2839,7 @@ JOIN clients c ON po.client_id = c.id
 JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
 JOIN products p ON pop.product_id = p.id
 WHERE po.status = 'processing' AND pop.muestra = 0
-GROUP BY po.id, c.client_name, po.order_creation_date, po.dispatch_date
+GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date, po.dispatch_date
 ORDER BY dias_en_processing DESC;
 
 ### ALEXA — Despachos reales
@@ -2873,7 +2873,7 @@ JOIN products p ON pop.product_id = p.id
 LEFT JOIN partials par ON par.order_id = po.id AND par.product_order_id = pop.id
   AND par.type = 'real' AND par.deleted_at IS NULL
 WHERE po.status = 'parcial_status' AND pop.muestra = 0
-GROUP BY po.id, c.client_name, po.order_creation_date
+GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date
 HAVING kilos_pendientes > 0
 ORDER BY po.order_creation_date;
 SCHEMA;

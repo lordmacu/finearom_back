@@ -15,6 +15,7 @@ class BranchOffice extends Model
         'delivery_address',
         'delivery_city',
         'general_observations',
+        'main_function',
     ];
 
     public function client()
