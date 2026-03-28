@@ -738,6 +738,7 @@ class MonthlyReportController extends Controller
             "- Usa siempre las fechas del período activo en los filtros.\n" .
             "- ALIASES recomendados: client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, fill_rate_pct, pipeline_usd, fecha_despacho, numero_oc.\n" .
             "- GROUP BY (MariaDB ONLY_FULL_GROUP_BY): todos los campos no-agregados del SELECT deben estar en GROUP BY. Agrupa por c.executive (no alias).\n" .
+            "  ⚠ CRÍTICO: cuando uses po.order_consecutive, c.nit, c.executive o cualquier campo de po/c en el SELECT y también hagas GROUP BY, SIEMPRE incluye esos campos en el GROUP BY. Ejemplo obligatorio: GROUP BY po.id, po.order_consecutive, c.client_name, c.nit, c.executive, po.status, po.order_creation_date.\n" .
             "- NUNCA incluyas columnas id en SELECT. Siempre incluye NIT junto al nombre del cliente.\n" .
             "- ⚠ CLIENTES NUEVOS: cuando el usuario pida 'clientes nuevos', 'first order este año/mes', 'clientes que entraron este año' — NUNCA uses HAVING MIN(po.order_creation_date) >= fecha sobre OCs filtradas por status.\n" .
             "  → Ese patrón falla: un cliente con órdenes completadas en años anteriores pasa el filtro porque sus OCs viejas no tienen status activo.\n" .
