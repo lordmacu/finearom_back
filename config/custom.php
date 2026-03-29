@@ -15,4 +15,8 @@ return [
     'dhl_username' => env('DHL_USERNAME', ''),
     'dhl_password' => env('DHL_PASSWORD', ''),
     'dhl_base_url' => env('DHL_BASE_URL', 'https://express.api.dhl.com/mydhlapi'),
+
+    'siigo_proxy_url'      => env('SIIGO_PROXY_URL', ''),
+    'siigo_proxy_username' => env('SIIGO_PROXY_USERNAME', ''),
+    'siigo_proxy_password' => env('SIIGO_PROXY_PASSWORD', ''),
 ];

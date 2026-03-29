@@ -11,10 +11,8 @@ class SiigoSale extends Model
 
     protected $fillable = [
         'nit',
-        'empresa',
         'cuenta',
-        'producto',
-        'descripcion',
+        'product_code',
         'precio_unitario',
         'mes',
         'valor',

@@ -18,7 +18,13 @@ class SyncSiigoSales extends Command
 
     protected $description = 'Sincroniza ventas desde la API de Siigo para todos los clientes';
 
-    private string $baseUrl = 'https://plates-cds-hosted-maintain.trycloudflare.com/api';
+    private string $baseUrl;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->baseUrl = rtrim(config('custom.siigo_proxy_url'), '/');
+    }
 
     public function handle(): int
     {
@@ -76,8 +82,8 @@ class SyncSiigoSales extends Command
     {
         try {
             $response = Http::post("{$this->baseUrl}/login", [
-                'username' => 'lordmacu',
-                'password' => 'lordmacu',
+                'username' => config('custom.siigo_proxy_username'),
+                'password' => config('custom.siigo_proxy_password'),
             ]);
 
             if ($response->successful()) {
@@ -113,19 +119,22 @@ class SyncSiigoSales extends Command
             $valoresMes = $venta['valores_mes'] ?? [];
             $cantidadesMes = $venta['cantidades_mes'] ?? [];
 
+            $descripcion = $venta['descripcion'] ?? null;
+            $productCode = $descripcion && str_contains($descripcion, ' - ')
+                ? trim(substr($descripcion, strrpos($descripcion, ' - ') + 3))
+                : null;
+
             foreach ($valoresMes as $mes => $valor) {
                 $cantidad = $cantidadesMes[$mes] ?? 0;
 
                 SiigoSale::updateOrCreate(
                     [
                         'nit' => $venta['nit'],
-                        'producto' => $venta['producto'],
-                        'empresa' => $venta['empresa'] ?? null,
-                        'cuenta' => $venta['cuenta'] ?? null,
+                        'product_code' => $productCode,
+                        'cuenta' => $venta['cuenta'] ?? '',
                         'mes' => $mes,
                     ],
                     [
-                        'descripcion' => $venta['descripcion'] ?? null,
                         'precio_unitario' => $venta['precio_unitario'] ?? 0,
                         'valor' => $valor,
                         'cantidad' => $cantidad,
