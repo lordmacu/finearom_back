@@ -11,9 +11,12 @@ class SiigoProduct extends Model
     protected $fillable = [
         'codigo',
         'nombre',
+        'nombre_corto',
         'precio',
         'unidad_medida',
         'grupo',
+        'referencia',
+        'empresa',
         'siigo_hash',
     ];
 }

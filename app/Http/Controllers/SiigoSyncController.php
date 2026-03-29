@@ -510,7 +510,10 @@ class SiigoSyncController extends Controller
                     ['codigo' => $record['code']],
                     [
                         'nombre' => $record['product_name'] ?? null,
-                        'precio' => $record['price'] ?? 0,
+                        'nombre_corto' => $record['nombre_corto'] ?? null,
+                        'grupo' => $record['grupo'] ?? null,
+                        'referencia' => $record['referencia'] ?? null,
+                        'empresa' => $record['empresa'] ?? null,
                         'siigo_hash' => $record['siigo_sync_hash'] ?? null,
                     ]
                 );
