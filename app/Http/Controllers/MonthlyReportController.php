@@ -380,14 +380,15 @@ class MonthlyReportController extends Controller
                 $dhlSystemNote = '';
             }
 
-            // System estático + nota DHL dinámica (solo si hay datos DHL) + período + historial + mensaje
-            $systemMessages = [['role' => 'system', 'content' => $this->buildSystemPrompt()]];
+            // System con período incluido (estable todo el día → prefix cache de DeepSeek aplica)
+            // La TRM cambia diario, pero dentro del mismo día todas las requests comparten el mismo prefijo.
+            $systemContent = $this->buildSystemPrompt() . "\n\n" . $this->buildPeriodContext($periodStart, $periodEnd, now('America/Bogota')->toDateString(), $trmNowStr);
+            $systemMessages = [['role' => 'system', 'content' => $systemContent]];
             if ($dhlSystemNote) {
                 $systemMessages[] = ['role' => 'system', 'content' => $dhlSystemNote];
             }
             $apiMessages = array_merge(
                 $systemMessages,
-                [['role' => 'user', 'content' => $this->buildPeriodContext($periodStart, $periodEnd, now('America/Bogota')->toDateString(), $trmNowStr)]],
                 $sessionMessages,
                 [['role' => 'user', 'content' => $messageForApi]]
             );

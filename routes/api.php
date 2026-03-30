@@ -179,6 +179,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/analyze/clients/{clientId}/partials', [AnalyzeController::class, 'clientPartials']);
     Route::put('/analyze/partials/{partialId}', [AnalyzeController::class, 'updatePartial']);
     Route::delete('/analyze/partials/{partialId}', [AnalyzeController::class, 'deletePartial']);
+    Route::get('/analyze/clients/{nit}/siigo', [AnalyzeController::class, 'clientSiigoSales']);
 
     // Cartera
     Route::get('/cartera/weekly-projection', [CarteraController::class, 'weeklyProjection']);

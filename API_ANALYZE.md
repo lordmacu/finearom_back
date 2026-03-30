@@ -38,7 +38,8 @@ Nota: el rol `super-admin` pasa todos los permisos (Gate::before).
       "nit": "900123123",
       "partials_count": 12,
       "total_usd": 1200.5,
-      "total_cop": 4800000
+      "total_cop": 4800000,
+      "total_cop_siigo": 5100000
     }
   ],
   "meta": {
@@ -47,14 +48,18 @@ Nota: el rol `super-admin` pasa todos los permisos (Gate::before).
     "total": 50,
     "last_page": 5,
     "from": "2025-12-01",
-    "to": "2025-12-18"
+    "to": "2025-12-18",
+    "paginate": true
   },
   "totals": {
     "total_cop": 123456789,
-    "total_usd": 98765.43
+    "total_usd": 98765.43,
+    "total_cop_siigo": 130000000
   }
 }
 ```
+
+Nota: `total_cop_siigo` en `data` es la suma de `siigo_sales.valor` para el NIT del cliente en el rango de meses. En `totals` es la suma global de todos los clientes.
 
 ---
 
@@ -93,7 +98,45 @@ Los mismos filtros que el endpoint de clientes (`status`, `type`, `from/to` o `c
 
 ---
 
-## 3) Editar parcial
+## 3) Ver ventas Siigo de un cliente
+
+`GET /api/analyze/clients/{nit}/siigo`
+
+Requiere permiso `analysis view`.
+
+El parámetro `{nit}` es el NIT del cliente (string), que se cruza con `siigo_sales.nit`.
+
+### Query params
+- `from` y `to` (opcional): fechas (ej: `2025-01-01`). Se convierten a formato `YYYY-MM` para comparar con `siigo_sales.mes`.
+- `creation_date` (opcional): formato legacy `YYYY-MM-DD - YYYY-MM-DD`.
+
+### Respuesta (200)
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "product_code": "PROD-001",
+      "product_name": "Fragancia X",
+      "mes": "2025-01",
+      "cantidad": 10,
+      "valor": 500000,
+      "precio_unitario": 50000
+    }
+  ],
+  "total": 500000,
+  "meta": {
+    "from": "2025-01-01",
+    "to": "2025-12-31"
+  }
+}
+```
+
+Nota: `product_name` puede ser `null` si el `product_code` de Siigo no tiene correspondencia en la tabla `products`.
+
+---
+
+## 4) Editar parcial
 
 `PUT /api/analyze/partials/{partialId}`
 
@@ -123,7 +166,7 @@ Los mismos filtros que el endpoint de clientes (`status`, `type`, `from/to` o `c
 
 ---
 
-## 4) Eliminar parcial
+## 5) Eliminar parcial
 
 `DELETE /api/analyze/partials/{partialId}`
 

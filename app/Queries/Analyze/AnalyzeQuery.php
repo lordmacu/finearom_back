@@ -106,6 +106,17 @@ class AnalyzeQuery
             ->first();
     }
 
+    /// Suma el total de ventas Siigo (valor) para todos los clientes en el rango de meses dado.
+    public function totalSiigo(Carbon $from, Carbon $to): float
+    {
+        $fromMes = $from->format('Y-m');
+        $toMes = $to->format('Y-m');
+
+        return (float) DB::table('siigo_sales')
+            ->whereBetween('mes', [$fromMes, $toMes])
+            ->sum('valor');
+    }
+
     public function paginateClients(
         Carbon $from,
         Carbon $to,
@@ -113,6 +124,9 @@ class AnalyzeQuery
         ?string $status,
         int $perPage
     ): LengthAwarePaginator {
+        $fromMes = $from->format('Y-m');
+        $toMes = $to->format('Y-m');
+
         $base = $this->base($from, $to, $type, $status);
 
         return $base
@@ -144,6 +158,10 @@ class AnalyzeQuery
                     END)
                 ) as total_cop
             ')
+            ->selectRaw(
+                'COALESCE((SELECT SUM(ss.valor) FROM siigo_sales ss WHERE ss.nit COLLATE utf8mb4_unicode_ci = clients.nit COLLATE utf8mb4_unicode_ci AND ss.mes BETWEEN ? AND ?), 0) as total_cop_siigo',
+                [$fromMes, $toMes]
+            )
             ->groupBy('clients.id', 'clients.client_name', 'clients.nit')
             ->orderByDesc('total_cop')
             ->paginate($perPage);
@@ -156,6 +174,9 @@ class AnalyzeQuery
         ?string $status,
         int $limit = 5000
     ): Collection {
+        $fromMes = $from->format('Y-m');
+        $toMes = $to->format('Y-m');
+
         $base = $this->base($from, $to, $type, $status);
 
         return $base
@@ -187,6 +208,10 @@ class AnalyzeQuery
                     END)
                 ) as total_cop
             ')
+            ->selectRaw(
+                'COALESCE((SELECT SUM(ss.valor) FROM siigo_sales ss WHERE ss.nit COLLATE utf8mb4_unicode_ci = clients.nit COLLATE utf8mb4_unicode_ci AND ss.mes BETWEEN ? AND ?), 0) as total_cop_siigo',
+                [$fromMes, $toMes]
+            )
             ->groupBy('clients.id', 'clients.client_name', 'clients.nit')
             ->orderByDesc('total_cop')
             ->limit($limit)
@@ -245,6 +270,28 @@ class AnalyzeQuery
                 ) as total
             ')
             ->orderBy('partials.dispatch_date')
+            ->get();
+    }
+
+    /// Retorna las ventas de Siigo para un NIT en el rango de meses, con detalle de producto.
+    public function clientSiigoSales(string $nit, Carbon $from, Carbon $to): Collection
+    {
+        $fromMes = $from->format('Y-m');
+        $toMes = $to->format('Y-m');
+
+        return DB::table('siigo_sales')
+            ->leftJoin('products', DB::raw('products.code COLLATE utf8mb4_unicode_ci'), '=', DB::raw('siigo_sales.product_code COLLATE utf8mb4_unicode_ci'))
+            ->where('siigo_sales.nit', $nit)
+            ->whereBetween('siigo_sales.mes', [$fromMes, $toMes])
+            ->selectRaw('siigo_sales.product_code')
+            ->selectRaw('MIN(products.product_name) as product_name')
+            ->selectRaw('siigo_sales.mes')
+            ->selectRaw('siigo_sales.cantidad')
+            ->selectRaw('siigo_sales.valor')
+            ->selectRaw('siigo_sales.precio_unitario')
+            ->groupBy('siigo_sales.product_code', 'siigo_sales.mes', 'siigo_sales.cantidad', 'siigo_sales.valor', 'siigo_sales.precio_unitario')
+            ->orderBy('siigo_sales.mes')
+            ->orderBy('siigo_sales.product_code')
             ->get();
     }
 }

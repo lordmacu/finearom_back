@@ -18,7 +18,7 @@ class AnalyzeController extends Controller
         private readonly TrmDailyWarmup $trmDailyWarmup
     )
     {
-        $this->middleware('can:analysis view')->only(['clients', 'clientPartials']);
+        $this->middleware('can:analysis view')->only(['clients', 'clientPartials', 'clientSiigoSales']);
         $this->middleware('can:partial edit')->only(['updatePartial']);
         $this->middleware('can:partial delete')->only(['deletePartial']);
     }
@@ -74,6 +74,7 @@ class AnalyzeController extends Controller
                     'totals' => [
                         'total_cop' => (float) ($totals->total_cop ?? 0),
                         'total_usd' => (float) ($totals->total_usd ?? 0),
+                        'total_cop_siigo' => $this->analyzeQuery->totalSiigo($from, $to),
                     ],
                 ];
             }
@@ -95,6 +96,7 @@ class AnalyzeController extends Controller
                 'totals' => [
                     'total_cop' => (float) ($totals->total_cop ?? 0),
                     'total_usd' => (float) ($totals->total_usd ?? 0),
+                    'total_cop_siigo' => $this->analyzeQuery->totalSiigo($from, $to),
                 ],
             ];
         });
@@ -118,6 +120,23 @@ class AnalyzeController extends Controller
         return response()->json([
             'success' => true,
             'data' => $rows,
+            'meta' => [
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
+            ],
+        ]);
+    }
+
+    public function clientSiigoSales(AnalyzeClientPartialsRequest $request, string $nit): JsonResponse
+    {
+        [$from, $to] = $this->analyzeQuery->resolveDateRange($request->validated());
+
+        $rows = $this->analyzeQuery->clientSiigoSales($nit, $from, $to);
+
+        return response()->json([
+            'success' => true,
+            'data' => $rows,
+            'total' => $rows->sum('valor'),
             'meta' => [
                 'from' => $from->toDateString(),
                 'to' => $to->toDateString(),
