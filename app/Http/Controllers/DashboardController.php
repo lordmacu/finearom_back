@@ -1631,15 +1631,15 @@ class DashboardController extends Controller
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
                 COUNT(DISTINCT CONCAT(ss.nit, '-', COALESCE(ss.orden_compra, ''))) as total_orders,
                 SUM(ss.cantidad) as total_kilos,
-                SUM(ss.precio_unitario * ss.cantidad) as value_usd,
+                SUM(ss.valor) as value_cop,
                 SUM(
-                    ss.precio_unitario * ss.cantidad *
+                    ss.valor /
                     (CASE
                         WHEN lpt.real_trm IS NOT NULL AND lpt.real_trm >= 3400 THEN lpt.real_trm
                         WHEN po.trm IS NOT NULL AND po.trm >= 3400 THEN po.trm
                         ELSE 4000
                     END)
-                ) as value_cop
+                ) as value_usd
             ")
             ->groupBy('c.executive')
             ->get();
