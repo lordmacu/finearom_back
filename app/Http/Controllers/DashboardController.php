@@ -1468,7 +1468,7 @@ class DashboardController extends Controller
                     'financial_analysis' => [
                         'average_trm' => $avgTrm ? round((float) $avgTrm, 2) : 4000.0,
                     ],
-                    'executive_stats'          => $this->calcExecutiveStatsV2($startDate, $endDate),
+                    'executive_stats'          => $this->calcExecutiveStatsFromSiigo($startDate, $endDate),
                     'lead_time_by_client_type' => $this->calculateLeadTimeByClientType($startDate, $endDate),
                 ],
             ]);
@@ -1582,6 +1582,55 @@ class DashboardController extends Controller
                 'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0.0,
                 'compliance_cop_pct'   => $valueCop > 0     ? round($dispCop   / $valueCop      * 100, 1) : 0.0,
                 'compliance_kilos_pct' => $kilos    > 0     ? round($dispKilos / $kilos          * 100, 1) : 0.0,
+            ];
+        }
+
+        usort($result, fn($a, $b) => $b['value_cop'] <=> $a['value_cop']);
+
+        return $result;
+    }
+
+    /**
+     * Estadísticas por ejecutiva usando datos de Siigo (ventas facturadas).
+     */
+    private function calcExecutiveStatsFromSiigo(string $startDate, string $endDate): array
+    {
+        $fromMes = Carbon::parse($startDate)->format('Y-m');
+        $toMes   = Carbon::parse($endDate)->format('Y-m');
+
+        $rows = DB::table('siigo_sales as ss')
+            ->join('clients as c', 'ss.nit', '=', 'c.nit')
+            ->whereBetween('ss.mes', [$fromMes, $toMes])
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COUNT(DISTINCT ss.nit) as total_clients,
+                SUM(ss.cantidad) as total_kilos,
+                SUM(ss.precio_unitario * ss.cantidad) as value_usd,
+                SUM(ss.valor) as value_cop
+            ")
+            ->groupBy('c.executive')
+            ->get();
+
+        $totalValueCop = $rows->sum('value_cop');
+
+        $result = [];
+        foreach ($rows as $row) {
+            $valueCop = (float) $row->value_cop;
+            $valueUsd = (float) $row->value_usd;
+            $kilos    = (float) $row->total_kilos;
+
+            $result[] = [
+                'executive'            => $row->executive,
+                'total_orders'         => (int) $row->total_clients,
+                'value_usd'            => round($valueUsd, 2),
+                'value_cop'            => round($valueCop, 0),
+                'total_kilos'          => round($kilos, 2),
+                'dispatched_usd'       => round($valueUsd, 2),
+                'dispatched_cop'       => round($valueCop, 0),
+                'dispatched_kilos'     => round($kilos, 2),
+                'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0.0,
+                'compliance_cop_pct'   => 100.0,
+                'compliance_kilos_pct' => 100.0,
             ];
         }
 
