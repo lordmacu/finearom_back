@@ -1592,21 +1592,54 @@ class DashboardController extends Controller
 
     /**
      * Estadísticas por ejecutiva usando datos de Siigo (ventas facturadas).
+     *
+     * TRM priority: partial real (Alexa) → po.trm → 4000
      */
     private function calcExecutiveStatsFromSiigo(string $startDate, string $endDate): array
     {
         $fromMes = Carbon::parse($startDate)->format('Y-m');
         $toMes   = Carbon::parse($endDate)->format('Y-m');
 
+        // Subquery: última TRM real por orden (la que pone Alexa)
+        $latestPartialTrm = DB::raw("(
+            SELECT pt2.order_id,
+                   CAST(REPLACE(REPLACE(pt2.trm, '$', ''), ',', '') AS DECIMAL(15,2)) as real_trm
+            FROM partials pt2
+            WHERE pt2.type = 'real'
+              AND pt2.deleted_at IS NULL
+              AND pt2.trm IS NOT NULL
+              AND pt2.trm != ''
+              AND pt2.id = (
+                  SELECT MAX(pt3.id) FROM partials pt3
+                  WHERE pt3.order_id = pt2.order_id
+                    AND pt3.type = 'real'
+                    AND pt3.deleted_at IS NULL
+                    AND pt3.trm IS NOT NULL
+                    AND pt3.trm != ''
+              )
+        ) as lpt");
+
         $rows = DB::table('siigo_sales as ss')
-            ->join('clients as c', 'ss.nit', '=', 'c.nit')
+            ->join('clients as c', DB::raw('ss.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'))
+            ->leftJoin('purchase_orders as po', function ($j) {
+                $j->on('po.client_id', '=', 'c.id')
+                  ->whereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci LIKE CONCAT('%-', ss.orden_compra COLLATE utf8mb4_unicode_ci)");
+            })
+            ->leftJoin($latestPartialTrm, 'lpt.order_id', '=', 'po.id')
             ->whereBetween('ss.mes', [$fromMes, $toMes])
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
                 COUNT(DISTINCT CONCAT(ss.nit, '-', COALESCE(ss.orden_compra, ''))) as total_orders,
                 SUM(ss.cantidad) as total_kilos,
                 SUM(ss.precio_unitario * ss.cantidad) as value_usd,
-                SUM(ss.valor) as value_cop
+                SUM(
+                    ss.precio_unitario * ss.cantidad *
+                    (CASE
+                        WHEN lpt.real_trm IS NOT NULL AND lpt.real_trm >= 3400 THEN lpt.real_trm
+                        WHEN po.trm IS NOT NULL AND po.trm >= 3400 THEN po.trm
+                        ELSE 4000
+                    END)
+                ) as value_cop
             ")
             ->groupBy('c.executive')
             ->get();
