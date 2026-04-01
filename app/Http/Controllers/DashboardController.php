@@ -1623,7 +1623,10 @@ class DashboardController extends Controller
             ->join('clients as c', DB::raw('ss.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'))
             ->leftJoin('purchase_orders as po', function ($j) {
                 $j->on('po.client_id', '=', 'c.id')
-                  ->whereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci LIKE CONCAT('%-', SUBSTRING_INDEX(ss.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1))");
+                  ->where(function ($q) {
+                      $q->whereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci LIKE CONCAT('%-', SUBSTRING_INDEX(ss.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1))")
+                        ->orWhereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(ss.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1)");
+                  });
             })
             ->leftJoin($latestPartialTrm, 'lpt.order_id', '=', 'po.id')
             ->whereBetween('ss.mes', [$fromMes, $toMes])
