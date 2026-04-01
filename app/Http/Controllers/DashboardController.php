@@ -1603,7 +1603,7 @@ class DashboardController extends Controller
             ->whereBetween('ss.mes', [$fromMes, $toMes])
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
-                COUNT(DISTINCT ss.nit) as total_clients,
+                COUNT(DISTINCT CONCAT(ss.nit, '-', COALESCE(ss.orden_compra, ''))) as total_orders,
                 SUM(ss.cantidad) as total_kilos,
                 SUM(ss.precio_unitario * ss.cantidad) as value_usd,
                 SUM(ss.valor) as value_cop
@@ -1621,7 +1621,7 @@ class DashboardController extends Controller
 
             $result[] = [
                 'executive'            => $row->executive,
-                'total_orders'         => (int) $row->total_clients,
+                'total_orders'         => (int) $row->total_orders,
                 'value_usd'            => round($valueUsd, 2),
                 'value_cop'            => round($valueCop, 0),
                 'total_kilos'          => round($kilos, 2),

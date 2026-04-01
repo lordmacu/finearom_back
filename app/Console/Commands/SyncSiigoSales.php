@@ -135,6 +135,8 @@ class SyncSiigoSales extends Command
                         'mes' => $mes,
                     ],
                     [
+                        'orden_compra' => $venta['orden_compra'] ?? null,
+                        'lote' => $venta['lote'] ?? null,
                         'precio_unitario' => $venta['precio_unitario'] ?? 0,
                         'valor' => $valor,
                         'cantidad' => $cantidad,
