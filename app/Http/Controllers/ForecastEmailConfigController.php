@@ -62,17 +62,28 @@ class ForecastEmailConfigController extends Controller
         $request->validate([
             'email'           => ['required', 'email'],
             'executive_email' => ['nullable', 'email'],
+            'date_from'       => ['nullable', 'date_format:Y-m-d'],
+            'date_to'         => ['nullable', 'date_format:Y-m-d'],
         ]);
 
-        $now      = Carbon::now('America/Bogota');
-        $año      = $now->year;
-        $semana   = (int) ceil($now->day / 7);
-        $mesNum   = $now->month;
-        $meses    = [1=>'ENERO',2=>'FEBRERO',3=>'MARZO',4=>'ABRIL',5=>'MAYO',6=>'JUNIO',
-                     7=>'JULIO',8=>'AGOSTO',9=>'SEPTIEMBRE',10=>'OCTUBRE',11=>'NOVIEMBRE',12=>'DICIEMBRE'];
-        $mes      = $meses[$mesNum];
-        $mesStart = $now->copy()->startOfMonth()->toDateString();
-        $mesEnd   = $now->copy()->endOfMonth()->toDateString();
+        $meses = [1=>'ENERO',2=>'FEBRERO',3=>'MARZO',4=>'ABRIL',5=>'MAYO',6=>'JUNIO',
+                  7=>'JULIO',8=>'AGOSTO',9=>'SEPTIEMBRE',10=>'OCTUBRE',11=>'NOVIEMBRE',12=>'DICIEMBRE'];
+
+        if ($request->filled('date_from') && $request->filled('date_to')) {
+            $from     = Carbon::parse($request->date_from, 'America/Bogota');
+            $mesStart = $request->date_from;
+            $mesEnd   = $request->date_to;
+            $año      = $from->year;
+            $semana   = (int) ceil($from->day / 7);
+            $mes      = $meses[$from->month];
+        } else {
+            $now      = Carbon::now('America/Bogota');
+            $año      = $now->year;
+            $semana   = (int) ceil($now->day / 7);
+            $mes      = $meses[$now->month];
+            $mesStart = $now->copy()->startOfMonth()->toDateString();
+            $mesEnd   = $now->copy()->endOfMonth()->toDateString();
+        }
 
         // Buscar la ejecutiva seleccionada o la primera disponible con pronósticos este mes
         $execQuery = DB::table('clients as c')
