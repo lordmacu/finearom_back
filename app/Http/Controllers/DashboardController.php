@@ -1468,7 +1468,7 @@ class DashboardController extends Controller
                     'financial_analysis' => [
                         'average_trm' => $avgTrm ? round((float) $avgTrm, 2) : 4000.0,
                     ],
-                    'executive_stats'          => $this->calcExecutiveStatsV2($startDate, $endDate),
+                    'executive_stats'          => $this->calcExecutiveStatsFromSiigo($startDate, $endDate),
                     'lead_time_by_client_type' => $this->calculateLeadTimeByClientType($startDate, $endDate),
                 ],
             ]);
@@ -1582,6 +1582,91 @@ class DashboardController extends Controller
                 'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0.0,
                 'compliance_cop_pct'   => $valueCop > 0     ? round($dispCop   / $valueCop      * 100, 1) : 0.0,
                 'compliance_kilos_pct' => $kilos    > 0     ? round($dispKilos / $kilos          * 100, 1) : 0.0,
+            ];
+        }
+
+        usort($result, fn($a, $b) => $b['value_cop'] <=> $a['value_cop']);
+
+        return $result;
+    }
+
+    /**
+     * Estadísticas por ejecutiva usando datos de Siigo (ventas facturadas).
+     *
+     * TRM priority: partial real (Alexa) → po.trm → 4000
+     */
+    private function calcExecutiveStatsFromSiigo(string $startDate, string $endDate): array
+    {
+        $fromMes = Carbon::parse($startDate)->format('Y-m');
+        $toMes   = Carbon::parse($endDate)->format('Y-m');
+
+        // Subquery: última TRM real por orden (la que pone Alexa)
+        $latestPartialTrm = DB::raw("(
+            SELECT pt2.order_id,
+                   CAST(REPLACE(REPLACE(pt2.trm, '$', ''), ',', '') AS DECIMAL(15,2)) as real_trm
+            FROM partials pt2
+            WHERE pt2.type = 'real'
+              AND pt2.deleted_at IS NULL
+              AND pt2.trm IS NOT NULL
+              AND pt2.trm != ''
+              AND pt2.id = (
+                  SELECT MAX(pt3.id) FROM partials pt3
+                  WHERE pt3.order_id = pt2.order_id
+                    AND pt3.type = 'real'
+                    AND pt3.deleted_at IS NULL
+                    AND pt3.trm IS NOT NULL
+                    AND pt3.trm != ''
+              )
+        ) as lpt");
+
+        $rows = DB::table('siigo_sales as ss')
+            ->join('clients as c', DB::raw('ss.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'))
+            ->leftJoin('purchase_orders as po', function ($j) {
+                $j->on('po.client_id', '=', 'c.id')
+                  ->where(function ($q) {
+                      $q->whereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci LIKE CONCAT('%-', SUBSTRING_INDEX(ss.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1))")
+                        ->orWhereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(ss.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1)");
+                  });
+            })
+            ->leftJoin($latestPartialTrm, 'lpt.order_id', '=', 'po.id')
+            ->whereBetween('ss.mes', [$fromMes, $toMes])
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COUNT(DISTINCT CONCAT(ss.nit, '-', COALESCE(ss.orden_compra, ''))) as total_orders,
+                SUM(ss.cantidad) as total_kilos,
+                SUM(ss.valor) as value_cop,
+                SUM(
+                    ss.valor /
+                    (CASE
+                        WHEN lpt.real_trm IS NOT NULL AND lpt.real_trm >= 3400 THEN lpt.real_trm
+                        WHEN po.trm IS NOT NULL AND po.trm >= 3400 THEN po.trm
+                        ELSE 4000
+                    END)
+                ) as value_usd
+            ")
+            ->groupBy('c.executive')
+            ->get();
+
+        $totalValueCop = $rows->sum('value_cop');
+
+        $result = [];
+        foreach ($rows as $row) {
+            $valueCop = (float) $row->value_cop;
+            $valueUsd = (float) $row->value_usd;
+            $kilos    = (float) $row->total_kilos;
+
+            $result[] = [
+                'executive'            => $row->executive,
+                'total_orders'         => (int) $row->total_orders,
+                'value_usd'            => round($valueUsd, 2),
+                'value_cop'            => round($valueCop, 0),
+                'total_kilos'          => round($kilos, 2),
+                'dispatched_usd'       => round($valueUsd, 2),
+                'dispatched_cop'       => round($valueCop, 0),
+                'dispatched_kilos'     => round($kilos, 2),
+                'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0.0,
+                'compliance_cop_pct'   => 100.0,
+                'compliance_kilos_pct' => 100.0,
             ];
         }
 

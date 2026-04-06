@@ -44,11 +44,11 @@ php artisan view:cache
 echo -e "${GREEN}✓ Optimización completada${NC}"
 echo ""
 
-# 5. Migrar base de datos (opcional, comentado por seguridad)
-# echo -e "${BLUE}🗄️  Ejecutando migraciones...${NC}"
-# php artisan migrate --force
-# echo -e "${GREEN}✓ Migraciones ejecutadas${NC}"
-# echo ""
+# 5. Migrar base de datos
+echo -e "${BLUE}🗄️  Ejecutando migraciones...${NC}"
+php artisan migrate --force
+echo -e "${GREEN}✓ Migraciones ejecutadas${NC}"
+echo ""
 
 echo -e "${GREEN}✅ Deploy completado exitosamente!${NC}"
 echo ""
