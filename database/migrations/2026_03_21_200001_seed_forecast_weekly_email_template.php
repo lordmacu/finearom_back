@@ -19,7 +19,7 @@ return new class extends Migration
             'title' => 'Seguimiento de Pronósticos',
 
             'header_content' => '
-<p>Hola <strong>|ejecutiva|</strong>,</p>
+<p>Estimada <strong>|primer_nombre|</strong>,</p>
 <p>Aquí tienes el resumen del cumplimiento de pronósticos de tus clientes para <strong>|mes| |año|</strong> — Semana |semana|.</p>
 
 <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#f0f9ff;border-radius:8px;overflow:hidden;">

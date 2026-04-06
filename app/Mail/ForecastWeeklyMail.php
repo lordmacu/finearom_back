@@ -44,6 +44,7 @@ class ForecastWeeklyMail extends Mailable
 
         return [
             'ejecutiva'          => $data['ejecutiva'],
+            'primer_nombre'      => explode(' ', trim($data['ejecutiva']))[0],
             'mes'                => $data['mes'],
             'año'                => $data['año'],
             'semana'             => $data['semana'],

@@ -90,16 +90,27 @@ class SendForecastEmails extends Command
     private function shouldRunToday(object $config): bool
     {
         $today = Carbon::now('America/Bogota');
+        $rules = json_decode($config->schedule_rules ?? '[]', true);
 
-        return match ($config->frequency) {
-            'weekly'    => $today->dayOfWeekIso === (int) $config->day_of_week,
-            'biweekly'  => in_array($today->day, [
-                               (int) $config->day_of_month,
-                               min((int) $config->day_of_month + 15, $today->daysInMonth),
-                           ]),
-            'monthly'   => $today->day === (int) $config->day_of_month,
-            default     => false,
-        };
+        if (empty($rules)) return false;
+
+        foreach ($rules as $rule) {
+            $week      = (int) ($rule['week'] ?? 0); // 1-4
+            $isoDay    = (int) ($rule['day']  ?? 0); // 1=Lun … 7=Dom (ISO)
+            $carbonDay = $isoDay % 7;                // Carbon: 0=Dom, 1=Lun … 6=Sáb
+
+            try {
+                $target = Carbon::create($today->year, $today->month, 1)
+                    ->nthOfMonth($week, $carbonDay);
+                if ($target && $today->toDateString() === $target->toDateString()) {
+                    return true;
+                }
+            } catch (\Throwable) {
+                // semana inexistente en este mes (ej: 5to lunes)
+            }
+        }
+
+        return false;
     }
 
     private function buildEmailData(object $exec, int $año, string $mes, string $mesStart, string $mesEnd, int $semana): array

@@ -31,20 +31,18 @@ class ForecastEmailConfigController extends Controller
     public function update(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'frequency'    => ['required', 'in:weekly,biweekly,monthly'],
-            'day_of_week'  => ['nullable', 'integer', 'min:1', 'max:7'],
-            'day_of_month' => ['nullable', 'integer', 'min:1', 'max:31'],
-            'send_hour'    => ['required', 'regex:/^\d{2}:\d{2}$/'],
-            'enabled'      => ['required', 'boolean'],
+            'schedule_rules'             => ['required', 'array', 'min:1', 'max:3'],
+            'schedule_rules.*.week'      => ['required', 'integer', 'min:1', 'max:4'],
+            'schedule_rules.*.day'       => ['required', 'integer', 'min:1', 'max:7'],
+            'send_hour'                  => ['required', 'regex:/^\d{2}:\d{2}$/'],
+            'enabled'                    => ['required', 'boolean'],
         ]);
 
         DB::table('forecast_email_config')->update([
-            'frequency'    => $validated['frequency'],
-            'day_of_week'  => $validated['day_of_week']  ?? null,
-            'day_of_month' => $validated['day_of_month'] ?? null,
-            'send_hour'    => $validated['send_hour'],
-            'enabled'      => $validated['enabled'],
-            'updated_at'   => now(),
+            'schedule_rules' => json_encode($validated['schedule_rules']),
+            'send_hour'      => $validated['send_hour'],
+            'enabled'        => $validated['enabled'],
+            'updated_at'     => now(),
         ]);
 
         return response()->json([
