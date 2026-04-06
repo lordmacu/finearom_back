@@ -43,18 +43,52 @@ class ForecastWeeklyMail extends Mailable
         $data = $this->emailData;
 
         return [
-            'ejecutiva'          => $data['ejecutiva'],
-            'primer_nombre'      => explode(' ', trim($data['ejecutiva']))[0],
-            'mes'                => $data['mes'],
-            'año'                => $data['año'],
-            'semana'             => $data['semana'],
-            'total_pronostico'   => number_format($data['total_pronostico']) . ' kg  /  $' . number_format($data['total_pron_usd'] ?? 0, 2),
-            'total_vendido'      => number_format($data['total_vendido']) . ' kg  /  $' . number_format($data['total_vendido_usd'] ?? 0, 2),
-            'total_cumplimiento' => $data['total_cumplimiento'] !== null
+            'ejecutiva'            => $data['ejecutiva'],
+            'primer_nombre'        => explode(' ', trim($data['ejecutiva']))[0],
+            'mes'                  => $data['mes'],
+            'año'                  => $data['año'],
+            'semana'               => $data['semana'],
+            'total_pronostico'     => number_format($data['total_pronostico']) . ' kg  /  $' . number_format($data['total_pron_usd'] ?? 0, 2),
+            'total_vendido'        => number_format($data['total_vendido']) . ' kg  /  $' . number_format($data['total_vendido_usd'] ?? 0, 2),
+            'total_cumplimiento'   => $data['total_cumplimiento'] !== null
                 ? $data['total_cumplimiento'] . '%'
                 : '—',
-            'tabla_detalle'      => $this->buildTablaHtml($data['clientes']),
+            'mensaje_motivacional' => $this->buildMensajeMotivacional($data['total_cumplimiento']),
+            'tabla_detalle'        => $this->buildTablaHtml($data['clientes']),
         ];
+    }
+
+    private function buildMensajeMotivacional(?float $cumplimiento): string
+    {
+        if ($cumplimiento === null) return '';
+
+        if ($cumplimiento >= 100) {
+            $pct = number_format($cumplimiento, 1);
+            return '
+<p style="margin:0 0 10px;font-size:14px;color:#374151;line-height:1.6;">
+  Quiero felicitarte porque a la fecha has superado el pronóstico del mes en un
+  <strong>' . $pct . '%</strong>.
+  Este resultado refleja tu compromiso y esfuerzo.
+</p>
+<p style="margin:0 0 10px;font-size:14px;color:#374151;line-height:1.6;">
+  Ahora el foco está en cerrar los pendientes, por favor revisemos con cada cliente las OC para asegurar el cumplimiento total.
+</p>
+<p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.6;">
+  Gracias por tu esfuerzo y participación a la venta de este mes.
+</p>';
+        }
+
+        return '
+<p style="margin:0 0 10px;font-size:14px;color:#374151;line-height:1.6;">
+  A la fecha presentas un buen avance frente al pronóstico del mes; sin embargo, aún hay oportunidades
+  por concretar para alcanzar la meta. Confío en tu gestión y enfoque para lograrlo.
+</p>
+<p style="margin:0 0 10px;font-size:14px;color:#374151;line-height:1.6;">
+  Ahora el foco está en cerrar los pendientes, por favor valida con cada cliente las OC para asegurar el cumplimiento total.
+</p>
+<p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.6;">
+  Gracias por tu esfuerzo y participación a la venta de este mes.
+</p>';
     }
 
     private function buildTablaHtml(array $clientes): string

@@ -37,6 +37,8 @@ return new class extends Migration
   </tr>
 </table>
 
+|mensaje_motivacional|
+
 |tabla_detalle|
 ',
 

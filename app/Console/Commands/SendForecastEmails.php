@@ -68,10 +68,26 @@ class SendForecastEmails extends Command
             $emails = $this->parseEmails($exec->executive_email);
             if (empty($emails)) continue;
 
+            // Guardia: solo enviar a emails registrados en la tabla executives (activos)
+            $emailsValidos = array_values(array_filter($emails, function (string $email) {
+                return DB::table('executives')
+                    ->whereRaw('LOWER(email) = ?', [strtolower(trim($email))])
+                    ->where('is_active', true)
+                    ->exists();
+            }));
+
+            $rechazados = array_diff($emails, $emailsValidos);
+            foreach ($rechazados as $r) {
+                $this->warn("  ⚠ Email ignorado (no es ejecutivo activo): {$r}");
+                Log::warning("SendForecastEmails: email ignorado porque no está en tabla executives — {$r}");
+            }
+
+            if (empty($emailsValidos)) continue;
+
             $data = $this->buildEmailData($exec, $año, $mes, $mesStart, $mesEnd, $semana);
             if (empty($data['clientes'])) continue;
 
-            foreach ($emails as $email) {
+            foreach ($emailsValidos as $email) {
                 try {
                     Mail::to($email)->send(new ForecastWeeklyMail($data));
                     $this->line("  ✓ Enviado a {$email}");
