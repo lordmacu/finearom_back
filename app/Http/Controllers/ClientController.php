@@ -949,10 +949,16 @@ class ClientController extends Controller
 
             // Envío de correo de bienvenida interno
             try {
-                $internalEmails = ['analista.operaciones@finearom.com', 'facturacion@finearom.com'];
+                $internalEmails = [
+                    'coordinadora.comercial@finearom.com',
+                    'monica.castano@finearom.com',
+                    'servicio.cliente@finearom.com',
+                    'contabilidad@finearom.com',
+                ];
                 if ($client->executive_email) {
                     $internalEmails[] = $client->executive_email;
                 }
+                $internalEmails = array_values(array_unique($internalEmails));
 
                 $emailData = [
                     'executive_name' => $client->executive,
