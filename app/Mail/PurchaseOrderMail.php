@@ -22,6 +22,7 @@ class PurchaseOrderMail extends Mailable
     public $customMetadata;
     public $templateContent;
     public $userAttachments;
+    public $forecastExceedances;
 
     /**
      * Create a new message instance.
@@ -32,13 +33,14 @@ class PurchaseOrderMail extends Mailable
      * @param array $customMetadata
      * @param array $userAttachments
      */
-    public function __construct($purchaseOrder, $pdf, $processType = 'purchase_order', $customMetadata = [], $userAttachments = [])
+    public function __construct($purchaseOrder, $pdf, $processType = 'purchase_order', $customMetadata = [], $userAttachments = [], array $forecastExceedances = [])
     {
-        $this->purchaseOrder = $purchaseOrder;
-        $this->pdf = $pdf;
-        $this->processType = $processType;
-        $this->customMetadata = $customMetadata;
-        $this->userAttachments = is_array($userAttachments) ? $userAttachments : [];
+        $this->purchaseOrder      = $purchaseOrder;
+        $this->pdf                = $pdf;
+        $this->processType        = $processType;
+        $this->customMetadata     = $customMetadata;
+        $this->userAttachments    = is_array($userAttachments) ? $userAttachments : [];
+        $this->forecastExceedances = $forecastExceedances;
 
         // Obtener el contenido del template desde ConfigSystem (backward compatibility)
         $config = ConfigSystem::where('key', 'templatePedido')->first();
@@ -97,9 +99,24 @@ class PurchaseOrderMail extends Mailable
      */
     public function content(): Content
     {
-        $service = new EmailTemplateService();
-        $variables = $this->prepareVariables();
+        $service         = new EmailTemplateService();
+        $variables       = $this->prepareVariables();
         $templateContent = $service->replaceVariables($this->templateContent, $variables);
+
+        // Inyectar aviso de pronóstico antes de "Nota:" si hay productos que exceden
+        $avisoPronostico = $this->buildForecastExceedancesBlock();
+        if ($avisoPronostico !== '') {
+            // Buscar "Nota:" (case-insensitive) y meter el bloque justo antes
+            $pos = stripos($templateContent, 'nota:');
+            if ($pos !== false) {
+                $templateContent = substr($templateContent, 0, $pos)
+                    . $avisoPronostico
+                    . substr($templateContent, $pos);
+            } else {
+                $templateContent .= $avisoPronostico;
+            }
+        }
+
         $variables['template_content'] = $templateContent;
         $rendered = $service->renderTemplate('purchase_order', $variables);
 
@@ -107,6 +124,35 @@ class PurchaseOrderMail extends Mailable
             view: 'emails.template',
             with: $rendered
         );
+    }
+
+    private function buildForecastExceedancesBlock(): string
+    {
+        if (empty($this->forecastExceedances)) return '';
+
+        $th = 'padding:8px 12px;text-align:left;border:1px solid #d1d5db;background:#f9fafb;font-size:13px;color:#374151;font-weight:bold;';
+        $td = 'padding:8px 12px;border:1px solid #d1d5db;font-size:13px;color:#374151;';
+
+        $rows = '';
+        foreach ($this->forecastExceedances as $row) {
+            $rows .= '<tr>'
+                . '<td style="' . $td . '">' . e($row['nombre']) . ' <span style="color:#9ca3af;font-size:11px;">(' . e($row['codigo']) . ')</span></td>'
+                . '<td style="' . $td . 'text-align:right;">' . number_format($row['cantidad'], 0, ',', '.') . ' kg</td>'
+                . '<td style="' . $td . 'text-align:right;font-weight:bold;color:#b45309;">' . number_format($row['excedente'], 0, ',', '.') . ' kg</td>'
+                . '</tr>';
+        }
+
+        return '<p style="font-family:Arial,sans-serif;font-size:13px;color:#1F2345;margin:16px 0 8px 0;">'
+            . 'Los siguientes productos podrían presentar novedades en la fecha de entrega debido a que la cantidad solicitada supera el pronóstico.'
+            . '</p>'
+            . '<table style="width:100%;border-collapse:collapse;margin:0 0 16px 0;font-family:Arial,sans-serif;">'
+            . '<thead><tr>'
+            . '<th style="' . $th . '">Referencia</th>'
+            . '<th style="' . $th . 'text-align:right;">Cantidad solicitada</th>'
+            . '<th style="' . $th . 'text-align:right;">Excede en</th>'
+            . '</tr></thead>'
+            . '<tbody>' . $rows . '</tbody>'
+            . '</table>';
     }
 
     /**

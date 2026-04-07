@@ -239,6 +239,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/purchase-orders/{id}/observations', [PurchaseOrderController::class, 'updateObservations']);
     Route::post('/recaudo/import', [RecaudoImportController::class, 'import']);
     Route::get('/recaudo/recent', [RecaudoImportController::class, 'recent']);
+    Route::get('/recaudo/template', [RecaudoImportController::class, 'downloadTemplate']);
 
     // Clientes y sucursales
     Route::get('/clients', [ClientController::class, 'index']);

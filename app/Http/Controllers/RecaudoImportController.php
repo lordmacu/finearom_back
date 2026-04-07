@@ -11,6 +11,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\Font;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class RecaudoImportController extends Controller
 {
@@ -123,6 +129,82 @@ class RecaudoImportController extends Controller
         return response()->json([
             'success' => true,
             'data' => $recaudos,
+        ]);
+    }
+
+    /**
+     * Descarga un archivo Excel de plantilla con los encabezados correctos.
+     */
+    public function downloadTemplate(): StreamedResponse
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Recaudos');
+
+        // Filas 1-6: título informativo
+        $sheet->mergeCells('A1:H1');
+        $sheet->setCellValue('A1', 'PLANTILLA DE IMPORTACIÓN DE RECAUDOS');
+        $sheet->getStyle('A1')->applyFromArray([
+            'font'      => ['bold' => true, 'size' => 13],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        $sheet->mergeCells('A2:H2');
+        $sheet->setCellValue('A2', 'Los encabezados deben estar en la fila 7. Los datos comienzan en la fila 8.');
+        $sheet->getStyle('A2')->applyFromArray([
+            'font'      => ['italic' => true, 'color' => ['rgb' => '555555']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        // Fila 7: encabezados
+        $headers = [
+            'A7' => 'FEC.REC.',
+            'B7' => 'NUMERO DEL RECIBO',
+            'C7' => 'FEC.VTO.',
+            'D7' => 'NUMERO FACTURA',
+            'E7' => 'NIT',
+            'F7' => 'CLIENTE',
+            'G7' => 'DIAS',
+            'H7' => 'VALOR CANCELADO',
+        ];
+
+        foreach ($headers as $cell => $label) {
+            $sheet->setCellValue($cell, $label);
+        }
+
+        $sheet->getStyle('A7:H7')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1F2345']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        // Fila 8: ejemplo
+        $sheet->setCellValue('A8', '15/04/2026');
+        $sheet->setCellValue('B8', 'REC-001');
+        $sheet->setCellValue('C8', '30/04/2026');
+        $sheet->setCellValue('D8', 'FAC-12345');
+        $sheet->setCellValue('E8', '900123456');
+        $sheet->setCellValue('F8', 'CLIENTE EJEMPLO S.A.S');
+        $sheet->setCellValue('G8', 0);
+        $sheet->setCellValue('H8', 1500000);
+
+        $sheet->getStyle('A8:H8')->applyFromArray([
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F0F4FF']],
+            'font' => ['italic' => true, 'color' => ['rgb' => '888888']],
+        ]);
+
+        // Anchos de columna
+        foreach (['A' => 14, 'B' => 22, 'C' => 14, 'D' => 20, 'E' => 15, 'F' => 30, 'G' => 8, 'H' => 18] as $col => $width) {
+            $sheet->getColumnDimension($col)->setWidth($width);
+        }
+
+        $writer = new Xlsx($spreadsheet);
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, 'plantilla_recaudos.xlsx', [
+            'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="plantilla_recaudos.xlsx"',
         ]);
     }
 

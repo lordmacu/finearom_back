@@ -2395,6 +2395,66 @@ class PurchaseOrderController extends Controller
     }
 
     /**
+     * Calcula qué productos de una orden exceden el pronóstico manual del mes.
+     * Retorna array de filas: ['nombre', 'codigo', 'cantidad', 'excedente']
+     */
+    private function buildForecastExceedances(PurchaseOrder $purchaseOrder): array
+    {
+        $now      = \Carbon\Carbon::now('America/Bogota');
+        $meses    = [1=>'ENERO',2=>'FEBRERO',3=>'MARZO',4=>'ABRIL',5=>'MAYO',6=>'JUNIO',
+                     7=>'JULIO',8=>'AGOSTO',9=>'SEPTIEMBRE',10=>'OCTUBRE',11=>'NOVIEMBRE',12=>'DICIEMBRE'];
+        $mes      = $meses[$now->month];
+        $año      = (string) $now->year;
+        $mesStart = $now->copy()->startOfMonth()->toDateString();
+        $mesEnd   = $now->copy()->endOfMonth()->toDateString();
+
+        $clientNit = $purchaseOrder->client->nit;
+        $excedencias = [];
+
+        foreach ($purchaseOrder->products as $product) {
+            // Ignorar muestras
+            if ($product->pivot->muestra) continue;
+
+            $cantidad = (float) $product->pivot->quantity;
+            if ($cantidad <= 0) continue;
+
+            $forecast = \DB::table('sales_forecasts')
+                ->where('nit', $clientNit)
+                ->where('codigo', $product->code)
+                ->where('modelo', 'manual')
+                ->where('año', $año)
+                ->where('mes', $mes)
+                ->value('cantidad_forecast');
+
+            if ($forecast === null) continue;
+
+            $vendido = (float) \DB::table('partials as pt')
+                ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
+                ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
+                ->join('products as p', 'pop.product_id', '=', 'p.id')
+                ->where('po.client_id', $purchaseOrder->client_id)
+                ->where('p.id', $product->id)
+                ->where('pt.type', 'real')
+                ->whereNull('pt.deleted_at')
+                ->where('pop.muestra', 0)
+                ->whereBetween('pt.dispatch_date', [$mesStart, $mesEnd])
+                ->sum('pt.quantity');
+
+            $excedente = ($vendido + $cantidad) - $forecast;
+            if ($excedente > 0) {
+                $excedencias[] = [
+                    'nombre'    => $product->product_name,
+                    'codigo'    => $product->code,
+                    'cantidad'  => $cantidad,
+                    'excedente' => round($excedente, 2),
+                ];
+            }
+        }
+
+        return $excedencias;
+    }
+
+    /**
      * Get TRM (Tasa Representativa del Mercado) for a specific date
      * Usa el TrmService centralizado con sistema de fallback completo
      */
@@ -2547,9 +2607,13 @@ class PurchaseOrderController extends Controller
                     }
                 });
 
+                // TODO: descomentar cuando se quiera activar el aviso de productos fuera del pronóstico en el email al cliente
+                // $forecastExceedances = $this->buildForecastExceedances($purchaseOrder);
+                $forecastExceedances = [];
+
                 \Mail::to($primaryToEmail)
                     ->cc($ccEmails)
-                    ->send(new \App\Mail\PurchaseOrderMail($purchaseOrder, $pdfContent, $subProcess, $metadata, $attachmentPaths));
+                    ->send(new \App\Mail\PurchaseOrderMail($purchaseOrder, $pdfContent, $subProcess, $metadata, $attachmentPaths, $forecastExceedances));
 
                 // Guardar el Message-ID capturado
                 if ($capturedMessageId) {
