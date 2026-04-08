@@ -56,6 +56,9 @@ class RecaudoImportController extends Controller
             DB::beginTransaction();
 
             try {
+                Recaudo::truncate();
+
+                $rows = [];
                 for ($row = $dataStartRow; $row <= $highestRow; $row++) {
                     $rowData = $this->extractRowData($worksheet, $row);
 
@@ -63,28 +66,22 @@ class RecaudoImportController extends Controller
                         continue;
                     }
 
-                    try {
-                        Recaudo::query()->updateOrCreate(
-                            [
-                                'numero_recibo' => $rowData['numero_recibo'],
-                                'numero_factura' => $rowData['numero_factura'],
-                            ],
-                            [
-                                'fecha_recaudo' => $rowData['fecha_recaudo'],
-                                'fecha_vencimiento' => $rowData['fecha_vencimiento'],
-                                'nit' => $rowData['nit'],
-                                'cliente' => $rowData['cliente'],
-                                'dias' => $rowData['dias'],
-                                'valor_cancelado' => $rowData['valor_cancelado'],
-                                'observaciones' => $rowData['observaciones'] ?? null,
-                            ]
-                        );
+                    $rows[] = [
+                        'fecha_recaudo'    => $rowData['fecha_recaudo'],
+                        'numero_recibo'    => $rowData['numero_recibo'],
+                        'fecha_vencimiento'=> $rowData['fecha_vencimiento'],
+                        'numero_factura'   => $rowData['numero_factura'],
+                        'nit'              => $rowData['nit'],
+                        'cliente'          => $rowData['cliente'],
+                        'dias'             => $rowData['dias'],
+                        'valor_cancelado'  => $rowData['valor_cancelado'],
+                        'observaciones'    => $rowData['observaciones'] ?? null,
+                    ];
+                    $imported++;
+                }
 
-                        $imported++;
-                    } catch (\Exception $e) {
-                        $errors[] = "Error en fila {$row}: " . $e->getMessage();
-                        Log::warning("Error importando fila {$row}: " . $e->getMessage());
-                    }
+                foreach (array_chunk($rows, 500) as $chunk) {
+                    Recaudo::insert($chunk);
                 }
 
                 DB::commit();
@@ -119,11 +116,8 @@ class RecaudoImportController extends Controller
      */
     public function recent(Request $request): JsonResponse
     {
-        $limit = $request->get('limit', 10);
-
         $recaudos = Recaudo::query()
-            ->orderBy('created_at', 'desc')
-            ->limit($limit)
+            ->orderBy('fecha_recaudo', 'desc')
             ->get();
 
         return response()->json([
