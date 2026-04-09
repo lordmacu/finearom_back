@@ -71,11 +71,13 @@ class Kernel extends ConsoleKernel
             \Illuminate\Support\Facades\Artisan::call('siigo:sync-cartera', [
                 '--desde' => $desde,
                 '--hasta' => $hasta,
+                '--dias-mora' => -270,
+                '--dias-cobro' => 10,
             ]);
-        })->weeklyOn(1, '08:00')
+        })->name('siigo-sync-cartera-lunes')
+          ->weeklyOn(1, '08:00')
           ->timezone('America/Bogota')
           ->withoutOverlapping()
-          ->name('siigo-sync-cartera-lunes')
           ->onSuccess(fn () => \Log::info('Siigo sync-cartera completado (lunes 8am)'))
           ->onFailure(fn () => \Log::error('Error en Siigo sync-cartera (lunes 8am)'));
 
@@ -88,10 +90,10 @@ class Kernel extends ConsoleKernel
                 '--desde' => $desde,
                 '--hasta' => $hasta,
             ]);
-        })->weeklyOn(1, '08:00')
+        })->name('siigo-sync-recaudos-lunes')
+          ->weeklyOn(1, '08:00')
           ->timezone('America/Bogota')
           ->withoutOverlapping()
-          ->name('siigo-sync-recaudos-lunes')
           ->onSuccess(fn () => \Log::info('Siigo sync-recaudos completado (lunes 8am)'))
           ->onFailure(fn () => \Log::error('Error en Siigo sync-recaudos (lunes 8am)'));
 

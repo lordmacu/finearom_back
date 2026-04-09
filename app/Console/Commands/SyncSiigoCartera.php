@@ -16,6 +16,8 @@ class SyncSiigoCartera extends Command
     protected $signature = 'siigo:sync-cartera
                             {--desde= : Fecha inicio YYYY-MM-DD (default: primer dia del mes actual)}
                             {--hasta= : Fecha fin YYYY-MM-DD (default: hoy)}
+                            {--dias-mora=-270 : Dias minimos de mora}
+                            {--dias-cobro=10 : Dias maximos de cobro}
                             {--nit= : Sincronizar solo un NIT especifico (default: all)}
                             {--fecha-cartera= : Fecha del snapshot (default: hoy)}';
 
@@ -50,11 +52,13 @@ class SyncSiigoCartera extends Command
         $nit = $this->option('nit') ?? 'all';
         $desde = $this->option('desde') ?? Carbon::now()->startOfMonth()->toDateString();
         $hasta = $this->option('hasta') ?? Carbon::now()->toDateString();
+        $diasMora = (int) $this->option('dias-mora');
+        $diasCobro = (int) $this->option('dias-cobro');
         $fechaCartera = $this->option('fecha-cartera') ?? Carbon::now()->toDateString();
 
         // 4. Fetch (siempre trae TODOS los clientes en una sola llamada)
         $url = "{$this->baseUrl}/cartera-cliente/{$nit}";
-        $this->info("Consultando: {$url} (desde {$desde} hasta {$hasta})");
+        $this->info("Consultando: {$url} (desde {$desde} hasta {$hasta}, dias_mora={$diasMora}, dias_cobro={$diasCobro})");
 
         try {
             $response = Http::withToken($token)
@@ -62,6 +66,8 @@ class SyncSiigoCartera extends Command
                 ->get($url, [
                     'desde' => $desde,
                     'hasta' => $hasta,
+                    'dias_mora' => $diasMora,
+                    'dias_cobro' => $diasCobro,
                 ]);
 
             if (! $response->successful()) {
