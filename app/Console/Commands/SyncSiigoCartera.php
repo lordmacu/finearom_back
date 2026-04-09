@@ -55,6 +55,8 @@ class SyncSiigoCartera extends Command
         $diasMora = (int) $this->option('dias-mora');
         $diasCobro = (int) $this->option('dias-cobro');
         $fechaCartera = $this->option('fecha-cartera') ?? Carbon::now()->toDateString();
+        $fechaFrom = $desde;
+        $fechaTo = $hasta;
 
         // 4. Fetch (siempre trae TODOS los clientes en una sola llamada)
         $url = "{$this->baseUrl}/cartera-cliente/{$nit}";
@@ -108,6 +110,7 @@ class SyncSiigoCartera extends Command
         $now = Carbon::now();
 
         DB::transaction(function () use ($cartera, $fechaCartera, $fechaFrom, $fechaTo, $now, $clientsCache, &$inserted, &$errors, $bar) {
+            // Borrar snapshot del mismo fecha_cartera (compatible con logica manual de Excel)
             Cartera::query()->where('fecha_cartera', $fechaCartera)->delete();
 
             $payload = [];

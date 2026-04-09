@@ -208,4 +208,103 @@ class CarteraController extends Controller
             ],
         ], 201);
     }
+
+    /**
+     * Devuelve la ultima importacion de cartera (ultimo snapshot por fecha_cartera).
+     * GET /api/cartera/latest-import
+     */
+    public function latestImport(Request $request): JsonResponse
+    {
+        $latest = Cartera::query()
+            ->select('fecha_cartera', 'fecha_from', 'fecha_to')
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (! $latest) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'fecha_cartera' => null,
+                    'fecha_from' => null,
+                    'fecha_to' => null,
+                    'rows' => [],
+                    'totals' => ['count' => 0, 'saldo_contable' => 0, 'saldo_vencido' => 0],
+                ],
+            ]);
+        }
+
+        $rows = Cartera::query()
+            ->where('fecha_cartera', $latest->fecha_cartera)
+            ->orderBy('nit')
+            ->orderBy('documento')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'fecha_cartera' => $latest->fecha_cartera,
+                'fecha_from' => $latest->fecha_from,
+                'fecha_to' => $latest->fecha_to,
+                'rows' => $rows,
+                'totals' => [
+                    'count' => $rows->count(),
+                    'saldo_contable' => (float) $rows->sum('saldo_contable'),
+                    'saldo_vencido' => (float) $rows->sum('saldo_vencido'),
+                    'vencido' => (float) $rows->sum('vencido'),
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Actualizar un registro de cartera.
+     * PUT /api/cartera/{id}
+     */
+    public function updateRow(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'nit' => ['nullable', 'string'],
+            'ciudad' => ['nullable', 'string'],
+            'vendedor' => ['nullable', 'string'],
+            'nombre_vendedor' => ['nullable', 'string'],
+            'cuenta' => ['nullable', 'string'],
+            'descripcion_cuenta' => ['nullable', 'string'],
+            'documento' => ['nullable', 'string'],
+            'fecha' => ['nullable', 'date'],
+            'vence' => ['nullable', 'date'],
+            'dias' => ['nullable', 'integer'],
+            'saldo_contable' => ['nullable', 'numeric'],
+            'saldo_vencido' => ['nullable', 'numeric'],
+            'vencido' => ['nullable', 'numeric'],
+            'nombre_empresa' => ['nullable', 'string'],
+        ]);
+
+        $row = Cartera::findOrFail($id);
+        $row->update($validated);
+
+        $this->carteraQuery->clearCustomersCache();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Registro actualizado correctamente',
+            'data' => $row->fresh(),
+        ]);
+    }
+
+    /**
+     * Eliminar un registro de cartera.
+     * DELETE /api/cartera/{id}
+     */
+    public function deleteRow(int $id): JsonResponse
+    {
+        $row = Cartera::findOrFail($id);
+        $row->delete();
+
+        $this->carteraQuery->clearCustomersCache();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Registro eliminado correctamente',
+        ]);
+    }
 }

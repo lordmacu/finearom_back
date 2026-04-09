@@ -190,6 +190,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/cartera/invoice-history', [CarteraController::class, 'invoiceHistory']);
     Route::post('/cartera/import', [CarteraController::class, 'import']);
     Route::post('/cartera/store', [CarteraController::class, 'store']);
+    Route::get('/cartera/latest-import', [CarteraController::class, 'latestImport']);
+    Route::put('/cartera/{id}', [CarteraController::class, 'updateRow']);
+    Route::delete('/cartera/{id}', [CarteraController::class, 'deleteRow']);
 
     // Cartera / Estado (envío a cola)
     Route::get('/cartera/estado', [CarteraEstadoController::class, 'load']);
