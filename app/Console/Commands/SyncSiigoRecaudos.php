@@ -40,7 +40,7 @@ class SyncSiigoRecaudos extends Command
         $this->info("Usando bridge en: {$this->baseUrl}");
 
         $now = Carbon::now();
-        $desde = $this->option('desde') ?? $now->copy()->startOfYear()->format('Y-m');
+        $desde = $this->option('desde') ?? $now->copy()->startOfMonth()->format('Y-m');
         $hasta = $this->option('hasta') ?? $now->format('Y-m');
 
         $this->info("Sincronizando recaudos desde {$desde} hasta {$hasta}");

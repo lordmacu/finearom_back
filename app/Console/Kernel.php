@@ -63,6 +63,26 @@ class Kernel extends ConsoleKernel
                 ->onFailure(fn () => \Log::error("Error en Siigo sync-sales ({$time})"));
         }
 
+        // ⭐ Sync de cartera Siigo - Todos los lunes a las 8 AM (Bogota)
+        // Toma snapshot del primer día del mes al día actual
+        $schedule->command('siigo:sync-cartera')
+            ->weeklyOn(1, '08:00') // 1 = Monday
+            ->timezone('America/Bogota')
+            ->withoutOverlapping()
+            ->runInBackground()
+            ->onSuccess(fn () => \Log::info('Siigo sync-cartera completado (lunes 8am)'))
+            ->onFailure(fn () => \Log::error('Error en Siigo sync-cartera (lunes 8am)'));
+
+        // ⭐ Sync de recaudos Siigo - Todos los lunes a las 8 AM (Bogota)
+        // Sincroniza desde el primer día del mes actual hasta el día actual
+        $schedule->command('siigo:sync-recaudos')
+            ->weeklyOn(1, '08:00') // 1 = Monday
+            ->timezone('America/Bogota')
+            ->withoutOverlapping()
+            ->runInBackground()
+            ->onSuccess(fn () => \Log::info('Siigo sync-recaudos completado (lunes 8am)'))
+            ->onFailure(fn () => \Log::error('Error en Siigo sync-recaudos (lunes 8am)'));
+
         // Ejecutar dispatch de emails de cartera cada 30 minutos
         $schedule->command('emails:dispatch')->everyMinute();
 
