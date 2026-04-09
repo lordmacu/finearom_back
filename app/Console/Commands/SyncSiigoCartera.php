@@ -14,12 +14,10 @@ use Illuminate\Support\Facades\Log;
 class SyncSiigoCartera extends Command
 {
     protected $signature = 'siigo:sync-cartera
-                            {--nit= : Sincronizar solo un NIT especifico}
-                            {--dias-mora=-270 : Dias minimos de mora (filtro)}
-                            {--dias-cobro=10 : Dias maximos de cobro (filtro)}
-                            {--fecha-cartera= : Fecha del snapshot (default: hoy)}
-                            {--fecha-from= : Fecha from del rango (default: hoy)}
-                            {--fecha-to= : Fecha to del rango (default: hoy)}';
+                            {--desde= : Fecha inicio YYYY-MM-DD (default: primer dia del mes actual)}
+                            {--hasta= : Fecha fin YYYY-MM-DD (default: hoy)}
+                            {--nit= : Sincronizar solo un NIT especifico (default: all)}
+                            {--fecha-cartera= : Fecha del snapshot (default: hoy)}';
 
     protected $description = 'Sincroniza cartera desde el Siigo Bridge (reemplaza import manual Excel)';
 
@@ -50,22 +48,20 @@ class SyncSiigoCartera extends Command
 
         // 3. Parametros
         $nit = $this->option('nit') ?? 'all';
-        $diasMora = $this->option('dias-mora');
-        $diasCobro = $this->option('dias-cobro');
+        $desde = $this->option('desde') ?? Carbon::now()->startOfMonth()->toDateString();
+        $hasta = $this->option('hasta') ?? Carbon::now()->toDateString();
         $fechaCartera = $this->option('fecha-cartera') ?? Carbon::now()->toDateString();
-        $fechaFrom = $this->option('fecha-from') ?? $fechaCartera;
-        $fechaTo = $this->option('fecha-to') ?? $fechaCartera;
 
-        // 4. Fetch
+        // 4. Fetch (siempre trae TODOS los clientes en una sola llamada)
         $url = "{$this->baseUrl}/cartera-cliente/{$nit}";
-        $this->info("Consultando: {$url}");
+        $this->info("Consultando: {$url} (desde {$desde} hasta {$hasta})");
 
         try {
             $response = Http::withToken($token)
-                ->timeout(120)
+                ->timeout(180)
                 ->get($url, [
-                    'dias_mora' => $diasMora,
-                    'dias_cobro' => $diasCobro,
+                    'desde' => $desde,
+                    'hasta' => $hasta,
                 ]);
 
             if (! $response->successful()) {

@@ -64,24 +64,36 @@ class Kernel extends ConsoleKernel
         }
 
         // ⭐ Sync de cartera Siigo - Todos los lunes a las 8 AM (Bogota)
-        // Toma snapshot del primer día del mes al día actual
-        $schedule->command('siigo:sync-cartera')
-            ->weeklyOn(1, '08:00') // 1 = Monday
-            ->timezone('America/Bogota')
-            ->withoutOverlapping()
-            ->runInBackground()
-            ->onSuccess(fn () => \Log::info('Siigo sync-cartera completado (lunes 8am)'))
-            ->onFailure(fn () => \Log::error('Error en Siigo sync-cartera (lunes 8am)'));
+        // Pasa desde=primer dia del mes y hasta=dia actual al ejecutarse
+        $schedule->call(function () {
+            $desde = \Carbon\Carbon::now('America/Bogota')->startOfMonth()->toDateString();
+            $hasta = \Carbon\Carbon::now('America/Bogota')->toDateString();
+            \Illuminate\Support\Facades\Artisan::call('siigo:sync-cartera', [
+                '--desde' => $desde,
+                '--hasta' => $hasta,
+            ]);
+        })->weeklyOn(1, '08:00')
+          ->timezone('America/Bogota')
+          ->withoutOverlapping()
+          ->name('siigo-sync-cartera-lunes')
+          ->onSuccess(fn () => \Log::info('Siigo sync-cartera completado (lunes 8am)'))
+          ->onFailure(fn () => \Log::error('Error en Siigo sync-cartera (lunes 8am)'));
 
         // ⭐ Sync de recaudos Siigo - Todos los lunes a las 8 AM (Bogota)
-        // Sincroniza desde el primer día del mes actual hasta el día actual
-        $schedule->command('siigo:sync-recaudos')
-            ->weeklyOn(1, '08:00') // 1 = Monday
-            ->timezone('America/Bogota')
-            ->withoutOverlapping()
-            ->runInBackground()
-            ->onSuccess(fn () => \Log::info('Siigo sync-recaudos completado (lunes 8am)'))
-            ->onFailure(fn () => \Log::error('Error en Siigo sync-recaudos (lunes 8am)'));
+        // Pasa desde=primer dia del mes y hasta=mes actual al ejecutarse
+        $schedule->call(function () {
+            $desde = \Carbon\Carbon::now('America/Bogota')->startOfMonth()->format('Y-m');
+            $hasta = \Carbon\Carbon::now('America/Bogota')->format('Y-m');
+            \Illuminate\Support\Facades\Artisan::call('siigo:sync-recaudos', [
+                '--desde' => $desde,
+                '--hasta' => $hasta,
+            ]);
+        })->weeklyOn(1, '08:00')
+          ->timezone('America/Bogota')
+          ->withoutOverlapping()
+          ->name('siigo-sync-recaudos-lunes')
+          ->onSuccess(fn () => \Log::info('Siigo sync-recaudos completado (lunes 8am)'))
+          ->onFailure(fn () => \Log::error('Error en Siigo sync-recaudos (lunes 8am)'));
 
         // Ejecutar dispatch de emails de cartera cada 30 minutos
         $schedule->command('emails:dispatch')->everyMinute();
