@@ -369,6 +369,67 @@ class SiigoSyncController extends Controller
     }
 
     /**
+     * Registrar/actualizar la URL del tunnel publico del Siigo Bridge.
+     * El bridge llama este endpoint cada vez que genera una URL nueva.
+     * POST /api/siigo/tunnel
+     */
+    public function updateTunnelUrl(Request $request)
+    {
+        $request->validate([
+            'tunnel_url' => 'required|url',
+            'version' => 'nullable|string',
+        ]);
+
+        $user = $request->user();
+        $userId = $user ? $user->id : null;
+        $email = $user ? $user->email : 'unknown';
+
+        // Guardar en la tabla siigo_bridge_tunnels (o actualizar si existe)
+        DB::table('siigo_bridge_tunnels')->updateOrInsert(
+            ['user_id' => $userId],
+            [
+                'user_email' => $email,
+                'tunnel_url' => $request->tunnel_url,
+                'version' => $request->version,
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]
+        );
+
+        $this->logSync('TUNNEL', 'updated', 1, 'URL: ' . $request->tunnel_url);
+
+        return response()->json([
+            'message' => 'Tunnel URL actualizado',
+            'tunnel_url' => $request->tunnel_url,
+        ]);
+    }
+
+    /**
+     * Obtener la URL actual del tunnel para un usuario dado.
+     * GET /api/siigo/tunnel
+     */
+    public function getTunnelUrl(Request $request)
+    {
+        $user = $request->user();
+        $record = DB::table('siigo_bridge_tunnels')
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (!$record) {
+            return response()->json([
+                'tunnel_url' => null,
+                'message' => 'No hay URL registrada',
+            ], 404);
+        }
+
+        return response()->json([
+            'tunnel_url' => $record->tunnel_url,
+            'version' => $record->version,
+            'updated_at' => $record->updated_at,
+        ]);
+    }
+
+    /**
      * List synced clients.
      * GET /api/siigo/clients
      */

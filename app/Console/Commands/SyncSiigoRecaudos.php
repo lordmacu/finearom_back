@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Recaudo;
 use App\Queries\Cartera\CarteraQuery;
+use App\Services\SiigoBridgeUrl;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -26,11 +27,18 @@ class SyncSiigoRecaudos extends Command
     public function __construct()
     {
         parent::__construct();
-        $this->baseUrl = rtrim(config('custom.siigo_proxy_url'), '/');
     }
 
     public function handle(): int
     {
+        // Obtener URL dinamica del bridge (empujada automaticamente por el bridge)
+        $this->baseUrl = SiigoBridgeUrl::get();
+        if (empty($this->baseUrl)) {
+            $this->error('No hay URL del Siigo Bridge registrada. El bridge debe estar corriendo y haberla empujado.');
+            return self::FAILURE;
+        }
+        $this->info("Usando bridge en: {$this->baseUrl}");
+
         $now = Carbon::now();
         $desde = $this->option('desde') ?? $now->copy()->startOfYear()->format('Y-m');
         $hasta = $this->option('hasta') ?? $now->format('Y-m');
