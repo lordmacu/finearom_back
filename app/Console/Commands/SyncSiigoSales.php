@@ -29,7 +29,7 @@ class SyncSiigoSales extends Command
     public function handle(): int
     {
         $now = Carbon::now();
-        $desde = $this->option('desde') ?? $now->copy()->startOfYear()->format('Y-m');
+        $desde = $this->option('desde') ?? $now->copy()->startOfMonth()->format('Y-m');
         $hasta = $this->option('hasta') ?? $now->format('Y-m');
 
         $this->info("Sincronizando ventas desde {$desde} hasta {$hasta}");

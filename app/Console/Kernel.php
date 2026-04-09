@@ -51,6 +51,18 @@ class Kernel extends ConsoleKernel
             ->timezone('America/Bogota')
             ->onFailure(fn() => \Log::error('Error enviando emails de pronóstico'));
 
+        // ⭐ Sync de ventas Siigo - 4 veces al día (8am, 11am, 2pm, 5pm Colombia)
+        // Sincroniza desde el primer día del mes actual hasta el día actual
+        foreach (['08:00', '11:00', '14:00', '17:00'] as $time) {
+            $schedule->command('siigo:sync-sales')
+                ->dailyAt($time)
+                ->timezone('America/Bogota')
+                ->withoutOverlapping()
+                ->runInBackground()
+                ->onSuccess(fn () => \Log::info("Siigo sync-sales completado ({$time})"))
+                ->onFailure(fn () => \Log::error("Error en Siigo sync-sales ({$time})"));
+        }
+
         // Ejecutar dispatch de emails de cartera cada 30 minutos
         $schedule->command('emails:dispatch')->everyMinute();
 
