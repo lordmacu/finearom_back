@@ -240,6 +240,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/recaudo/import', [RecaudoImportController::class, 'import']);
     Route::get('/recaudo/recent', [RecaudoImportController::class, 'recent']);
     Route::get('/recaudo/template', [RecaudoImportController::class, 'downloadTemplate']);
+    Route::put('/recaudo/{id}', [RecaudoImportController::class, 'update']);
+    Route::delete('/recaudo/{id}', [RecaudoImportController::class, 'destroy']);
 
     // Clientes y sucursales
     Route::get('/clients', [ClientController::class, 'index']);

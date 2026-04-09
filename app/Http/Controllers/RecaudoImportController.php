@@ -127,6 +127,54 @@ class RecaudoImportController extends Controller
     }
 
     /**
+     * Actualizar un recaudo existente.
+     * PUT /api/recaudo/{id}
+     */
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'fecha_recaudo' => ['nullable', 'date'],
+            'numero_recibo' => ['nullable', 'string'],
+            'fecha_vencimiento' => ['nullable', 'date'],
+            'numero_factura' => ['nullable', 'string'],
+            'nit' => ['nullable', 'string'],
+            'cliente' => ['nullable', 'string'],
+            'dias' => ['nullable', 'integer'],
+            'valor_cancelado' => ['nullable', 'numeric'],
+            'observaciones' => ['nullable', 'string'],
+        ]);
+
+        $recaudo = Recaudo::findOrFail($id);
+        $recaudo->update($validated);
+
+        // Limpiar cache de customers
+        $this->carteraQuery->clearCustomersCache();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Recaudo actualizado correctamente',
+            'data' => $recaudo->fresh(),
+        ]);
+    }
+
+    /**
+     * Eliminar un recaudo.
+     * DELETE /api/recaudo/{id}
+     */
+    public function destroy(int $id): JsonResponse
+    {
+        $recaudo = Recaudo::findOrFail($id);
+        $recaudo->delete();
+
+        $this->carteraQuery->clearCustomersCache();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Recaudo eliminado correctamente',
+        ]);
+    }
+
+    /**
      * Descarga un archivo Excel de plantilla con los encabezados correctos.
      */
     public function downloadTemplate(): StreamedResponse
