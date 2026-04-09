@@ -525,6 +525,20 @@ Route::middleware('auth:sanctum')->group(function () {
 // Webhook (no requiere auth Sanctum - usa HMAC signature)
 Route::post('/siigo/webhook', [SiigoSyncController::class, 'webhook']);
 
+// Webhook genérico de debug - loguea todo lo que llega
+Route::any('/webhook', function (\Illuminate\Http\Request $request) {
+    \Illuminate\Support\Facades\Log::channel('daily')->info('[/api/webhook] incoming', [
+        'method' => $request->method(),
+        'ip' => $request->ip(),
+        'user_agent' => $request->userAgent(),
+        'headers' => $request->headers->all(),
+        'query' => $request->query(),
+        'payload' => $request->all(),
+        'raw_body' => $request->getContent(),
+    ]);
+    return response()->json(['received' => true, 'timestamp' => now()->toIso8601String()]);
+});
+
 // Rutas protegidas para sincronización (sin throttle - sync masivo)
 Route::middleware('auth:sanctum')->prefix('siigo')->group(function () {
     // Endpoint generico - recibe { table, action, key, data }
