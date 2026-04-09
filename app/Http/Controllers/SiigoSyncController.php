@@ -10,6 +10,7 @@ use App\Models\SiigoSyncLog;
 use App\Models\SiigoWebhookLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class SiigoSyncController extends Controller
 {
@@ -247,6 +248,13 @@ class SiigoSyncController extends Controller
      */
     public function sync(Request $request)
     {
+        Log::channel('daily')->info('[siigo:sync] incoming request', [
+            'ip' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'headers' => $request->headers->all(),
+            'payload' => $request->all(),
+        ]);
+
         $request->validate([
             'table' => 'required|in:clients,products,movements,cartera',
             'action' => 'required|in:add,edit,delete',
