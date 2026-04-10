@@ -552,4 +552,5 @@ Route::middleware('auth:sanctum')->prefix('siigo')->group(function () {
     Route::get('/webhook-logs', [SiigoSyncController::class, 'webhookLogs']);
     Route::post('/tunnel', [SiigoSyncController::class, 'updateTunnelUrl']);
     Route::get('/tunnel', [SiigoSyncController::class, 'getTunnelUrl']);
+    Route::post('/sync-sales', [SiigoSyncController::class, 'syncSales']);
 });

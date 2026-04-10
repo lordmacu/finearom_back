@@ -8,7 +8,10 @@ use App\Models\SiigoMovement;
 use App\Models\SiigoCartera;
 use App\Models\SiigoSyncLog;
 use App\Models\SiigoWebhookLog;
+use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -350,6 +353,30 @@ class SiigoSyncController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Ejecuta siigo:sync-sales desde el primer día del mes hasta hoy.
+     * POST /api/siigo/sync-sales
+     */
+    public function syncSales(): JsonResponse
+    {
+        $desde = Carbon::now()->startOfMonth()->format('Y-m');
+        $hasta = Carbon::now()->format('Y-m');
+
+        Artisan::call('siigo:sync-sales', [
+            '--desde' => $desde,
+            '--hasta' => $hasta,
+        ]);
+
+        $output = Artisan::output();
+
+        return response()->json([
+            'message' => 'Sincronización de ventas completada',
+            'desde'   => $desde,
+            'hasta'   => $hasta,
+            'output'  => trim($output),
+        ]);
     }
 
     /**
