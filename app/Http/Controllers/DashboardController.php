@@ -1525,10 +1525,8 @@ class DashboardController extends Controller
             ->groupBy('c.executive')
             ->get();
 
-        // ── Query 2: Facturado real desde Siigo (siigo_sales) ──────────────────
-        // Total facturado en el mes según Siigo, cruzado por nit → ejecutiva.
-        // Los totales coinciden con lo que muestra Siigo. El % Cumplimiento puede superar
-        // 100% cuando una ejecutiva factura OCs creadas en meses anteriores.
+        // ── Query 2a: Facturado Siigo TOTAL del mes (tarjeta grande "Órdenes de Compra") ──
+        // Este valor coincide con lo que muestra Siigo. Útil para ver actividad del mes.
         $fromMes = Carbon::parse($startDate)->format('Y-m');
         $toMes   = Carbon::parse($endDate)->format('Y-m');
         $avgTrmSiigo = (float) DB::table('trm_daily')
@@ -1551,18 +1549,43 @@ class DashboardController extends Controller
             ->get()
             ->keyBy('executive');
 
+        // ── Query 2b: Facturado de OCs creadas en el período (para % Cumplimiento real) ─
+        // Matching siigo_sales.orden_compra ↔ purchase_orders.order_consecutive.
+        // El % evoluciona con el tiempo: mes actual bajo, meses antiguos cercanos a 100%.
+        $fulfilledRows = DB::table('siigo_sales as s')
+            ->join('clients as c', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('s.nit COLLATE utf8mb4_unicode_ci'))
+            ->join('purchase_orders as po', function ($j) {
+                $j->on('po.client_id', '=', 'c.id')
+                  ->where(function ($q) {
+                      $q->whereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci LIKE CONCAT('%-', SUBSTRING_INDEX(s.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1))")
+                        ->orWhereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(s.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1)");
+                  });
+            })
+            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                SUM(s.valor) as fulfilled_cop,
+                SUM(s.cantidad) as fulfilled_kilos
+            ")
+            ->groupBy('c.executive')
+            ->get()
+            ->keyBy('executive');
+
         $totalValueCop = $ocRows->sum('value_cop');
 
         $result = [];
         foreach ($ocRows as $row) {
-            $exec      = $row->executive;
-            $disp      = $dispRows[$exec] ?? null;
-            $valueCop  = (float) $row->value_cop;
-            $valueUsd  = (float) $row->value_usd;
-            $kilos     = (float) $row->total_kilos;
-            $dispCop   = $disp ? (float) $disp->dispatched_cop   : 0.0;
-            $dispUsd   = $disp ? (float) $disp->dispatched_usd   : 0.0;
-            $dispKilos = $disp ? (float) $disp->dispatched_kilos : 0.0;
+            $exec          = $row->executive;
+            $disp          = $dispRows[$exec] ?? null;
+            $fulfilled     = $fulfilledRows[$exec] ?? null;
+            $valueCop      = (float) $row->value_cop;
+            $valueUsd      = (float) $row->value_usd;
+            $kilos         = (float) $row->total_kilos;
+            $dispCop       = $disp ? (float) $disp->dispatched_cop       : 0.0;
+            $dispUsd       = $disp ? (float) $disp->dispatched_usd       : 0.0;
+            $dispKilos     = $disp ? (float) $disp->dispatched_kilos     : 0.0;
+            $fulfilledCop  = $fulfilled ? (float) $fulfilled->fulfilled_cop   : 0.0;
+            $fulfilledKilos= $fulfilled ? (float) $fulfilled->fulfilled_kilos : 0.0;
 
             $result[] = [
                 'executive'            => $exec,
@@ -1573,9 +1596,11 @@ class DashboardController extends Controller
                 'dispatched_usd'       => round($dispUsd, 2),
                 'dispatched_cop'       => round($dispCop, 0),
                 'dispatched_kilos'     => round($dispKilos, 2),
+                'fulfilled_cop'        => round($fulfilledCop, 0),
+                'fulfilled_kilos'      => round($fulfilledKilos, 2),
                 'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0.0,
-                'compliance_cop_pct'   => $valueCop > 0     ? round($dispCop   / $valueCop      * 100, 1) : 0.0,
-                'compliance_kilos_pct' => $kilos    > 0     ? round($dispKilos / $kilos          * 100, 1) : 0.0,
+                'compliance_cop_pct'   => $valueCop > 0     ? round($fulfilledCop   / $valueCop      * 100, 1) : 0.0,
+                'compliance_kilos_pct' => $kilos    > 0     ? round($fulfilledKilos / $kilos          * 100, 1) : 0.0,
             ];
         }
 
