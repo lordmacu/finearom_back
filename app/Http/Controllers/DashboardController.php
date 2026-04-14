@@ -1525,12 +1525,12 @@ class DashboardController extends Controller
             ->groupBy('c.executive')
             ->get();
 
-        // ── Query 2: Facturado real desde Siigo para OCs creadas en el período ─
-        // Matching: siigo_sales.orden_compra ↔ purchase_orders.order_consecutive
-        // (el fragmento tras el último '-' de order_consecutive suele ser el PO del cliente).
-        // Se cuentan facturas de cualquier mes que correspondan a OCs creadas en el período,
-        // para que el % Cumplimiento sea real: evoluciona con el tiempo (mes actual bajo, meses
-        // antiguos altos a medida que se facturan las OCs).
+        // ── Query 2: Facturado real desde Siigo (siigo_sales) ──────────────────
+        // Total facturado en el mes según Siigo, cruzado por nit → ejecutiva.
+        // Los totales coinciden con lo que muestra Siigo. El % Cumplimiento puede superar
+        // 100% cuando una ejecutiva factura OCs creadas en meses anteriores.
+        $fromMes = Carbon::parse($startDate)->format('Y-m');
+        $toMes   = Carbon::parse($endDate)->format('Y-m');
         $avgTrmSiigo = (float) DB::table('trm_daily')
             ->whereBetween('date', [$startDate, $endDate])
             ->avg('value');
@@ -1539,15 +1539,8 @@ class DashboardController extends Controller
         }
 
         $dispRows = DB::table('siigo_sales as s')
-            ->join('clients as c', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('s.nit COLLATE utf8mb4_unicode_ci'))
-            ->join('purchase_orders as po', function ($j) {
-                $j->on('po.client_id', '=', 'c.id')
-                  ->where(function ($q) {
-                      $q->whereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci LIKE CONCAT('%-', SUBSTRING_INDEX(s.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1))")
-                        ->orWhereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(s.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1)");
-                  });
-            })
-            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->leftJoin('clients as c', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('s.nit COLLATE utf8mb4_unicode_ci'))
+            ->whereBetween('s.mes', [$fromMes, $toMes])
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
                 SUM(s.cantidad) as dispatched_kilos,
