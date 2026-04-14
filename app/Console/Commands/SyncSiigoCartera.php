@@ -17,7 +17,7 @@ class SyncSiigoCartera extends Command
                             {--desde= : Fecha inicio YYYY-MM-DD (default: primer dia del mes actual)}
                             {--hasta= : Fecha fin YYYY-MM-DD (default: hoy)}
                             {--dias-mora=-270 : Dias minimos de mora}
-                            {--dias-cobro=10 : Dias maximos de cobro}
+                            {--dias-cobro=15 : Dias maximos de cobro}
                             {--nit= : Sincronizar solo un NIT especifico (default: all)}
                             {--fecha-cartera= : Fecha del snapshot (default: hoy)}';
 
