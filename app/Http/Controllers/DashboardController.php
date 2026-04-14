@@ -1526,8 +1526,8 @@ class DashboardController extends Controller
             ->get();
 
         // ── Query 2: Facturado real desde Siigo (siigo_sales) ──────────────────
-        // Se cruza por clients.nit → c.executive. Granularidad mensual (mes YYYY-MM).
-        // Mismo patrón que /analyze/clients (AnalyzeQuery).
+        // Se cruza por clients.nit → c.executive. Granularidad mensual (columna 'mes' YYYY-MM).
+        // Mismo patrón que /analyze/clients (AnalyzeQuery) — COLLATE por diferencia de charset entre tablas.
         $fromMes = Carbon::parse($startDate)->format('Y-m');
         $toMes   = Carbon::parse($endDate)->format('Y-m');
         $avgTrmSiigo = (float) DB::table('trm_daily')
