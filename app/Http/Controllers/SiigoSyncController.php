@@ -356,6 +356,25 @@ class SiigoSyncController extends Controller
     }
 
     /**
+     * Ejecuta siigo:sync-cartera y luego siigo:sync-recaudos.
+     * POST /api/siigo/sync-cartera-recaudos
+     */
+    public function syncCarteraRecaudos(): JsonResponse
+    {
+        Artisan::call('siigo:sync-cartera');
+        $carteraOutput = trim(Artisan::output());
+
+        Artisan::call('siigo:sync-recaudos');
+        $recaudosOutput = trim(Artisan::output());
+
+        return response()->json([
+            'message' => 'Sincronización de cartera y recaudos completada',
+            'cartera' => $carteraOutput,
+            'recaudos' => $recaudosOutput,
+        ]);
+    }
+
+    /**
      * Ejecuta siigo:sync-sales desde el primer día del mes hasta hoy.
      * POST /api/siigo/sync-sales
      */
