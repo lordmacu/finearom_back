@@ -1468,7 +1468,7 @@ class DashboardController extends Controller
                     'financial_analysis' => [
                         'average_trm' => $avgTrm ? round((float) $avgTrm, 2) : 4000.0,
                     ],
-                    'executive_stats'          => $this->calcExecutiveStatsFromSiigo($startDate, $endDate),
+                    'executive_stats'          => $this->calcExecutiveStatsV2($startDate, $endDate),
                     'lead_time_by_client_type' => $this->calculateLeadTimeByClientType($startDate, $endDate),
                 ],
             ]);
@@ -1525,33 +1525,26 @@ class DashboardController extends Controller
             ->groupBy('c.executive')
             ->get();
 
-        // ── Query 2: Despachos reales con dispatch_date en el período ─────────
-        // TRM: igual que AnalyzeQuery — partials.trm >= 3400 → trm_daily → 4000
-        $dispRows = DB::table('partials as pt')
-            ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
-            ->join('clients as c', 'po.client_id', '=', 'c.id')
-            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
-            ->join('products as p', 'pop.product_id', '=', 'p.id')
-            ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
-            ->where('pt.type', 'real')
-            ->whereNull('pt.deleted_at')
-            ->whereNotNull('pt.dispatch_date')
-            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
-            ->where('pop.muestra', 0)
+        // ── Query 2: Facturado real desde Siigo (siigo_sales) ──────────────────
+        // Se cruza por clients.nit → c.executive. Granularidad mensual (mes YYYY-MM).
+        // Mismo patrón que /analyze/clients (AnalyzeQuery).
+        $fromMes = Carbon::parse($startDate)->format('Y-m');
+        $toMes   = Carbon::parse($endDate)->format('Y-m');
+        $avgTrmSiigo = (float) DB::table('trm_daily')
+            ->whereBetween('date', [$startDate, $endDate])
+            ->avg('value');
+        if ($avgTrmSiigo <= 0) {
+            $avgTrmSiigo = 4000;
+        }
+
+        $dispRows = DB::table('siigo_sales as s')
+            ->leftJoin('clients as c', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('s.nit COLLATE utf8mb4_unicode_ci'))
+            ->whereBetween('s.mes', [$fromMes, $toMes])
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
-                SUM(pt.quantity) as dispatched_kilos,
-                SUM(
-                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity
-                ) as dispatched_usd,
-                SUM(
-                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
-                    (CASE
-                        WHEN pt.trm IS NOT NULL AND pt.trm >= 3400 THEN pt.trm
-                        WHEN td.value  IS NOT NULL                 THEN td.value
-                        ELSE 4000
-                    END)
-                ) as dispatched_cop
+                SUM(s.cantidad) as dispatched_kilos,
+                SUM(s.valor) / {$avgTrmSiigo} as dispatched_usd,
+                SUM(s.valor) as dispatched_cop
             ")
             ->groupBy('c.executive')
             ->get()
