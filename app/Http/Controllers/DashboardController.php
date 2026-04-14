@@ -1050,27 +1050,27 @@ class DashboardController extends Controller
             ->groupBy('c.executive')
             ->get();
 
-        // Despachos reales (partials tipo 'real') en el período, agrupados por ejecutiva (igual que /analyze)
-        $dispatchQuery = DB::table('partials as pt')
-            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
-            ->join('purchase_orders as po', 'pop.purchase_order_id', '=', 'po.id')
-            ->join('clients as c', 'po.client_id', '=', 'c.id')
-            ->join('products as p', 'pop.product_id', '=', 'p.id')
-            ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
-            ->where('pt.type', 'real')
-            ->whereNotNull('pt.dispatch_date')
-            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
-            ->where('pop.muestra', '=', 0)
+        // Facturado real desde Siigo (siigo_sales), agrupado por ejecutiva via clients.nit
+        // Mismo patrón que /analyze/clients (AnalyzeQuery): filtro por mes BETWEEN + COLLATE por diferencia de charset entre tablas.
+        $fromMes = Carbon::parse($startDate)->format('Y-m');
+        $toMes = Carbon::parse($endDate)->format('Y-m');
+
+        // TRM promedio del período para convertir valor COP a USD (aproximación)
+        $avgTrm = (float) DB::table('trm_daily')
+            ->whereBetween('date', [$startDate, $endDate])
+            ->avg('value');
+        if ($avgTrm <= 0) {
+            $avgTrm = 4000;
+        }
+
+        $dispatchQuery = DB::table('siigo_sales as s')
+            ->leftJoin('clients as c', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('s.nit COLLATE utf8mb4_unicode_ci'))
+            ->whereBetween('s.mes', [$fromMes, $toMes])
             ->selectRaw("
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
-                SUM(pt.quantity) as dispatched_kilos,
-                SUM(
-                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity
-                ) as dispatched_usd,
-                SUM(
-                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
-                    COALESCE(NULLIF(pt.trm, 0), NULLIF(po.trm, 0), NULLIF(td.value, 0), 4000)
-                ) as dispatched_cop
+                SUM(s.cantidad) as dispatched_kilos,
+                SUM(s.valor) / {$avgTrm} as dispatched_usd,
+                SUM(s.valor) as dispatched_cop
             ")
             ->groupBy('c.executive')
             ->get()
