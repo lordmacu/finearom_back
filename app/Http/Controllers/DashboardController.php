@@ -1527,7 +1527,9 @@ class DashboardController extends Controller
 
         // ── Query 2: Facturado real desde Siigo (siigo_sales) ──────────────────
         // Se cruza por clients.nit → c.executive. Granularidad mensual (columna 'mes' YYYY-MM).
-        // Mismo patrón que /analyze/clients (AnalyzeQuery) — COLLATE por diferencia de charset entre tablas.
+        // NOTA: Los valores coinciden con lo que muestra Siigo (cualquier factura del mes,
+        // sin importar en qué mes se creó la OC), por eso el % contra OC del mes es más
+        // una "actividad del mes" que un cumplimiento OC→factura estricto.
         $fromMes = Carbon::parse($startDate)->format('Y-m');
         $toMes   = Carbon::parse($endDate)->format('Y-m');
         $avgTrmSiigo = (float) DB::table('trm_daily')
