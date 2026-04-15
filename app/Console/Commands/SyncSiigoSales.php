@@ -155,26 +155,31 @@ class SyncSiigoSales extends Command
                 $this->info("  → {$collapsed} línea(s) consolidada(s) por clave duplicada (nit+product_code+cuenta+mes).");
             }
 
+            // Limpiar filas huérfanas: borramos todos los registros del rango
+            // [desde, hasta] antes de insertar, para que el sync sea autoritativo
+            // y no dejen huérfanos de syncs previos cuando el bridge cambia el
+            // formato de product_code/lote/etc.
+            $deleted = SiigoSale::whereBetween('mes', [$desde, $hasta])->delete();
+            if ($deleted > 0) {
+                $this->info("  → {$deleted} fila(s) previas del rango {$desde}..{$hasta} eliminadas para sync limpio.");
+            }
+
             $bar = $this->output->createProgressBar(count($grouped));
             $bar->start();
 
             $count = 0;
             foreach ($grouped as $row) {
-                SiigoSale::updateOrCreate(
-                    [
-                        'nit'          => $row['nit'],
-                        'product_code' => $row['product_code'],
-                        'cuenta'       => $row['cuenta'],
-                        'mes'          => $row['mes'],
-                    ],
-                    [
-                        'orden_compra'    => $row['orden_compra'],
-                        'lote'            => $row['lote'],
-                        'precio_unitario' => $row['precio_unitario'],
-                        'valor'           => $row['valor'],
-                        'cantidad'        => $row['cantidad'],
-                    ]
-                );
+                SiigoSale::create([
+                    'nit'             => $row['nit'],
+                    'product_code'    => $row['product_code'],
+                    'cuenta'          => $row['cuenta'],
+                    'mes'             => $row['mes'],
+                    'orden_compra'    => $row['orden_compra'],
+                    'lote'            => $row['lote'],
+                    'precio_unitario' => $row['precio_unitario'],
+                    'valor'           => $row['valor'],
+                    'cantidad'        => $row['cantidad'],
+                ]);
                 $count++;
                 $bar->advance();
             }
