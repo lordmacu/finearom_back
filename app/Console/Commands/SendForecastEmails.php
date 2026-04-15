@@ -25,23 +25,44 @@ class SendForecastEmails extends Command
         $config = DB::table('forecast_email_config')->first();
 
         if (!$config || !$config->enabled) {
-            $this->line('Envío de pronósticos deshabilitado.');
+            // Corre cada minuto; si no está habilitado no logueamos nada para no
+            // llenar el log.
             return 0;
         }
 
+        $now = Carbon::now('America/Bogota');
+
+        // 1. Validar HORA configurada (HH:mm). Corre cada minuto → solo dispara
+        //    en el minuto exacto de send_hour.
+        if (!$this->option('force')) {
+            $sendHour = $this->normalizeHour($config->send_hour ?? '08:00');
+            if ($now->format('H:i') !== $sendHour) {
+                return 0;
+            }
+        }
+
+        // 2. Validar que haya al menos una regla de día configurada.
+        $rules = json_decode($config->schedule_rules ?? '[]', true);
+        if (!$this->option('force') && empty($rules)) {
+            Log::warning('forecast:send-emails: enabled=1 pero schedule_rules vacío — no se envía nada. Configurá al menos un día en /settings/general?tab=forecast-email');
+            $this->warn('schedule_rules vacío — no hay días configurados.');
+            return 0;
+        }
+
+        // 3. Validar que HOY sea uno de los días configurados (soporta hasta 3 reglas).
         if (!$this->option('force') && !$this->shouldRunToday($config)) {
-            $this->line('Hoy no corresponde enviar según la configuración.');
+            $this->line('Hoy no corresponde enviar según schedule_rules.');
             return 0;
         }
 
-        $now      = Carbon::now('America/Bogota');
         $año      = $now->year;
         $mes      = self::MESES[$now->month];
         $mesStart = $now->copy()->startOfMonth()->toDateString();
         $mesEnd   = $now->copy()->endOfMonth()->toDateString();
         $semana   = (int) ceil($now->day / 7);
 
-        $this->info("Generando emails de pronóstico — {$mes} {$año} (Semana {$semana})");
+        $this->info("Generando emails de pronóstico — {$mes} {$año}");
+        Log::info("forecast:send-emails disparado — {$mes} {$año} — hora={$now->format('H:i')} — reglas=" . count($rules));
 
         // Obtener ejecutivas que tienen clientes con pronósticos manuales este mes
         $ejecutivas = DB::table('clients as c')
@@ -101,6 +122,19 @@ class SendForecastEmails extends Command
 
         $this->info("Emails enviados: {$enviados}");
         return 0;
+    }
+
+    /**
+     * Normaliza a HH:mm — admite "H:i", "H:i:s" o "H:i".
+     */
+    private function normalizeHour(string $raw): string
+    {
+        $raw = trim($raw);
+        // Quedarnos solo con HH:mm aunque venga HH:mm:ss
+        $parts = explode(':', $raw);
+        $h = str_pad((string) (int) ($parts[0] ?? '0'), 2, '0', STR_PAD_LEFT);
+        $m = str_pad((string) (int) ($parts[1] ?? '0'), 2, '0', STR_PAD_LEFT);
+        return "{$h}:{$m}";
     }
 
     private function shouldRunToday(object $config): bool

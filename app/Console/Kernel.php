@@ -45,9 +45,12 @@ class Kernel extends ConsoleKernel
                 \Log::error('Error al realizar backup de base de datos');
             });
 
-        // ⭐ Emails de pronóstico a ejecutivas — corre diario, el comando verifica si toca hoy
+        // ⭐ Emails de pronóstico a ejecutivas — corre cada minuto; el comando
+        //    compara la hora actual con `forecast_email_config.send_hour` y sólo
+        //    dispara cuando coincide HH:mm y el día pertenece a `schedule_rules`.
         $schedule->command('forecast:send-emails')
-            ->dailyAt('08:00')
+            ->everyMinute()
+            ->withoutOverlapping(10)
             ->timezone('America/Bogota')
             ->onFailure(fn() => \Log::error('Error enviando emails de pronóstico'));
 
