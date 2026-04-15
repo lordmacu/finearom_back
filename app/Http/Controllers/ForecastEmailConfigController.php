@@ -128,10 +128,22 @@ class ForecastEmailConfigController extends Controller
 
     private function buildEmailData(object $exec, int $año, string $mes, string $mesStart, string $mesEnd, int $semana): array
     {
-        // Pronósticos con precio del producto para calcular USD
+        // Pronósticos con precio del producto para calcular USD.
+        // NOTA: `products` tiene códigos duplicados (mismo `code` en varios rows).
+        // Usamos un subquery deduplicado (MIN(id) GROUP BY code) para evitar
+        // que cada forecast se multiplique por cuantos productos compartan el code.
+        $productsUniqCode = DB::table('products')
+            ->selectRaw('code, MIN(id) as id')
+            ->whereNotNull('code')
+            ->where('code', '!=', '')
+            ->groupBy('code');
+
         $forecasts = DB::table('sales_forecasts as sf')
             ->join('clients as c', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('sf.nit COLLATE utf8mb4_unicode_ci'))
-            ->join('products as p', DB::raw('p.code COLLATE utf8mb4_unicode_ci'), '=', DB::raw('sf.codigo COLLATE utf8mb4_unicode_ci'))
+            ->joinSub($productsUniqCode, 'pu', function ($j) {
+                $j->on(DB::raw('pu.code COLLATE utf8mb4_unicode_ci'), '=', DB::raw('sf.codigo COLLATE utf8mb4_unicode_ci'));
+            })
+            ->join('products as p', 'p.id', '=', 'pu.id')
             ->where('sf.modelo', 'manual')
             ->where('sf.año', (string) $año)
             ->where('sf.mes', $mes)
