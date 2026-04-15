@@ -110,6 +110,7 @@ class ForecastWeeklyMail extends Mailable
             $html .= '<th style="padding:8px 16px;text-align:right;font-size:11px;color:#64748b;text-transform:uppercase;border:none;font-weight:600;">Pron. USD</th>';
             $html .= '<th style="padding:8px 16px;text-align:right;font-size:11px;color:#64748b;text-transform:uppercase;border:none;font-weight:600;">Desp. kg</th>';
             $html .= '<th style="padding:8px 16px;text-align:right;font-size:11px;color:#64748b;text-transform:uppercase;border:none;font-weight:600;">Desp. USD</th>';
+            $html .= '<th style="padding:8px 16px;text-align:right;font-size:11px;color:#64748b;text-transform:uppercase;border:none;font-weight:600;">Pend. despacho</th>';
             $html .= '<th style="padding:8px 16px;text-align:center;font-size:11px;color:#64748b;text-transform:uppercase;border:none;font-weight:600;">Cumplim.</th>';
             $html .= '</tr></thead><tbody>';
 
@@ -128,6 +129,12 @@ class ForecastWeeklyMail extends Mailable
                 $html .= '<td style="padding:10px 16px;text-align:right;font-size:12px;color:#64748b;border:none;">$' . number_format($prod['pron_usd'] ?? 0, 2) . '</td>';
                 $html .= '<td style="padding:10px 16px;text-align:right;font-size:13px;font-weight:700;color:#1e40af;border:none;">' . number_format($prod['vendido']) . ' kg</td>';
                 $html .= '<td style="padding:10px 16px;text-align:right;font-size:12px;font-weight:600;color:#059669;border:none;">$' . number_format($prod['vendido_usd'] ?? 0, 2) . '</td>';
+
+                // Pendiente por despachar = pronóstico - vendido (mínimo 0)
+                $pendiente = max(0, (int) $prod['pronostico'] - (int) $prod['vendido']);
+                $pendColor = $pendiente === 0 ? '#059669' : '#b45309';  // verde si 0, ámbar si queda pendiente
+                $html .= '<td style="padding:10px 16px;text-align:right;font-size:13px;font-weight:700;color:' . $pendColor . ';border:none;">' . number_format($pendiente) . ' kg</td>';
+
                 $html .= '<td style="padding:10px 16px;text-align:center;border:none;">';
                 $html .= '<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700;background:' . $bg . ';color:' . $fc . ';">' . $txt . '</span>';
                 $html .= '</td>';
@@ -145,12 +152,20 @@ class ForecastWeeklyMail extends Mailable
             $totalPronUsdCliente  = array_sum(array_column($cliente['productos'], 'pron_usd'));
             $totalVendUsdCliente  = array_sum(array_column($cliente['productos'], 'vendido_usd'));
 
+            // Total pendiente del cliente = suma de max(0, pron - vend) por producto
+            $totalPend = 0;
+            foreach ($cliente['productos'] as $p) {
+                $totalPend += max(0, (int) $p['pronostico'] - (int) $p['vendido']);
+            }
+            $totalPendColor = $totalPend === 0 ? '#059669' : '#b45309';
+
             $html .= '<tr style="border-top:2px solid #e5e7eb;background:#f8fafc;">';
             $html .= '<td style="padding:10px 16px;border:none;font-weight:700;font-size:12px;color:#374151;text-transform:uppercase;letter-spacing:.04em;">Resumen cliente</td>';
             $html .= '<td style="padding:10px 16px;text-align:right;font-size:13px;font-weight:700;color:#374151;border:none;">' . number_format($totalPron) . ' kg</td>';
             $html .= '<td style="padding:10px 16px;text-align:right;font-size:12px;font-weight:700;color:#64748b;border:none;">$' . number_format($totalPronUsdCliente, 2) . '</td>';
             $html .= '<td style="padding:10px 16px;text-align:right;font-size:13px;font-weight:700;color:#1e40af;border:none;">' . number_format($totalVend) . ' kg</td>';
             $html .= '<td style="padding:10px 16px;text-align:right;font-size:12px;font-weight:700;color:#059669;border:none;">$' . number_format($totalVendUsdCliente, 2) . '</td>';
+            $html .= '<td style="padding:10px 16px;text-align:right;font-size:13px;font-weight:700;color:' . $totalPendColor . ';border:none;">' . number_format($totalPend) . ' kg</td>';
             $html .= '<td style="padding:10px 16px;text-align:center;border:none;">';
             if ($avgCumplim !== null) {
                 $html .= '<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;background:' . $avgBg . ';color:' . $avgFc . ';">' . $avgCumplim . '%</span>';
