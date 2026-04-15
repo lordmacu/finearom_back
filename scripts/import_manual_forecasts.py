@@ -273,8 +273,27 @@ for blk in p_blocks:
 anchor_idx    = None
 anchor_reason = ""
 
+# Threshold para considerar que la columna Ventas está "poblada"
+threshold_ventas = max(5, int(round(len(data) * 0.02)))
+
+def pick_block_for_month(target_mes_name: str):
+    """Entre todas las apariciones de `target_mes_name`, devuelve el índice
+    del bloque cuya columna Ventas esté más poblada. Prefiere el que tenga
+    ventas reales sobre el que no — así evita anclar a una proyección futura
+    del mismo mes que solo tiene P > 0 pero sin ventas.
+    """
+    candidates = [i for i, b in enumerate(p_blocks) if b["mes"] == target_mes_name]
+    if not candidates:
+        return None, None
+    # Rankear por ventas_nonzero desc; en empate, tomar el primero (más a la izquierda)
+    ranked = sorted(candidates, key=lambda i: (-p_blocks[i]["ventas_nonzero"], i))
+    best = ranked[0]
+    any_populated = p_blocks[best]["ventas_nonzero"] >= threshold_ventas
+    return best, any_populated
+
 if FORCE_YEAR is None:
-    # Buscar coincidencia con hoy, hoy-1, hoy-2, ... hasta 12 meses atrás
+    # Buscar secuencialmente: primero probar mes actual con ventas pobladas (mes en curso),
+    # luego mes anterior con ventas pobladas (mes cerrado), y así hasta 12 meses atrás.
     for offset in range(0, 12):
         target_month_num = TODAY.month - offset
         target_year      = TODAY.year
@@ -282,19 +301,42 @@ if FORCE_YEAR is None:
             target_month_num += 12
             target_year -= 1
         target_mes_name = MESES_ES[target_month_num - 1]
-        # Última aparición del mes en el archivo
-        for i in range(len(p_blocks) - 1, -1, -1):
-            if p_blocks[i]["mes"] == target_mes_name:
-                anchor_idx    = i
-                anchor_year   = target_year
-                anchor_reason = (
-                    f"último '{target_mes_name}' del archivo → calendario = {target_mes_name} {target_year}"
-                    + (f" (hoy es {TODAY.strftime('%Y-%m-%d')}, ajustado {offset} mes(es) atrás)" if offset else
-                       f" (coincide con el mes actual, hoy es {TODAY.strftime('%Y-%m-%d')})")
-                )
-                break
-        if anchor_idx is not None:
+
+        idx, populated = pick_block_for_month(target_mes_name)
+        if idx is None:
+            continue
+
+        if populated:
+            anchor_idx    = idx
+            anchor_year   = target_year
+            anchor_reason = (
+                f"'{target_mes_name}' con columna de Ventas poblada "
+                f"(>= {threshold_ventas} filas) → calendario = {target_mes_name} {target_year}"
+                + (f" (ajustado {offset} mes(es) atrás respecto a hoy {TODAY.strftime('%Y-%m-%d')})" if offset else
+                   f" (coincide con el mes actual, hoy es {TODAY.strftime('%Y-%m-%d')})")
+            )
             break
+
+    # Fallback: si ningún mes tuvo ventas pobladas, usar el último mes que coincida con hoy
+    if anchor_idx is None:
+        for offset in range(0, 12):
+            target_month_num = TODAY.month - offset
+            target_year      = TODAY.year
+            while target_month_num < 1:
+                target_month_num += 12
+                target_year -= 1
+            target_mes_name = MESES_ES[target_month_num - 1]
+            for i in range(len(p_blocks) - 1, -1, -1):
+                if p_blocks[i]["mes"] == target_mes_name:
+                    anchor_idx    = i
+                    anchor_year   = target_year
+                    anchor_reason = (
+                        f"fallback sin ventas pobladas: última aparición de "
+                        f"'{target_mes_name}' → {target_mes_name} {target_year}"
+                    )
+                    break
+            if anchor_idx is not None:
+                break
 
 # Fallback final: último bloque con P > 0
 if anchor_idx is None:
