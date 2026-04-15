@@ -476,6 +476,32 @@ class SiigoSyncController extends Controller
     }
 
     /**
+     * Devuelve el último Siigo Bridge activo (cualquier usuario).
+     * GET /api/siigo/bridge-status
+     */
+    public function bridgeStatus(): JsonResponse
+    {
+        $record = DB::table('siigo_bridge_tunnels')
+            ->orderByDesc('updated_at')
+            ->first();
+
+        if (!$record) {
+            return response()->json([
+                'active' => false,
+                'message' => 'No hay bridge registrado',
+            ]);
+        }
+
+        return response()->json([
+            'active'     => true,
+            'tunnel_url' => $record->tunnel_url,
+            'version'    => $record->version,
+            'user_email' => $record->user_email,
+            'updated_at' => $record->updated_at,
+        ]);
+    }
+
+    /**
      * List synced clients.
      * GET /api/siigo/clients
      */
