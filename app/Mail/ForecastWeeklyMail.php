@@ -130,9 +130,9 @@ class ForecastWeeklyMail extends Mailable
                 $html .= '<td style="padding:10px 16px;text-align:right;font-size:13px;font-weight:700;color:#1e40af;border:none;">' . number_format($prod['vendido']) . ' kg</td>';
                 $html .= '<td style="padding:10px 16px;text-align:right;font-size:12px;font-weight:600;color:#059669;border:none;">$' . number_format($prod['vendido_usd'] ?? 0, 2) . '</td>';
 
-                // Pendiente por despachar = pronóstico - vendido (mínimo 0)
-                $pendiente = max(0, (int) $prod['pronostico'] - (int) $prod['vendido']);
-                $pendColor = $pendiente === 0 ? '#059669' : '#b45309';  // verde si 0, ámbar si queda pendiente
+                // Pendiente por despacho = OC programadas sin facturar (partials.type='temporal')
+                $pendiente = (int) ($prod['pendiente'] ?? 0);
+                $pendColor = $pendiente > 0 ? '#b45309' : '#9ca3af';  // ámbar si hay pendiente, gris si 0
                 $html .= '<td style="padding:10px 16px;text-align:right;font-size:13px;font-weight:700;color:' . $pendColor . ';border:none;">' . number_format($pendiente) . ' kg</td>';
 
                 $html .= '<td style="padding:10px 16px;text-align:center;border:none;">';
@@ -152,12 +152,12 @@ class ForecastWeeklyMail extends Mailable
             $totalPronUsdCliente  = array_sum(array_column($cliente['productos'], 'pron_usd'));
             $totalVendUsdCliente  = array_sum(array_column($cliente['productos'], 'vendido_usd'));
 
-            // Total pendiente del cliente = suma de max(0, pron - vend) por producto
+            // Total pendiente = suma de partials 'temporal' por producto
             $totalPend = 0;
             foreach ($cliente['productos'] as $p) {
-                $totalPend += max(0, (int) $p['pronostico'] - (int) $p['vendido']);
+                $totalPend += (int) ($p['pendiente'] ?? 0);
             }
-            $totalPendColor = $totalPend === 0 ? '#059669' : '#b45309';
+            $totalPendColor = $totalPend > 0 ? '#b45309' : '#9ca3af';
 
             $html .= '<tr style="border-top:2px solid #e5e7eb;background:#f8fafc;">';
             $html .= '<td style="padding:10px 16px;border:none;font-weight:700;font-size:12px;color:#374151;text-transform:uppercase;letter-spacing:.04em;">Resumen cliente</td>';

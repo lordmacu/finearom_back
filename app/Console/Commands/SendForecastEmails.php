@@ -191,6 +191,7 @@ class SendForecastEmails extends Command
             ->orderBy('p.product_name')
             ->get();
 
+        // Partials REAL = facturado / despachado
         $despachados = DB::table('partials as pt')
             ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
             ->join('clients as c', 'po.client_id', '=', 'c.id')
@@ -208,34 +209,63 @@ class SendForecastEmails extends Command
             ->get()
             ->keyBy(fn ($r) => $r->nit . '|' . $r->codigo);
 
-        $clientesMap     = [];
-        $totalPronostico = 0;
-        $totalVendido    = 0;
-        $totalPronUsd    = 0.0;
-        $totalVendidoUsd = 0.0;
+        // Partials TEMPORAL = pendiente por despacho (OC programadas pero sin facturar)
+        $pendientes = DB::table('partials as pt')
+            ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
+            ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->where('pt.type', 'temporal')
+            ->whereNull('pt.deleted_at')
+            ->whereBetween('pt.dispatch_date', [$mesStart, $mesEnd])
+            ->where('pop.muestra', 0)
+            ->where('c.executive_email', $exec->executive_email)
+            ->selectRaw('c.nit, p.code as codigo,
+                SUM(pt.quantity) as cantidad_pendiente,
+                SUM((CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity) as value_usd')
+            ->groupBy('c.nit', 'p.code')
+            ->get()
+            ->keyBy(fn ($r) => $r->nit . '|' . $r->codigo);
+
+        $clientesMap       = [];
+        $totalPronostico   = 0;
+        $totalVendido      = 0;
+        $totalPendiente    = 0;
+        $totalPronUsd      = 0.0;
+        $totalVendidoUsd   = 0.0;
+        $totalPendienteUsd = 0.0;
 
         foreach ($forecasts as $f) {
-            $key          = $f->nit . '|' . $f->codigo;
-            $vendido      = (int) ($despachados[$key]->cantidad_real ?? 0);
-            $pronostico   = (int) $f->cantidad_forecast;
-            $cumplimiento = $pronostico > 0 ? round($vendido / $pronostico * 100, 1) : null;
-            $pronUsd      = round($pronostico * (float) $f->product_price, 2);
-            $vendUsd      = round((float) ($despachados[$key]->value_usd ?? 0), 2);
+            $key         = $f->nit . '|' . $f->codigo;
+            $pronostico  = (int) $f->cantidad_forecast;
+            $vendido     = (int) ($despachados[$key]->cantidad_real ?? 0);
+            $pendiente   = (int) ($pendientes[$key]->cantidad_pendiente ?? 0);
+            $pronUsd     = round($pronostico * (float) $f->product_price, 2);
+            $vendUsd     = round((float) ($despachados[$key]->value_usd ?? 0), 2);
+            $pendUsd     = round((float) ($pendientes[$key]->value_usd ?? 0), 2);
+            // Cumplimiento = (facturado + pendiente) / pronosticado
+            $cumplimiento = $pronostico > 0
+                ? round((($vendido + $pendiente) / $pronostico) * 100, 1)
+                : null;
 
             $clientesMap[$f->nit]['nombre'] = $f->client_name;
             $clientesMap[$f->nit]['productos'][] = [
-                'nombre'       => $f->product_name,
-                'codigo'       => $f->codigo,
-                'pronostico'   => $pronostico,
-                'vendido'      => $vendido,
-                'cumplimiento' => $cumplimiento,
-                'pron_usd'     => $pronUsd,
-                'vendido_usd'  => $vendUsd,
+                'nombre'        => $f->product_name,
+                'codigo'        => $f->codigo,
+                'pronostico'    => $pronostico,
+                'vendido'       => $vendido,
+                'pendiente'     => $pendiente,
+                'cumplimiento'  => $cumplimiento,
+                'pron_usd'      => $pronUsd,
+                'vendido_usd'   => $vendUsd,
+                'pendiente_usd' => $pendUsd,
             ];
-            $totalPronostico += $pronostico;
-            $totalVendido    += $vendido;
-            $totalPronUsd    += $pronUsd;
-            $totalVendidoUsd += $vendUsd;
+            $totalPronostico   += $pronostico;
+            $totalVendido      += $vendido;
+            $totalPendiente    += $pendiente;
+            $totalPronUsd      += $pronUsd;
+            $totalVendidoUsd   += $vendUsd;
+            $totalPendienteUsd += $pendUsd;
         }
 
         $execName = DB::table('executives')
@@ -243,17 +273,19 @@ class SendForecastEmails extends Command
             ->value('name') ?? ($exec->executive ?: $exec->executive_email);
 
         return [
-            'ejecutiva'          => $execName,
-            'mes'                => ucfirst(strtolower($mes)),
-            'año'                => $año,
-            'semana'             => $semana,
-            'clientes'           => array_values($clientesMap),
-            'total_pronostico'   => $totalPronostico,
-            'total_vendido'      => $totalVendido,
-            'total_pron_usd'     => $totalPronUsd,
-            'total_vendido_usd'  => $totalVendidoUsd,
-            'total_cumplimiento' => $totalPronostico > 0
-                ? round($totalVendido / $totalPronostico * 100, 1)
+            'ejecutiva'           => $execName,
+            'mes'                 => ucfirst(strtolower($mes)),
+            'año'                 => $año,
+            'semana'              => $semana,
+            'clientes'            => array_values($clientesMap),
+            'total_pronostico'    => $totalPronostico,
+            'total_vendido'       => $totalVendido,
+            'total_pendiente'     => $totalPendiente,
+            'total_pron_usd'      => $totalPronUsd,
+            'total_vendido_usd'   => $totalVendidoUsd,
+            'total_pendiente_usd' => $totalPendienteUsd,
+            'total_cumplimiento'  => $totalPronostico > 0
+                ? round((($totalVendido + $totalPendiente) / $totalPronostico) * 100, 1)
                 : null,
         ];
     }
