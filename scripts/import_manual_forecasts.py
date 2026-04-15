@@ -436,6 +436,30 @@ for _, row in data.iterrows():
 for i, blk in enumerate(p_blocks):
     blk["valid_count"] = per_month_valid[i]
 
+# ── Consolidar duplicados (fix TEMPORAL) ──────────────────────────────────────
+# El Excel puede tener múltiples filas con el mismo (nit, codigo, año, mes)
+# cuando un mismo cliente aparece bajo varios "nombres" (ej: PERFUMES FACTORY
+# LATAM + PERFUMES FACTORY VENEZUELA comparten NIT 444444599). Queremos UN
+# solo registro por clave, sumando las cantidades — no perder ningún dato.
+# TODO: a futuro, unificar correctamente a nivel de BD con UNIQUE constraint.
+aggregated = {}
+for row in inserts:
+    nit, cod, modelo, año, mes, cant, lb, ub, conf, ts = row
+    key = (nit, cod, modelo, año, mes)
+    if key in aggregated:
+        prev = aggregated[key]
+        aggregated[key] = (nit, cod, modelo, año, mes, prev[5] + cant, lb, ub, conf, ts)
+    else:
+        aggregated[key] = row
+
+consolidated_count = len(inserts) - len(aggregated)
+inserts = list(aggregated.values())
+if consolidated_count > 0:
+    warnings_list.append(
+        f"Se consolidaron {consolidated_count} filas duplicadas del Excel "
+        f"sumando sus cantidades (mismo NIT+código+año+mes). Ningún dato fue eliminado."
+    )
+
 # ── 8. Armar respuesta de preview ─────────────────────────────────────────────
 preview_months = [{
     "año": blk["año"],
