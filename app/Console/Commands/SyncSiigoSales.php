@@ -50,16 +50,37 @@ class SyncSiigoSales extends Command
         }
         $this->info('Autenticación exitosa.');
 
-        // 2. Get clients
+        // 2. Si piden un NIT específico → endpoint individual directo
         $nitFilter = $this->option('nit');
         if ($nitFilter) {
-            $nits = collect([$nitFilter]);
-        } else {
-            $nits = Client::whereNotNull('nit')
-                ->where('nit', '!=', '')
-                ->pluck('nit')
-                ->unique();
+            $this->info("Procesando solo NIT {$nitFilter}...");
+            try {
+                $inserted = $this->syncClientSales($token, $nitFilter, $desde, $hasta);
+                $this->info("Sincronización completada: {$inserted} registros.");
+                return self::SUCCESS;
+            } catch (\Throwable $e) {
+                $this->error("Error NIT {$nitFilter}: {$e->getMessage()}");
+                Log::error("SyncSiigoSales: Error NIT {$nitFilter}: {$e->getMessage()}");
+                return self::FAILURE;
+            }
         }
+
+        // 3. Sin filtro → intentar primero el endpoint masivo /ventas/all (1 llamada)
+        $this->info('Intentando descarga masiva vía /ventas/all...');
+        $bulkResult = $this->syncAll($token, $desde, $hasta);
+
+        if ($bulkResult !== null) {
+            $this->info("Sincronización masiva completada: {$bulkResult} registros insertados/actualizados.");
+            return self::SUCCESS;
+        }
+
+        // 4. Fallback: /ventas/all falló, volver al método por NIT
+        $this->warn('Endpoint /ventas/all no disponible o con error. Usando modo cliente-por-cliente.');
+
+        $nits = Client::whereNotNull('nit')
+            ->where('nit', '!=', '')
+            ->pluck('nit')
+            ->unique();
 
         $this->info("Procesando {$nits->count()} clientes...");
         $bar = $this->output->createProgressBar($nits->count());
@@ -84,6 +105,86 @@ class SyncSiigoSales extends Command
         $this->info("Sincronización completada: {$totalInserted} registros insertados/actualizados, {$errors} errores.");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Intenta descargar TODAS las ventas en una sola llamada via /ventas/all.
+     * Devuelve el # de registros persistidos o NULL si el endpoint falla
+     * (para que el caller haga fallback al modo por NIT).
+     */
+    private function syncAll(string $token, string $desde, string $hasta): ?int
+    {
+        try {
+            $response = Http::withToken($token)
+                ->timeout(300)  // 5 min para respuestas grandes
+                ->get("{$this->baseUrl}/ventas/all", [
+                    'desde' => $desde,
+                    'hasta' => $hasta,
+                ]);
+
+            if (! $response->successful()) {
+                Log::info("SyncSiigoSales: /ventas/all status={$response->status()} — " . substr($response->body(), 0, 200));
+                return null;
+            }
+
+            $ventas = $response->json('ventas');
+            if (! is_array($ventas)) {
+                Log::info('SyncSiigoSales: /ventas/all respondió sin key "ventas".');
+                return null;
+            }
+
+            $this->info('Recibidas ' . count($ventas) . ' líneas de venta. Persistiendo...');
+            $bar = $this->output->createProgressBar(count($ventas));
+            $bar->start();
+
+            $count = 0;
+            foreach ($ventas as $venta) {
+                $count += $this->persistVenta($venta);
+                $bar->advance();
+            }
+            $bar->finish();
+            $this->newLine();
+
+            return $count;
+        } catch (\Throwable $e) {
+            Log::info('SyncSiigoSales: /ventas/all exception — ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Persiste una venta del formato del bridge en sales_siigo.
+     * Extrae product_code de la descripción ("Producto - CODE").
+     */
+    private function persistVenta(array $venta): int
+    {
+        $valoresMes    = $venta['valores_mes'] ?? [];
+        $cantidadesMes = $venta['cantidades_mes'] ?? [];
+        $descripcion   = $venta['descripcion'] ?? null;
+        $productCode   = ($descripcion && str_contains($descripcion, ' - '))
+            ? trim(substr($descripcion, strrpos($descripcion, ' - ') + 3))
+            : null;
+
+        $count = 0;
+        foreach ($valoresMes as $mes => $valor) {
+            SiigoSale::updateOrCreate(
+                [
+                    'nit'          => $venta['nit'],
+                    'product_code' => $productCode,
+                    'cuenta'       => $venta['cuenta'] ?? '',
+                    'mes'          => $mes,
+                ],
+                [
+                    'orden_compra'    => $venta['orden_compra'] ?? null,
+                    'lote'            => $venta['lote'] ?? null,
+                    'precio_unitario' => $venta['precio_unitario'] ?? 0,
+                    'valor'           => $valor,
+                    'cantidad'        => $cantidadesMes[$mes] ?? 0,
+                ]
+            );
+            $count++;
+        }
+        return $count;
     }
 
     private function login(): ?string
