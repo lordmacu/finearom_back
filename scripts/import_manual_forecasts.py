@@ -376,6 +376,8 @@ preview_months = [{
     "is_anchor": blk["is_anchor"],
 } for blk in p_blocks]
 
+years_in_file_list = sorted({blk["año"] for blk in p_blocks})
+
 result = {
     "ok": True,
     "dry_run": DRY_RUN,
@@ -395,6 +397,7 @@ result = {
         "today": TODAY.strftime("%Y-%m-%d"),
         "force_year": FORCE_YEAR,
     },
+    "years_replaced": years_in_file_list,
     "warnings": warnings_list,
 }
 
@@ -415,7 +418,14 @@ except Exception as e:
 cursor = conn.cursor()
 
 try:
-    cursor.execute("DELETE FROM sales_forecasts WHERE modelo = 'manual'")
+    # Borrar sólo los años presentes en el Excel.
+    # Los pronósticos manuales de años no incluidos en este archivo se preservan.
+    years_in_file = sorted({str(blk["año"]) for blk in p_blocks})
+    placeholders  = ",".join(["%s"] * len(years_in_file))
+    cursor.execute(
+        f"DELETE FROM sales_forecasts WHERE modelo = 'manual' AND año IN ({placeholders})",
+        years_in_file,
+    )
     deleted = cursor.rowcount
 
     sql = """
