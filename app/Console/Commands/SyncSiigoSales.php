@@ -19,6 +19,16 @@ class SyncSiigoSales extends Command
 
     protected $description = 'Sincroniza ventas desde la API de Siigo para todos los clientes';
 
+    /**
+     * Mapeo de alias de NIT: cuando Siigo reporta el NIT de la izquierda,
+     * se guarda como el NIT de la derecha (el real en `clients`).
+     * Se usa para casos donde SIIGO factura bajo un NIT distinto al registrado
+     * en la plataforma (ej: razón social alterna, sucursal, etc.)
+     */
+    private const NIT_ALIASES = [
+        '444444608' => '444444599', // → PERFUMES FACTORY CA
+    ];
+
     private string $baseUrl;
 
     public function __construct()
@@ -164,12 +174,13 @@ class SyncSiigoSales extends Command
         $productCode   = ($descripcion && str_contains($descripcion, ' - '))
             ? trim(substr($descripcion, strrpos($descripcion, ' - ') + 3))
             : null;
+        $nit = self::NIT_ALIASES[$venta['nit'] ?? ''] ?? ($venta['nit'] ?? '');
 
         $count = 0;
         foreach ($valoresMes as $mes => $valor) {
             SiigoSale::updateOrCreate(
                 [
-                    'nit'          => $venta['nit'],
+                    'nit'          => $nit,
                     'product_code' => $productCode,
                     'cuenta'       => $venta['cuenta'] ?? '',
                     'mes'          => $mes,
@@ -233,12 +244,13 @@ class SyncSiigoSales extends Command
                 ? trim(substr($descripcion, strrpos($descripcion, ' - ') + 3))
                 : null;
 
+            $mappedNit = self::NIT_ALIASES[$venta['nit'] ?? ''] ?? ($venta['nit'] ?? '');
             foreach ($valoresMes as $mes => $valor) {
                 $cantidad = $cantidadesMes[$mes] ?? 0;
 
                 SiigoSale::updateOrCreate(
                     [
-                        'nit' => $venta['nit'],
+                        'nit' => $mappedNit,
                         'product_code' => $productCode,
                         'cuenta' => $venta['cuenta'] ?? '',
                         'mes' => $mes,
