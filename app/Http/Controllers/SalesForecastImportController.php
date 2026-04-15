@@ -57,7 +57,19 @@ class SalesForecastImportController extends Controller
             $args[] = '--year=' . (int) $request->input('year');
         }
 
-        $command = escapeshellcmd("$python $scriptPath") . ' ' . implode(' ', $args) . ' 2>&1';
+        // Pasamos las credenciales DB vía env vars para no depender de que el
+        // usuario web (daemon) pueda leer backend/.env.
+        $db = config('database.connections.' . config('database.default'));
+        $envPrefix = sprintf(
+            'DB_HOST=%s DB_PORT=%s DB_DATABASE=%s DB_USERNAME=%s DB_PASSWORD=%s ',
+            escapeshellarg((string) ($db['host'] ?? '127.0.0.1')),
+            escapeshellarg((string) ($db['port'] ?? '3306')),
+            escapeshellarg((string) ($db['database'] ?? '')),
+            escapeshellarg((string) ($db['username'] ?? '')),
+            escapeshellarg((string) ($db['password'] ?? '')),
+        );
+
+        $command = $envPrefix . escapeshellcmd("$python $scriptPath") . ' ' . implode(' ', $args) . ' 2>&1';
         $output  = shell_exec($command);
 
         @unlink($fullPath);

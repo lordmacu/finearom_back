@@ -100,15 +100,20 @@ def parse_env(path):
     env = {}
     if not os.path.exists(path):
         return env
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            m = re.match(r'^([A-Z0-9_]+)=(.*)$', line)
-            if m:
-                k, v = m.groups()
-                env[k] = v.strip('"').strip("'")
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                m = re.match(r'^([A-Z0-9_]+)=(.*)$', line)
+                if m:
+                    k, v = m.groups()
+                    env[k] = v.strip('"').strip("'")
+    except PermissionError:
+        # El usuario web (daemon) puede no tener permiso de lectura sobre .env.
+        # En ese caso confiamos en las env vars ya exportadas por PHP.
+        pass
     return env
 
 env = parse_env(ENV_PATH)
