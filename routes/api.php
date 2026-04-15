@@ -291,6 +291,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('import', [SalesHistoryController::class, 'import']);
     });
 
+    Route::prefix('sales-forecasts')->group(function () {
+        Route::post('preview', [\App\Http\Controllers\SalesForecastImportController::class, 'preview']);
+        Route::post('import',  [\App\Http\Controllers\SalesForecastImportController::class, 'import']);
+    });
+
     // IA Forecast (MVP - comentado, reemplazado por Historial de Ventas)
     // Route::prefix('ia/forecast')->group(function () {
     //     Route::get('batch-processing', [IaForecastController::class, 'batchProcessing']);
