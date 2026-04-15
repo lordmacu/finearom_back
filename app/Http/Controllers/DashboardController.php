@@ -1550,26 +1550,33 @@ class DashboardController extends Controller
             ->keyBy('executive');
 
         // ── Query 2b: Facturado de OCs creadas en el período (para % Cumplimiento real) ─
-        // Matching siigo_sales.orden_compra ↔ purchase_orders.order_consecutive.
-        // El % evoluciona con el tiempo: mes actual bajo, meses antiguos cercanos a 100%.
-        $fulfilledRows = DB::table('siigo_sales as s')
-            ->join('clients as c', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('s.nit COLLATE utf8mb4_unicode_ci'))
-            ->join('purchase_orders as po', function ($j) {
-                $j->on('po.client_id', '=', 'c.id')
-                  ->where(function ($q) {
-                      $q->whereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci LIKE CONCAT('%-', SUBSTRING_INDEX(s.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1))")
-                        ->orWhereRaw("po.order_consecutive COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(s.orden_compra COLLATE utf8mb4_unicode_ci, ',', 1)");
-                  });
-            })
-            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
-            ->selectRaw("
+        // Matching robusto: NIT cliente + código producto + cantidad exacta + siigo.mes ≥ mes de la OC.
+        // Filtro temporal evita que facturas viejas matcheen con OCs nuevas por coincidencia producto+cantidad.
+        $fromMesForFulfilled = Carbon::parse($startDate)->format('Y-m');
+        $fulfilledSql = "
+            SELECT
                 COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
                 SUM(s.valor) as fulfilled_cop,
                 SUM(s.cantidad) as fulfilled_kilos
-            ")
-            ->groupBy('c.executive')
-            ->get()
-            ->keyBy('executive');
+            FROM siigo_sales s
+            JOIN clients c ON c.nit COLLATE utf8mb4_unicode_ci = s.nit COLLATE utf8mb4_unicode_ci
+            WHERE s.mes >= ?
+              AND EXISTS (
+                SELECT 1
+                FROM purchase_orders po
+                JOIN purchase_order_product pop ON pop.purchase_order_id = po.id
+                JOIN products p ON p.id = pop.product_id
+                WHERE po.client_id = c.id
+                  AND po.order_creation_date BETWEEN ? AND ?
+                  AND p.code COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(s.product_code COLLATE utf8mb4_unicode_ci, ' ', 1)
+                  AND pop.quantity = s.cantidad
+                  AND pop.muestra = 0
+                  AND DATE_FORMAT(po.order_creation_date, '%Y-%m') <= s.mes
+              )
+            GROUP BY c.executive
+        ";
+        $fulfilledRaw = DB::select($fulfilledSql, [$fromMesForFulfilled, $startDate, $endDate]);
+        $fulfilledRows = collect($fulfilledRaw)->keyBy('executive');
 
         $totalValueCop = $ocRows->sum('value_cop');
 
