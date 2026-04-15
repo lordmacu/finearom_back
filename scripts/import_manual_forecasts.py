@@ -152,29 +152,57 @@ if header_row_idx is None:
 headers = [norm_cell(v) for v in raw.iloc[header_row_idx].tolist()]
 
 # ── 2. Detectar columnas NIT y CÓDIGO ─────────────────────────────────────────
-col_nit = None
-col_codigo = None
+# El código que necesitamos es el CÓDIGO CORTO del producto (el que matchea con
+# `products.code`, ej "10388"), NO el "CÓDIGO DE BÚSQUEDA" (NIT+código concat).
+# Heurística: en el Excel "BD COMERCIAL", el código corto es la columna
+# inmediatamente anterior a "NOMBRE REF" (o "REFERENCIA"/"REF").
+col_nit       = None
+col_codigo    = None
+col_nombre_ref = None
 for j, h in enumerate(headers):
     u = h.upper()
     if col_nit is None and u == 'NIT':
         col_nit = j
-    if col_codigo is None and 'CÓDIGO DE BÚSQUEDA' in u:
-        col_codigo = j
-    if col_codigo is None and 'CODIGO DE BUSQUEDA' in u:
-        col_codigo = j
+    if col_nombre_ref is None and (
+        u == 'NOMBRE REF' or u == 'NOMBRE DE REF'
+        or u == 'REFERENCIA' or u == 'NOMBRE REFERENCIA'
+        or u == 'REF'
+    ):
+        col_nombre_ref = j
 
-# Fallback: buscar cualquier header que contenga "CÓDIGO" / "CODIGO"
+if col_nombre_ref is not None and col_nombre_ref > 0:
+    col_codigo = col_nombre_ref - 1
+
+# Fallback: "CÓDIGO DE BÚSQUEDA" (menos preciso — no matchea con products.code)
+codigo_warning = None
+if col_codigo is None:
+    for j, h in enumerate(headers):
+        u = h.upper()
+        if 'CÓDIGO DE BÚSQUEDA' in u or 'CODIGO DE BUSQUEDA' in u:
+            col_codigo = j
+            codigo_warning = (
+                f"Se usó 'CÓDIGO DE BÚSQUEDA' (col {j}) como código porque no se "
+                f"encontró una columna 'NOMBRE REF' para ubicar el código corto. "
+                f"Es posible que los códigos NO matcheen con products.code."
+            )
+            break
+
+# Último fallback: cualquier header que contenga "CÓDIGO"
 if col_codigo is None:
     for j, h in enumerate(headers):
         u = h.upper()
         if 'CÓDIGO' in u or 'CODIGO' in u:
             col_codigo = j
+            codigo_warning = (
+                f"Se usó '{headers[j]}' (col {j}) como código por fallback. "
+                f"Verifica que matchee con products.code."
+            )
             break
 
 if col_nit is None:
     fail("No se encontró columna 'NIT' en la fila de headers")
 if col_codigo is None:
-    fail("No se encontró columna 'CÓDIGO DE BÚSQUEDA' en la fila de headers")
+    fail("No se encontró columna de código de producto (se buscó 'NOMBRE REF' + previa, o 'CÓDIGO DE BÚSQUEDA')")
 
 # ── 3. Detectar bloques de "P <Mes>" y sus "Ventas <Mes>" adyacentes ──────────
 p_blocks = []  # lista ordenada de dicts {mes, col_p, col_ventas}
@@ -318,6 +346,8 @@ for i, blk in enumerate(p_blocks):
         blk["warning_mismatch"] = True
 
 warnings_list = []
+if codigo_warning:
+    warnings_list.append(codigo_warning)
 for blk in p_blocks:
     if blk.get("warning_mismatch"):
         warnings_list.append(
