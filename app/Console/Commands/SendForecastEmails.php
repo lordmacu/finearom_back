@@ -165,10 +165,23 @@ class SendForecastEmails extends Command
 
     private function buildEmailData(object $exec, int $año, string $mes, string $mesStart, string $mesEnd, int $semana): array
     {
-        // Clientes de esta ejecutiva con pronóstico manual este mes
+        // Clientes de esta ejecutiva con pronóstico manual este mes.
+        // NOTA: la tabla `products` tiene códigos repetidos (distintos product_id
+        // con el mismo `code`). Para evitar que cada forecast se multiplique por
+        // cuantos productos compartan su código, hacemos el JOIN contra un subquery
+        // que devuelve UN solo product_id por code (el más antiguo / menor id).
+        $productsUniqCode = DB::table('products')
+            ->selectRaw('code, MIN(id) as id')
+            ->whereNotNull('code')
+            ->where('code', '!=', '')
+            ->groupBy('code');
+
         $forecasts = DB::table('sales_forecasts as sf')
             ->join('clients as c', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('sf.nit COLLATE utf8mb4_unicode_ci'))
-            ->join('products as p', DB::raw('p.code COLLATE utf8mb4_unicode_ci'), '=', DB::raw('sf.codigo COLLATE utf8mb4_unicode_ci'))
+            ->joinSub($productsUniqCode, 'pu', function ($j) {
+                $j->on(DB::raw('pu.code COLLATE utf8mb4_unicode_ci'), '=', DB::raw('sf.codigo COLLATE utf8mb4_unicode_ci'));
+            })
+            ->join('products as p', 'p.id', '=', 'pu.id')
             ->where('sf.modelo', 'manual')
             ->where('sf.año', (string) $año)
             ->where('sf.mes', $mes)
