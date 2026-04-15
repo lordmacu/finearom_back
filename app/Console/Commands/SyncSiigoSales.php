@@ -143,13 +143,39 @@ class SyncSiigoSales extends Command
                 return null;
             }
 
-            $this->info('Recibidas ' . count($ventas) . ' líneas de venta. Persistiendo...');
-            $bar = $this->output->createProgressBar(count($ventas));
+            $this->info('Recibidas ' . count($ventas) . ' líneas de venta. Consolidando duplicados...');
+
+            // Agrupar por la clave del updateOrCreate (nit, product_code, cuenta, mes)
+            // y SUMAR los valores/cantidades para preservar datos cuando el bridge
+            // devuelve varias líneas que colapsan a la misma fila.
+            $grouped = $this->groupVentasByKey($ventas);
+            $collapsed = 0;
+            foreach ($grouped as $g) { if ($g['_count'] > 1) $collapsed += ($g['_count'] - 1); }
+            if ($collapsed > 0) {
+                $this->info("  → {$collapsed} línea(s) consolidada(s) por clave duplicada (nit+product_code+cuenta+mes).");
+            }
+
+            $bar = $this->output->createProgressBar(count($grouped));
             $bar->start();
 
             $count = 0;
-            foreach ($ventas as $venta) {
-                $count += $this->persistVenta($venta);
+            foreach ($grouped as $row) {
+                SiigoSale::updateOrCreate(
+                    [
+                        'nit'          => $row['nit'],
+                        'product_code' => $row['product_code'],
+                        'cuenta'       => $row['cuenta'],
+                        'mes'          => $row['mes'],
+                    ],
+                    [
+                        'orden_compra'    => $row['orden_compra'],
+                        'lote'            => $row['lote'],
+                        'precio_unitario' => $row['precio_unitario'],
+                        'valor'           => $row['valor'],
+                        'cantidad'        => $row['cantidad'],
+                    ]
+                );
+                $count++;
                 $bar->advance();
             }
             $bar->finish();
@@ -166,6 +192,52 @@ class SyncSiigoSales extends Command
      * Persiste una venta del formato del bridge en sales_siigo.
      * Extrae product_code de la descripción ("Producto - CODE").
      */
+    /**
+     * Agrupa las líneas devueltas por el bridge usando la misma clave del
+     * updateOrCreate (nit, product_code, cuenta, mes). Cuando varias líneas
+     * del bridge caen a la misma clave, SUMA los valores y cantidades para
+     * no perder información. Guarda la última orden_compra/lote como refs.
+     */
+    private function groupVentasByKey(array $ventas): array
+    {
+        $grouped = [];
+        foreach ($ventas as $venta) {
+            $valoresMes    = $venta['valores_mes'] ?? [];
+            $cantidadesMes = $venta['cantidades_mes'] ?? [];
+            $descripcion   = $venta['descripcion'] ?? null;
+            $productCode   = ($descripcion && str_contains($descripcion, ' - '))
+                ? trim(substr($descripcion, strrpos($descripcion, ' - ') + 3))
+                : null;
+            $nit = self::NIT_ALIASES[$venta['nit'] ?? ''] ?? ($venta['nit'] ?? '');
+            $cuenta = $venta['cuenta'] ?? '';
+
+            foreach ($valoresMes as $mes => $valor) {
+                $key = "{$nit}|" . ($productCode ?? 'NULL') . "|{$cuenta}|{$mes}";
+                if (!isset($grouped[$key])) {
+                    $grouped[$key] = [
+                        'nit'             => $nit,
+                        'product_code'    => $productCode,
+                        'cuenta'          => $cuenta,
+                        'mes'             => $mes,
+                        'valor'           => 0.0,
+                        'cantidad'        => 0.0,
+                        'orden_compra'    => $venta['orden_compra'] ?? null,
+                        'lote'            => $venta['lote'] ?? null,
+                        'precio_unitario' => $venta['precio_unitario'] ?? 0,
+                        '_count'          => 0,
+                    ];
+                }
+                $grouped[$key]['valor']    += (float) $valor;
+                $grouped[$key]['cantidad'] += (float) ($cantidadesMes[$mes] ?? 0);
+                $grouped[$key]['_count']++;
+                // Mantener la última orden/lote no vacía (para referencia)
+                if (!empty($venta['orden_compra'])) $grouped[$key]['orden_compra'] = $venta['orden_compra'];
+                if (!empty($venta['lote']))         $grouped[$key]['lote']         = $venta['lote'];
+            }
+        }
+        return $grouped;
+    }
+
     private function persistVenta(array $venta): int
     {
         $valoresMes    = $venta['valores_mes'] ?? [];
