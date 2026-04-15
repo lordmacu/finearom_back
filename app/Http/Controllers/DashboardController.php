@@ -1606,8 +1606,8 @@ class DashboardController extends Controller
                 'fulfilled_cop'        => round($fulfilledCop, 0),
                 'fulfilled_kilos'      => round($fulfilledKilos, 2),
                 'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0.0,
-                'compliance_cop_pct'   => $valueCop > 0     ? round($fulfilledCop   / $valueCop      * 100, 1) : 0.0,
-                'compliance_kilos_pct' => $kilos    > 0     ? round($fulfilledKilos / $kilos          * 100, 1) : 0.0,
+                'compliance_cop_pct'   => $valueCop > 0     ? round($dispCop   / $valueCop      * 100, 1) : 0.0,
+                'compliance_kilos_pct' => $kilos    > 0     ? round($dispKilos / $kilos          * 100, 1) : 0.0,
             ];
         }
 
