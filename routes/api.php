@@ -167,6 +167,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/settings/processes', [SettingsController::class, 'updateProcesses']);
     Route::get('/settings/forecast-email', [\App\Http\Controllers\ForecastEmailConfigController::class, 'show']);
     Route::put('/settings/forecast-email', [\App\Http\Controllers\ForecastEmailConfigController::class, 'update']);
+    Route::put('/settings/forecast-email/fallback-emails', [\App\Http\Controllers\ForecastEmailConfigController::class, 'updateFallbackEmails']);
     Route::post('/settings/forecast-email/test', [\App\Http\Controllers\ForecastEmailConfigController::class, 'sendTest']);
     Route::put('/settings/template-pedido', [SettingsController::class, 'updateTemplatePedido']);
     Route::get('/settings/backups', [SettingsController::class, 'listBackups']);

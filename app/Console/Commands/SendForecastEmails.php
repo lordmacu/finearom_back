@@ -85,6 +85,24 @@ class SendForecastEmails extends Command
 
         $enviados = 0;
 
+        // Emails alternativos (configurados en /settings/general?tab=forecast-email)
+        // Se agregan como destinatarios adicionales a TODO envío — no se validan
+        // contra la tabla `executives` porque son copias fijas para seguimiento.
+        $fallbackRaw = $config->fallback_emails ?? null;
+        $fallbackEmails = [];
+        if (!empty($fallbackRaw)) {
+            $decoded = is_array($fallbackRaw) ? $fallbackRaw : json_decode((string) $fallbackRaw, true);
+            if (is_array($decoded)) {
+                $fallbackEmails = array_values(array_filter(array_map(
+                    fn ($e) => strtolower(trim((string) $e)),
+                    $decoded
+                )));
+            }
+        }
+        if (!empty($fallbackEmails)) {
+            $this->info('Emails alternativos configurados: ' . implode(', ', $fallbackEmails));
+        }
+
         foreach ($ejecutivas as $exec) {
             $emails = $this->parseEmails($exec->executive_email);
             if (empty($emails)) continue;
@@ -108,7 +126,13 @@ class SendForecastEmails extends Command
             $data = $this->buildEmailData($exec, $año, $mes, $mesStart, $mesEnd, $semana);
             if (empty($data['clientes'])) continue;
 
-            foreach ($emailsValidos as $email) {
+            // Combinar ejecutivas + fallback (copia) y deduplicar
+            $destinatarios = array_values(array_unique(array_map(
+                fn ($e) => strtolower(trim($e)),
+                array_merge($emailsValidos, $fallbackEmails)
+            )));
+
+            foreach ($destinatarios as $email) {
                 try {
                     Mail::to($email)->send(new ForecastWeeklyMail($data));
                     $this->line("  ✓ Enviado a {$email}");

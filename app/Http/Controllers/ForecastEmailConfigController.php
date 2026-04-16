@@ -22,6 +22,11 @@ class ForecastEmailConfigController extends Controller
     {
         $config = DB::table('forecast_email_config')->first();
 
+        // Normalizar fallback_emails a array (si es null o string JSON)
+        if ($config) {
+            $config->fallback_emails = $this->parseFallbackEmails($config->fallback_emails ?? null);
+        }
+
         return response()->json([
             'success' => true,
             'data'    => $config,
@@ -52,6 +57,43 @@ class ForecastEmailConfigController extends Controller
     }
 
     /**
+     * PUT /settings/forecast-email/fallback-emails
+     * Guarda los emails alternativos que se adjuntan a cada envío (cron y prueba).
+     */
+    public function updateFallbackEmails(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'emails'   => ['present', 'array'],
+            'emails.*' => ['email'],
+        ]);
+
+        $clean = array_values(array_unique(array_filter(array_map(
+            fn ($e) => strtolower(trim((string) $e)),
+            $validated['emails']
+        ))));
+
+        DB::table('forecast_email_config')->update([
+            'fallback_emails' => json_encode($clean),
+            'updated_at'      => now(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $clean,
+            'message' => 'Emails alternativos guardados (' . count($clean) . ')',
+        ]);
+    }
+
+    /** Decodifica fallback_emails desde BD a array plano y saneado. */
+    private function parseFallbackEmails(mixed $raw): array
+    {
+        if (is_array($raw)) return array_values(array_filter($raw));
+        if (!is_string($raw) || $raw === '') return [];
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? array_values(array_filter($decoded)) : [];
+    }
+
+    /**
      * POST /settings/forecast-email/test
      * Envía un email de prueba al correo indicado usando datos reales del mes actual.
      */
@@ -71,6 +113,13 @@ class ForecastEmailConfigController extends Controller
         if (empty($emails) && $request->filled('email')) {
             $emails = [$request->input('email')];
         }
+
+        // Sumar los emails alternativos guardados en la config (siempre en copia)
+        $config = DB::table('forecast_email_config')->first();
+        $fallback = $this->parseFallbackEmails($config->fallback_emails ?? null);
+
+        $emails = array_merge($emails, $fallback);
+
         // Limpiar duplicados, trim, lowercase
         $emails = array_values(array_unique(array_filter(array_map(
             fn ($e) => strtolower(trim((string) $e)),
