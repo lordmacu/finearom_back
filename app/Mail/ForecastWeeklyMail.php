@@ -47,9 +47,9 @@ class ForecastWeeklyMail extends Mailable
             'primer_nombre'        => explode(' ', trim($data['ejecutiva']))[0],
             'mes'                  => $data['mes'],
             'año'                  => $data['año'],
-            'semana'               => $data['semana'],
             'total_pronostico'     => number_format($data['total_pronostico']) . ' kg  /  $' . number_format($data['total_pron_usd'] ?? 0, 2),
             'total_vendido'        => number_format($data['total_vendido']) . ' kg  /  $' . number_format($data['total_vendido_usd'] ?? 0, 2),
+            'total_pendiente'      => number_format($data['total_pendiente'] ?? 0) . ' kg  /  $' . number_format($data['total_pendiente_usd'] ?? 0, 2),
             'total_cumplimiento'   => $data['total_cumplimiento'] !== null
                 ? $data['total_cumplimiento'] . '%'
                 : '—',
