@@ -57,12 +57,32 @@ class ForecastEmailConfigController extends Controller
      */
     public function sendTest(Request $request): JsonResponse
     {
+        // Soportar tanto `emails[]` (nuevo, múltiples) como `email` (legacy, uno solo)
         $request->validate([
-            'email'           => ['required', 'email'],
+            'emails'          => ['sometimes', 'array', 'min:1'],
+            'emails.*'        => ['email'],
+            'email'           => ['sometimes', 'email'],
             'executive_email' => ['nullable', 'email'],
             'date_from'       => ['nullable', 'date_format:Y-m-d'],
             'date_to'         => ['nullable', 'date_format:Y-m-d'],
         ]);
+
+        $emails = $request->input('emails', []);
+        if (empty($emails) && $request->filled('email')) {
+            $emails = [$request->input('email')];
+        }
+        // Limpiar duplicados, trim, lowercase
+        $emails = array_values(array_unique(array_filter(array_map(
+            fn ($e) => strtolower(trim((string) $e)),
+            $emails
+        ))));
+
+        if (empty($emails)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Debes proporcionar al menos un correo destino.',
+            ], 422);
+        }
 
         $meses = [1=>'ENERO',2=>'FEBRERO',3=>'MARZO',4=>'ABRIL',5=>'MAYO',6=>'JUNIO',
                   7=>'JULIO',8=>'AGOSTO',9=>'SEPTIEMBRE',10=>'OCTUBRE',11=>'NOVIEMBRE',12=>'DICIEMBRE'];
@@ -110,19 +130,36 @@ class ForecastEmailConfigController extends Controller
 
         $data = $this->buildEmailData($exec, $año, $mes, $mesStart, $mesEnd, $semana);
 
-        try {
-            Mail::to($request->email)->send(new ForecastWeeklyMail($data));
-        } catch (\Throwable $e) {
-            Log::error('ForecastEmailTest: ' . $e->getMessage());
+        $sent   = [];
+        $failed = [];
+        foreach ($emails as $addr) {
+            try {
+                Mail::to($addr)->send(new ForecastWeeklyMail($data));
+                $sent[] = $addr;
+            } catch (\Throwable $e) {
+                Log::error("ForecastEmailTest to {$addr}: " . $e->getMessage());
+                $failed[] = $addr;
+            }
+        }
+
+        if (empty($sent)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al enviar: ' . $e->getMessage(),
+                'message' => 'No se pudo enviar a ningún destinatario: ' . implode(', ', $failed),
             ], 500);
+        }
+
+        $msg = 'Email de prueba enviado a ' . implode(', ', $sent)
+             . " (datos de {$exec->executive}, {$mes} {$año})";
+        if (!empty($failed)) {
+            $msg .= ' — falló envío a: ' . implode(', ', $failed);
         }
 
         return response()->json([
             'success' => true,
-            'message' => "Email de prueba enviado a {$request->email} (datos de {$exec->executive}, semana {$semana} de {$mes} {$año})",
+            'sent'    => $sent,
+            'failed'  => $failed,
+            'message' => $msg,
         ]);
     }
 
