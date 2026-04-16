@@ -179,23 +179,17 @@ class ForecastEmailConfigController extends Controller
             ], 422);
         }
 
-        // Incluir también el email de la ejecutiva seleccionada en el TO
-        // (para simular el comportamiento real del cron).
-        // executive_email puede venir con varios correos separados por coma.
-        $execEmails = [];
-        foreach (preg_split('/\s*,\s*/', (string) $exec->executive_email) as $e) {
-            $e = strtolower(trim($e));
-            if ($e !== '') $execEmails[] = $e;
-        }
-        $emails = array_values(array_unique(array_merge($emails, $execEmails)));
-
-        // Quitar del CC los que ya están en TO para evitar duplicados visuales
+        // Quitar del CC los que ya están en TO para evitar duplicados visuales.
+        // NOTA: en el TEST no incluimos el email de la ejecutiva — la prueba es
+        // para que la veas tú (los chips que escribes) + los alternativos en copia.
+        // El cron real sí le envía a la ejecutiva.
         $ccEmails = array_values(array_diff($ccEmails, $emails));
 
-        // Si TO quedó vacío (por ejemplo no se seleccionó ejecutiva ni se pusieron chips)
-        // movemos el primer CC al TO para que el mail tenga al menos un destinatario principal.
+        // Si TO quedó vacío (no se pusieron chips y no hay CC tampoco), ya lo
+        // validamos antes. Si solo hay CC, movemos el primero al TO para tener
+        // al menos un destinatario principal.
         if (empty($emails) && !empty($ccEmails)) {
-            $emails   = [array_shift($ccEmails)];
+            $emails = [array_shift($ccEmails)];
         }
 
         $data = $this->buildEmailData($exec, $año, $mes, $mesStart, $mesEnd, $semana);
