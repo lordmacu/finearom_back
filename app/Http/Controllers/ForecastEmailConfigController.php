@@ -114,19 +114,21 @@ class ForecastEmailConfigController extends Controller
             $emails = [$request->input('email')];
         }
 
-        // Sumar los emails alternativos guardados en la config (siempre en copia)
-        $config = DB::table('forecast_email_config')->first();
-        $fallback = $this->parseFallbackEmails($config->fallback_emails ?? null);
-
-        $emails = array_merge($emails, $fallback);
-
-        // Limpiar duplicados, trim, lowercase
+        // Limpiar duplicados, trim, lowercase — éstos son los destinatarios TO (principales)
         $emails = array_values(array_unique(array_filter(array_map(
             fn ($e) => strtolower(trim((string) $e)),
             $emails
         ))));
 
-        if (empty($emails)) {
+        // Cargar emails alternativos guardados — éstos van en CC (copia)
+        $config = DB::table('forecast_email_config')->first();
+        $ccEmails = $this->parseFallbackEmails($config->fallback_emails ?? null);
+        $ccEmails = array_values(array_unique(array_filter(array_map(
+            fn ($e) => strtolower(trim((string) $e)),
+            $ccEmails
+        ))));
+
+        if (empty($emails) && empty($ccEmails)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Debes proporcionar al menos un correo destino.',
@@ -177,8 +179,8 @@ class ForecastEmailConfigController extends Controller
             ], 422);
         }
 
-        // Incluir también el email de la ejecutiva seleccionada entre los
-        // destinatarios del test (para simular el comportamiento real del cron).
+        // Incluir también el email de la ejecutiva seleccionada en el TO
+        // (para simular el comportamiento real del cron).
         // executive_email puede venir con varios correos separados por coma.
         $execEmails = [];
         foreach (preg_split('/\s*,\s*/', (string) $exec->executive_email) as $e) {
@@ -187,37 +189,39 @@ class ForecastEmailConfigController extends Controller
         }
         $emails = array_values(array_unique(array_merge($emails, $execEmails)));
 
-        $data = $this->buildEmailData($exec, $año, $mes, $mesStart, $mesEnd, $semana);
+        // Quitar del CC los que ya están en TO para evitar duplicados visuales
+        $ccEmails = array_values(array_diff($ccEmails, $emails));
 
-        $sent   = [];
-        $failed = [];
-        foreach ($emails as $addr) {
-            try {
-                Mail::to($addr)->send(new ForecastWeeklyMail($data));
-                $sent[] = $addr;
-            } catch (\Throwable $e) {
-                Log::error("ForecastEmailTest to {$addr}: " . $e->getMessage());
-                $failed[] = $addr;
-            }
+        // Si TO quedó vacío (por ejemplo no se seleccionó ejecutiva ni se pusieron chips)
+        // movemos el primer CC al TO para que el mail tenga al menos un destinatario principal.
+        if (empty($emails) && !empty($ccEmails)) {
+            $emails   = [array_shift($ccEmails)];
         }
 
-        if (empty($sent)) {
+        $data = $this->buildEmailData($exec, $año, $mes, $mesStart, $mesEnd, $semana);
+
+        try {
+            $mailer = Mail::to($emails);
+            if (!empty($ccEmails)) {
+                $mailer->cc($ccEmails);
+            }
+            $mailer->send(new ForecastWeeklyMail($data));
+        } catch (\Throwable $e) {
+            Log::error('ForecastEmailTest: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'message' => 'No se pudo enviar a ningún destinatario: ' . implode(', ', $failed),
+                'message' => 'Error al enviar el email de prueba: ' . $e->getMessage(),
             ], 500);
         }
 
-        $msg = 'Email de prueba enviado a ' . implode(', ', $sent)
-             . " (datos de {$exec->executive}, {$mes} {$año})";
-        if (!empty($failed)) {
-            $msg .= ' — falló envío a: ' . implode(', ', $failed);
-        }
+        $msg = 'Email de prueba enviado — TO: ' . implode(', ', $emails);
+        if (!empty($ccEmails)) $msg .= '  |  CC: ' . implode(', ', $ccEmails);
+        $msg .= " (datos de {$exec->executive}, {$mes} {$año})";
 
         return response()->json([
             'success' => true,
-            'sent'    => $sent,
-            'failed'  => $failed,
+            'to'      => $emails,
+            'cc'      => $ccEmails,
             'message' => $msg,
         ]);
     }

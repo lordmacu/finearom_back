@@ -126,21 +126,26 @@ class SendForecastEmails extends Command
             $data = $this->buildEmailData($exec, $año, $mes, $mesStart, $mesEnd, $semana);
             if (empty($data['clientes'])) continue;
 
-            // Combinar ejecutivas + fallback (copia) y deduplicar
-            $destinatarios = array_values(array_unique(array_map(
+            // TO = ejecutiva(s) válida(s) — destinatario principal
+            $toList = array_values(array_unique(array_map(
                 fn ($e) => strtolower(trim($e)),
-                array_merge($emailsValidos, $fallbackEmails)
+                $emailsValidos
             )));
+            // CC = emails alternativos (en copia) — excluyendo los que ya están en TO
+            $ccList = array_values(array_diff($fallbackEmails, $toList));
 
-            foreach ($destinatarios as $email) {
-                try {
-                    Mail::to($email)->send(new ForecastWeeklyMail($data));
-                    $this->line("  ✓ Enviado a {$email}");
-                    $enviados++;
-                } catch (\Throwable $e) {
-                    $this->error("  ✗ Error enviando a {$email}: " . $e->getMessage());
-                    Log::error("SendForecastEmails: {$email} — " . $e->getMessage());
+            try {
+                $mailer = Mail::to($toList);
+                if (!empty($ccList)) {
+                    $mailer->cc($ccList);
                 }
+                $mailer->send(new ForecastWeeklyMail($data));
+                $ccMsg = empty($ccList) ? '' : ' | cc: ' . implode(', ', $ccList);
+                $this->line("  ✓ Enviado a " . implode(', ', $toList) . $ccMsg);
+                $enviados++;
+            } catch (\Throwable $e) {
+                $this->error("  ✗ Error enviando a " . implode(', ', $toList) . ": " . $e->getMessage());
+                Log::error('SendForecastEmails [' . implode(', ', $toList) . ']: ' . $e->getMessage());
             }
         }
 
