@@ -177,6 +177,16 @@ class ForecastEmailConfigController extends Controller
             ], 422);
         }
 
+        // Incluir también el email de la ejecutiva seleccionada entre los
+        // destinatarios del test (para simular el comportamiento real del cron).
+        // executive_email puede venir con varios correos separados por coma.
+        $execEmails = [];
+        foreach (preg_split('/\s*,\s*/', (string) $exec->executive_email) as $e) {
+            $e = strtolower(trim($e));
+            if ($e !== '') $execEmails[] = $e;
+        }
+        $emails = array_values(array_unique(array_merge($emails, $execEmails)));
+
         $data = $this->buildEmailData($exec, $año, $mes, $mesStart, $mesEnd, $semana);
 
         $sent   = [];
