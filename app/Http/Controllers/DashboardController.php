@@ -1578,6 +1578,67 @@ class DashboardController extends Controller
         $fulfilledRaw = DB::select($fulfilledSql, [$fromMesForFulfilled, $startDate, $endDate]);
         $fulfilledRows = collect($fulfilledRaw)->keyBy('executive');
 
+        // ── Query 3: Despachado real (partials type='real') — exclusivo para % Cumpl. ──
+        $realDispRows = DB::table('partials as pt')
+            ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
+            ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
+            ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
+            ->where('pt.type', 'real')
+            ->whereNull('pt.deleted_at')
+            ->where('pop.muestra', 0)
+            ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
+            ->selectRaw("
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                SUM(pt.quantity) as real_kilos,
+                SUM(
+                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
+                    (CASE
+                        WHEN CAST(REPLACE(REPLACE(COALESCE(pt.trm,'0'), '$', ''), ',', '') AS DECIMAL(15,2)) >= 3400
+                            THEN CAST(REPLACE(REPLACE(COALESCE(pt.trm,'0'), '$', ''), ',', '') AS DECIMAL(15,2))
+                        WHEN po.trm >= 3400 THEN po.trm
+                        WHEN td.value IS NOT NULL THEN td.value
+                        ELSE 4000
+                    END)
+                ) as real_cop
+            ")
+            ->groupBy('c.executive')
+            ->get()
+            ->keyBy('executive');
+
+        // ── Query 4: Pronóstico manual (sales_forecasts) — exclusivo para % Cumpl. ──
+        $mesesMap = [
+            1=>'ENERO', 2=>'FEBRERO', 3=>'MARZO', 4=>'ABRIL', 5=>'MAYO', 6=>'JUNIO',
+            7=>'JULIO', 8=>'AGOSTO', 9=>'SEPTIEMBRE', 10=>'OCTUBRE', 11=>'NOVIEMBRE', 12=>'DICIEMBRE',
+        ];
+        $forecastParams = [];
+        $forecastConditions = [];
+        $cur = Carbon::parse($startDate)->startOfMonth();
+        while ($cur <= Carbon::parse($endDate)) {
+            $forecastConditions[] = '(sf.año = ? AND sf.mes = ?)';
+            $forecastParams[] = (string) $cur->year;
+            $forecastParams[] = $mesesMap[$cur->month];
+            $cur->addMonth();
+        }
+        $forecastWhere = implode(' OR ', $forecastConditions);
+        $forecastSql = "
+            SELECT
+                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                SUM(sf.cantidad_forecast * COALESCE(p.price, 0) * {$avgTrmSiigo}) as forecast_cop,
+                SUM(sf.cantidad_forecast) as forecast_kilos
+            FROM sales_forecasts sf
+            LEFT JOIN clients c ON c.nit COLLATE utf8mb4_unicode_ci = sf.nit COLLATE utf8mb4_unicode_ci
+            LEFT JOIN (
+                SELECT MIN(id) as id, code FROM products
+                WHERE code IS NOT NULL AND code != '' GROUP BY code
+            ) pu ON pu.code COLLATE utf8mb4_unicode_ci = sf.codigo COLLATE utf8mb4_unicode_ci
+            LEFT JOIN products p ON p.id = pu.id
+            WHERE sf.modelo = 'manual' AND ({$forecastWhere})
+            GROUP BY c.executive
+        ";
+        $forecastRows = collect(DB::select($forecastSql, $forecastParams))->keyBy('executive');
+
         $totalValueCop = $ocRows->sum('value_cop');
 
         $result = [];
@@ -1585,6 +1646,8 @@ class DashboardController extends Controller
             $exec          = $row->executive;
             $disp          = $dispRows[$exec] ?? null;
             $fulfilled     = $fulfilledRows[$exec] ?? null;
+            $realDisp      = $realDispRows[$exec] ?? null;
+            $forecastRow   = $forecastRows[$exec] ?? null;
             $valueCop      = (float) $row->value_cop;
             $valueUsd      = (float) $row->value_usd;
             $kilos         = (float) $row->total_kilos;
@@ -1593,6 +1656,10 @@ class DashboardController extends Controller
             $dispKilos     = $disp ? (float) $disp->dispatched_kilos     : 0.0;
             $fulfilledCop  = $fulfilled ? (float) $fulfilled->fulfilled_cop   : 0.0;
             $fulfilledKilos= $fulfilled ? (float) $fulfilled->fulfilled_kilos : 0.0;
+            $realCop       = $realDisp    ? (float) $realDisp->real_cop        : 0.0;
+            $realKilos     = $realDisp    ? (float) $realDisp->real_kilos      : 0.0;
+            $forecastCop   = $forecastRow ? (float) $forecastRow->forecast_cop : 0.0;
+            $forecastKilos = $forecastRow ? (float) $forecastRow->forecast_kilos : 0.0;
 
             $result[] = [
                 'executive'            => $exec,
@@ -1606,8 +1673,8 @@ class DashboardController extends Controller
                 'fulfilled_cop'        => round($fulfilledCop, 0),
                 'fulfilled_kilos'      => round($fulfilledKilos, 2),
                 'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0.0,
-                'compliance_cop_pct'   => $valueCop > 0     ? round($dispCop   / $valueCop      * 100, 1) : 0.0,
-                'compliance_kilos_pct' => $kilos    > 0     ? round($dispKilos / $kilos          * 100, 1) : 0.0,
+                'compliance_cop_pct'   => $forecastCop   > 0 ? round($realCop   / $forecastCop   * 100, 1) : 0.0,
+                'compliance_kilos_pct' => $forecastKilos > 0 ? round($realKilos / $forecastKilos * 100, 1) : 0.0,
             ];
         }
 
