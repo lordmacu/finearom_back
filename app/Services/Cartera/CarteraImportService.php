@@ -169,6 +169,8 @@ class CarteraImportService
             $row['dias'] = (int) Carbon::today()->diffInDays(Carbon::parse($row['vence']), false);
         }
 
+        $row['vencido'] = $row['dias'] < 0 ? $this->toSortableNumber($row['saldo_contable'] ?? 0) : 0;
+
         $row['nit'] = $nitNumber;
         $row['catera_type'] = $tipoCartera;
         $row['nombre_empresa'] = $companyName;
