@@ -117,6 +117,11 @@ class CarteraImportService
                 continue;
             }
 
+            $saldo = $this->toSortableNumber($processed['saldo_contable'] ?? 0);
+            if ($saldo <= 0) {
+                continue;
+            }
+
             $rows[] = $processed;
         }
 
