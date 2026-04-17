@@ -160,6 +160,10 @@ class CarteraImportService
         $row['fecha'] = $this->convertExcelDate($row['fecha'] ?? null);
         $row['vence'] = $this->convertExcelDate($row['vence'] ?? null);
 
+        if (!empty($row['vence'])) {
+            $row['dias'] = (int) Carbon::today()->diffInDays(Carbon::parse($row['vence']), false);
+        }
+
         $row['nit'] = $nitNumber;
         $row['catera_type'] = $tipoCartera;
         $row['nombre_empresa'] = $companyName;
