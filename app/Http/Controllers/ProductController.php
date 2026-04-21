@@ -33,85 +33,61 @@ class ProductController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        // Generar clave de caché única basada en los parámetros de la consulta
-        $cacheKey = $this->generateProductsCacheKey($request);
-        $cacheTimestampKey = $cacheKey . '.timestamp';
+        $query = Product::query()->with(['client:id,client_name,nit', 'discounts']);
 
-        // Verificar si el caché es válido comparando timestamps
-        $cachedTimestamp = Cache::get($cacheTimestampKey);
-        $lastModified = Cache::get('products.last_modified', 0);
-
-        if ($cachedTimestamp && $cachedTimestamp < $lastModified) {
-            // El caché está desactualizado, eliminarlo
-            Cache::forget($cacheKey);
-            Cache::forget($cacheTimestampKey);
+        if ($search = $request->query('search')) {
+            $query->where(function ($q) use ($search) {
+                $q->where('product_name', 'like', "%{$search}%")
+                    ->orWhere('code', 'like', "%{$search}%");
+            });
         }
 
-        // Caché permanente (solo se invalida manualmente en CRUD)
-        $data = Cache::rememberForever($cacheKey, function () use ($request) {
-            $query = Product::query()->with(['client:id,client_name,nit', 'discounts']);
+        if ($clientId = $request->query('client_id')) {
+            $query->where('client_id', (int) $clientId);
+        }
 
-            if ($search = $request->query('search')) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('product_name', 'like', "%{$search}%")
-                        ->orWhere('code', 'like', "%{$search}%");
-                });
-            }
+        if ($code = $request->query('code')) {
+            $query->where('code', $code);
+        }
 
-            if ($clientId = $request->query('client_id')) {
-                $query->where('client_id', (int) $clientId);
-            }
+        $allowedSorts = ['id', 'code', 'product_name', 'price', 'client_id'];
+        $sortBy = $request->query('sort_by', 'id');
+        $sortDir = $request->query('sort_direction', 'desc');
+        if (! in_array($sortBy, $allowedSorts, true)) {
+            $sortBy = 'id';
+        }
+        $sortDir = strtolower($sortDir) === 'asc' ? 'asc' : 'desc';
+        $query->orderBy($sortBy, $sortDir);
 
-            if ($code = $request->query('code')) {
-                $query->where('code', $code);
-            }
+        $paginate = filter_var($request->query('paginate', true), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $perPage = (int) ($request->query('per_page', 15));
+        $perPage = max(1, min(500, $perPage));
 
-            $allowedSorts = ['id', 'code', 'product_name', 'price', 'client_id'];
-            $sortBy = $request->query('sort_by', 'id');
-            $sortDir = $request->query('sort_direction', 'desc');
-            if (! in_array($sortBy, $allowedSorts, true)) {
-                $sortBy = 'id';
-            }
-            $sortDir = strtolower($sortDir) === 'asc' ? 'asc' : 'desc';
-            $query->orderBy($sortBy, $sortDir);
-
-            $paginate = filter_var($request->query('paginate', true), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-            $perPage = (int) ($request->query('per_page', 15));
-            $perPage = max(1, min(500, $perPage));
-
-            if ($paginate === false) {
-                $items = $query->limit($perPage)->get();
-                return [
-                    'success' => true,
-                    'data' => $items,
-                    'meta' => [
-                        'total' => $items->count(),
-                        'paginate' => false,
-                    ],
-                ];
-            }
-
-            $products = $query->paginate($perPage);
-
-            return [
+        if ($paginate === false) {
+            $items = $query->limit($perPage)->get();
+            return response()->json([
                 'success' => true,
-                'data' => $products->items(),
+                'data' => $items,
                 'meta' => [
-                    'current_page' => $products->currentPage(),
-                    'last_page' => $products->lastPage(),
-                    'per_page' => $products->perPage(),
-                    'total' => $products->total(),
-                    'paginate' => true,
+                    'total' => $items->count(),
+                    'paginate' => false,
                 ],
-            ];
-        });
-
-        // Guardar timestamp del caché si es la primera vez (permanente)
-        if (!Cache::has($cacheTimestampKey)) {
-            Cache::forever($cacheTimestampKey, now()->timestamp);
+            ]);
         }
 
-        return response()->json($data);
+        $products = $query->paginate($perPage);
+
+        return response()->json([
+            'success' => true,
+            'data' => $products->items(),
+            'meta' => [
+                'current_page' => $products->currentPage(),
+                'last_page' => $products->lastPage(),
+                'per_page' => $products->perPage(),
+                'total' => $products->total(),
+                'paginate' => true,
+            ],
+        ]);
     }
 
     public function store(ProductStoreRequest $request): JsonResponse
@@ -197,41 +173,20 @@ class ProductController extends Controller
         $limit = (int) $request->query('limit', 10);
         $limit = max(1, min(50, $limit));
 
-        $cacheKey = "products.search." . md5($search . '|' . $limit);
-        $cacheTimestampKey = "{$cacheKey}.timestamp";
+        $query = Product::query();
 
-        // Verificar si el caché es válido comparando timestamps
-        $cachedTimestamp = Cache::get($cacheTimestampKey);
-        $lastModified = Cache::get('products.last_modified', 0);
-
-        if ($cachedTimestamp && $cachedTimestamp < $lastModified) {
-            // El caché está desactualizado, eliminarlo
-            Cache::forget($cacheKey);
-            Cache::forget($cacheTimestampKey);
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('product_name', 'like', "%{$search}%")
+                    ->orWhere('code', 'like', "%{$search}%")
+                    ->orWhere('id', $search);
+            });
         }
 
-        // Caché permanente (solo se invalida manualmente en CRUD)
-        $products = Cache::rememberForever($cacheKey, function () use ($search, $limit) {
-            $query = Product::query();
-
-            if ($search !== '') {
-                $query->where(function ($q) use ($search) {
-                    $q->where('product_name', 'like', "%{$search}%")
-                        ->orWhere('code', 'like', "%{$search}%")
-                        ->orWhere('id', $search);
-                });
-            }
-
-            return $query
-                ->select('id', DB::raw('product_name as text'), 'code', 'price')
-                ->limit($limit)
-                ->get();
-        });
-
-        // Guardar timestamp del caché si es la primera vez (permanente)
-        if (!Cache::has($cacheTimestampKey)) {
-            Cache::forever($cacheTimestampKey, now()->timestamp);
-        }
+        $products = $query
+            ->select('id', DB::raw('product_name as text'), 'code', 'price')
+            ->limit($limit)
+            ->get();
 
         return response()->json($products);
     }
