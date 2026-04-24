@@ -767,11 +767,17 @@ class MonthlyReportController extends Controller
             "{\"html\":\"<p>explicación breve en HTML</p>\",\"sql\":\"SELECT ...\",\"showing\":\"campo1, campo2\",\"available\":\"campo3, campo4\"}\n\n" .
             "Reglas del JSON:\n" .
             "- \"html\": explicación en HTML limpio. Sin LaTeX, sin markdown, sin backticks. Para preguntas sin datos: solo el html, sql=null.\n" .
-            "  ⚠ CRÍTICO — PROHIBIDO ALUCINAR DATOS EN html: NUNCA escribas una tabla con filas de datos (valores reales de kilos, USD, cumplimiento, ejecutivas, clientes) dentro del html. TU NO SABES los valores — la tabla la renderiza el frontend ejecutando el sql.\n" .
-            "  → MAL: <table><tr><td>Monica</td><td>1200</td>...</table> (valores inventados = alucinación grave)\n" .
-            "  → MAL: mencionar totales concretos en el html ('el total fue 13,200 kg') cuando el sql aún no se ha ejecutado\n" .
-            "  → BIEN: <p>Comparativa de kilos pedidos vs pronosticados por ejecutiva (modelo manual, abril 2026). La tabla se calcula con la query.</p>\n" .
-            "  → El html solo describe QUÉ hace la query, NO muestra RESULTADOS. Los números salen del sql.\n" .
+            "  ⚠⚠⚠ REGLA ABSOLUTA — PROHIBIDO MOSTRAR DATOS EN html CUANDO HAY sql:\n" .
+            "  → PROHIBIDO etiqueta <table> dentro del html (cero excepciones).\n" .
+            "  → PROHIBIDO <ul>/<ol> con valores concretos (ej: '<li>Monica: 1200 kg</li>').\n" .
+            "  → PROHIBIDO cualquier cifra concreta (kilos, USD, COP, porcentajes, cantidades, totales) — no sabes los valores hasta que el frontend ejecute el sql.\n" .
+            "  → PROHIBIDO nombres de ejecutivas/clientes/productos asociados a números (ej: 'Monica lleva 1200 kg').\n" .
+            "  → Si sientes la tentación de 'dar ejemplo' o 'mostrar el total' — NO LO HAGAS. Esos números los inventas tú = alucinación.\n" .
+            "  → El html es SOLO texto explicativo de QUÉ hace la query: variables que compara, filtros aplicados, período, agrupaciones. El frontend pinta la tabla con los resultados reales.\n" .
+            "  → BIEN: <p>Comparativa de kilos pedidos (OC creadas en abril 2026) vs kilos pronosticados (modelo manual) agrupada por ejecutiva.</p>\n" .
+            "  → MAL: <p>La tabla muestra: Monica 1200 kg, Claudia 3500 kg, total 13,200 kg.</p>\n" .
+            "  → MAL: <table>...</table> dentro del html con cualquier dato.\n" .
+            "  → Excepción única: si sql=null (pregunta sin datos), puedes responder normal en html sin tabla.\n" .
             "- \"sql\": la query SQL completa, sin escapar. null si no hay query.\n" .
             "- \"showing\": campos que muestra la query, en español legible (ej: 'total órdenes, kilos pedidos, valor USD'). Omitir si sql=null.\n" .
             "- \"available\": campos adicionales que el usuario puede pedir. Omitir si sql=null.\n" .
