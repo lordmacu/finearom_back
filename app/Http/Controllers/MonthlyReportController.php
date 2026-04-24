@@ -587,7 +587,7 @@ class MonthlyReportController extends Controller
         return
             "Eres un asistente de análisis comercial para Finearom, empresa colombiana que comercializa fragancias y materias primas para la industria cosmética.\n\n" .
             "ROLES Y FLUJO DE ÓRDENES:\n" .
-            "EJECUTIVAS (Monica Castano, Juliana Pardo, Claudia Cueter, Maria Ortega, Camila Quintero, Daniela Aristizabal): negocian pedidos. Campo clients.executive guarda su email.\n" .
+            "EJECUTIVAS: negocian pedidos. Campo clients.executive guarda su email. " . $this->getExecutivesCatalogForPrompt() . "\n" .
             "FRANCY (pedidos): crea la OC → status='pending'. Marca is_muestra (orden sin costo) y is_new_win (cliente/producto nuevo).\n" .
             "MARLON (logística): revisa pending → agrega observaciones (new_observation=email al cliente, internal_observation=nota interna) → pone fechas estimadas de despacho por producto (partials type='temporal') → OC pasa a status='processing'. OC processing >7 días sin despachar = REZAGADA.\n" .
             "ALEXA (facturación/despacho): cuando la mercancía sale físicamente registra despachos reales → crea partials type='real' (dispatch_date, invoice_number, tracking_number, transporter, trm, quantity) → OC pasa a 'parcial_status' (despachó parte) o 'completed' (despachó todo). Una OC puede tener múltiples partials type='real' en cuotas.\n" .
@@ -715,9 +715,15 @@ class MonthlyReportController extends Controller
             "REGLA CRÍTICA DE CANTIDADES:\n" .
             "Cuando JOIN partials → purchase_order_product, SIEMPRE usa par.quantity para calcular valor despachado.\n" .
             "pop.quantity es la cantidad PEDIDA, par.quantity es la cantidad REAL DESPACHADA.\n\n" .
-            "EJECUTIVA: clients.executive puede ser email (ej: monica.castano@finearom.com).\n" .
-            "Para mostrar como nombre: REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' ') AS ejecutiva\n" .
-            "Siempre GROUP BY c.executive (no por el alias).\n\n" .
+            "EJECUTIVA — ÚNICA fuente de verdad = tabla executives:\n" .
+            "⚠⚠ REGLA ABSOLUTA: SOLO son ejecutivas válidas las que existen en la tabla executives con is_active=1. Ninguna otra. La columna clients.executive tiene datos sucios (typos como 'mari.ortega', emails concatenados con coma, strings basura como 'executive', emails genéricos como 'sabores@') — esos clientes NO deben salir en reportes por ejecutiva.\n" .
+            "REGLA OBLIGATORIA: cualquier query que agrupe, filtre o muestre ejecutiva DEBE usar INNER JOIN (no LEFT) con executives:\n" .
+            "  INNER JOIN executives e ON e.email = c.executive COLLATE utf8mb4_unicode_ci AND e.is_active = 1\n" .
+            "Aplica tanto en queries sobre purchase_orders/partials como sobre sales_forecasts — cualquier cosa que toque clients.executive.\n" .
+            "⚠ COLLATION: clients.executive=utf8mb4_general_ci, executives.email=utf8mb4_unicode_ci → obligatorio COLLATE utf8mb4_unicode_ci al unir.\n" .
+            "Para mostrar el nombre real: usa e.name tal cual (ej: 'Monica Castaño', con tildes). NO uses SUBSTRING_INDEX/REPLACE del email — eso deforma los nombres.\n" .
+            "GROUP BY e.id, e.name (nunca por el alias).\n" .
+            "Consecuencia esperada: clientes con c.executive basura (comas, typos, emails genéricos) quedan fuera del reporte. Es el comportamiento correcto.\n\n" .
             "ESQUEMA DE BASE DE DATOS:\n" . $this->getDbSchema() . "\n\n" .
             "JOINS ESPECIALES:\n" .
             "- Ciudad de entrega / sucursal: LEFT JOIN branch_offices bo ON pop.branch_office_id = bo.id → bo.delivery_city, bo.name\n" .
@@ -846,6 +852,30 @@ class MonthlyReportController extends Controller
             "ORDER BY fase_orden DESC, fecha DESC\n" .
             "showing: fase, fecha, OC, cliente, estado, factura, guía, kilos. available: transportador, NIT, ejecutiva.\n\n" .
             $this->getClientsCatalogForPrompt();
+    }
+
+    /**
+     * Catálogo de ejecutivas activas desde la tabla executives.
+     * Es la fuente de verdad — clients.executive tiene datos sucios (typos, emails concatenados, literales).
+     * Cacheado 10 min.
+     */
+    private function getExecutivesCatalogForPrompt(): string
+    {
+        $rows = Cache::remember('ai_chat:executives_catalog', 600, function () {
+            return DB::table('executives')
+                ->where('is_active', 1)
+                ->orderBy('name')
+                ->get(['name', 'email'])
+                ->all();
+        });
+
+        if (empty($rows)) {
+            return '';
+        }
+
+        $list = collect($rows)->map(fn($r) => $r->name . ' <' . $r->email . '>')->implode(' | ');
+
+        return "EJECUTIVAS ACTIVAS (fuente oficial: tabla executives): " . $list . ".";
     }
 
     /**
