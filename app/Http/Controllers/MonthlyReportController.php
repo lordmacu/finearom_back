@@ -782,7 +782,39 @@ class MonthlyReportController extends Controller
             "UNION ALL SELECT 'estimado (Marlon)',2,par_t.dispatch_date,po.order_consecutive,'processing',c.client_name,c.nit,REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),NULL,NULL,NULL,par_t.quantity FROM partials par_t JOIN purchase_orders po ON po.id=par_t.order_id JOIN clients c ON c.id=po.client_id WHERE par_t.order_id=(SELECT order_id FROM partials WHERE tracking_number='{N}' AND type='real' AND deleted_at IS NULL LIMIT 1) AND par_t.type='temporal' AND par_t.deleted_at IS NULL\n" .
             "UNION ALL SELECT 'despacho real (Alexa)',3,par_r.dispatch_date,po.order_consecutive,po.status,c.client_name,c.nit,REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),par_r.invoice_number,par_r.tracking_number,par_r.transporter,par_r.quantity FROM partials par_r JOIN purchase_orders po ON po.id=par_r.order_id JOIN clients c ON c.id=po.client_id WHERE par_r.tracking_number='{N}' AND par_r.type='real' AND par_r.deleted_at IS NULL\n" .
             "ORDER BY fase_orden DESC, fecha DESC\n" .
-            "showing: fase, fecha, OC, cliente, estado, factura, guía, kilos. available: transportador, NIT, ejecutiva.";
+            "showing: fase, fecha, OC, cliente, estado, factura, guía, kilos. available: transportador, NIT, ejecutiva.\n\n" .
+            $this->getClientsCatalogForPrompt();
+    }
+
+    /**
+     * Catálogo de clientes para el prompt — permite a la IA desambiguar nombres propios.
+     * Si el usuario menciona un nombre que aparece aquí, es un CLIENTE y debe filtrarse por c.client_name.
+     * Se cachea 10 min para no pegarle a la BD en cada request.
+     */
+    private function getClientsCatalogForPrompt(): string
+    {
+        $names = Cache::remember('ai_chat:clients_catalog', 600, function () {
+            return DB::table('clients')
+                ->orderBy('client_name')
+                ->pluck('client_name')
+                ->filter(fn($n) => trim((string) $n) !== '')
+                ->values()
+                ->all();
+        });
+
+        if (empty($names)) {
+            return '';
+        }
+
+        return "CATÁLOGO DE CLIENTES (" . count($names) . " totales):\n"
+            . implode(' | ', $names) . "\n\n"
+            . "REGLAS DE DESAMBIGUACIÓN POR NOMBRE:\n"
+            . "- Si el usuario menciona un nombre que coincide con el catálogo de arriba (o un fragmento único de él), es un CLIENTE — filtra con c.client_name LIKE '%NOMBRE%'.\n"
+            . "  → Ejemplo: 'ventas de Beautik' → c.client_name LIKE '%Beautik%' (es LABORATORIOS BEAUTIK sa).\n"
+            . "- Si coincide con una ejecutiva (Monica, Juliana, Claudia, Maria, Camila, Daniela) → filtra por clients.executive (email).\n"
+            . "- Si no coincide con ninguna entidad conocida, pregunta en html sin generar SQL.\n"
+            . "- NUNCA interpretes un nombre propio del catálogo de clientes como si fuera un producto (p.product_name).\n"
+            . "- Cuando el usuario pida desglose 'por referencia' o 'por producto', SIEMPRE incluye p.id, p.code, p.product_name en SELECT y en GROUP BY.\n";
     }
 
     /**
