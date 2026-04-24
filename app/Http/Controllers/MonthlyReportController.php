@@ -759,7 +759,17 @@ class MonthlyReportController extends Controller
             "  → POR CLIENTE (el usuario menciona uno del catálogo): añade WHERE c.client_name LIKE '%NOMBRE%' o c.nit='...' y el GROUP BY ya no necesita client_name.\n" .
             "  → POR EJECUTIVA: WHERE c.executive = 'email' y agrupa por ejecutiva.\n" .
             "  → Ejemplo 'cumplimiento general por ejecutiva 2026': el GROUP BY va por c.executive; las métricas son SUM(cantidad_forecast) y SUM(kilos_reales) agregadas.\n" .
-            "- Si piden solo 'kilos pronosticados para X cliente', filtro directo: WHERE sf.nit = c.nit AND sf.modelo='manual' AND sf.año = '2026'.\n\n" .
+            "- Si piden solo 'kilos pronosticados para X cliente', filtro directo: WHERE sf.nit = c.nit AND sf.modelo='manual' AND sf.año = '2026'.\n" .
+            "- ⚠ CRÍTICO REAL vs PRONÓSTICO — no sesgar hacia un lado:\n" .
+            "  → El LEFT JOIN 'FROM creadas LEFT JOIN pronosticado' OCULTA ejecutivas/clientes con presupuesto pero sin ventas (0% cumplimiento = lo MÁS importante detectar). NUNCA hagas eso.\n" .
+            "  → Patrón correcto: construye un CTE 'claves' con UNION de ambos lados, y haz dos LEFT JOINs:\n" .
+            "     WITH creadas AS (...), pronosticado AS (...),\n" .
+            "          claves AS (SELECT ejecutiva_email FROM creadas UNION SELECT ejecutiva_email FROM pronosticado)\n" .
+            "     SELECT k.ejecutiva_email, COALESCE(cr.kilos_pedidos,0) AS kilos_pedidos, COALESCE(pr.kilos_pronosticados,0) AS kilos_pronosticados, ...\n" .
+            "     FROM claves k LEFT JOIN creadas cr USING(ejecutiva_email) LEFT JOIN pronosticado pr USING(ejecutiva_email)\n" .
+            "  → Cumplimiento debe manejar NULL en AMBOS lados: si no hay forecast, cumplimiento='sin presupuesto'; si no hay ventas, cumplimiento=0%.\n" .
+            "  → Compara también valor USD si el usuario pide 'vs pronosticado' sin especificar kilos — incluye valor_pronosticado_usd = SUM(sf.cantidad_forecast * COALESCE(NULLIF(p.price,0), 0)) en la CTE pronosticado (join products por código con COLLATE).\n" .
+            "  → Filtro SIEMPRE en 'creadas': AND po.status != 'cancelled' para no inflar con órdenes anuladas.\n\n" .
             "FORMATO DE RESPUESTA — OBLIGATORIO:\n" .
             "Responde SIEMPRE con un objeto JSON válido, sin texto antes ni después, sin wrapper de backticks.\n" .
             "⚠ CRÍTICO PARA STREAMING: el campo \"html\" DEBE ser SIEMPRE el PRIMER campo del JSON — nunca muevas \"sql\" al inicio.\n" .
