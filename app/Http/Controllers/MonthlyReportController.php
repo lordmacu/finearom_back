@@ -832,6 +832,7 @@ class MonthlyReportController extends Controller
             "- ⚠ PERCENTILE_CONT / PERCENTILE_DISC no existen en MariaDB. Para percentiles usar NTILE(N) OVER (ORDER BY col ASC/DESC):\n" .
             "  → Top 20% (percentil 80): NTILE(5) OVER (ORDER BY valor ASC) = 5\n" .
             "  → Mediana (percentil 50): NTILE(2) OVER (ORDER BY valor ASC) = 2\n" .
+            "- ⚠ MariaDB NO soporta NULLS LAST / NULLS FIRST (sintaxis Postgres/Oracle). Para poner nulls al final en ORDER BY DESC: ORDER BY col IS NULL, col DESC. Para ascendente con nulls al final: ORDER BY col IS NULL, col ASC.\n" .
             "- ⚠ NUNCA uses FULL OUTER JOIN — MariaDB/MySQL NO lo soporta. Para combinar dos conjuntos donde ambos pueden tener filas sin match:\n" .
             "  → Patrón correcto: CTE adicional con UNION de ambos lados + dos LEFT JOINs:\n" .
             "     WITH cte_a AS (...), cte_b AS (...), todos AS (SELECT key FROM cte_a UNION SELECT key FROM cte_b)\n" .
