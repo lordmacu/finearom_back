@@ -740,6 +740,10 @@ class MonthlyReportController extends Controller
             "- ALIASES recomendados: client_name, ejecutiva, kilos, valor_usd, valor_cop, ocs, fill_rate_pct, pipeline_usd, fecha_despacho, numero_oc.\n" .
             "- GROUP BY (MariaDB ONLY_FULL_GROUP_BY): todos los campos no-agregados del SELECT deben estar en GROUP BY. Agrupa por c.executive (no alias).\n" .
             "  ⚠ CRÍTICO: cuando uses po.order_consecutive, c.nit, c.executive o cualquier campo de po/c en el SELECT y también hagas GROUP BY, SIEMPRE incluye esos campos en el GROUP BY. Ejemplo obligatorio: GROUP BY po.id, po.order_consecutive, c.client_name, c.nit, c.executive, po.status, po.order_creation_date.\n" .
+            "  ⚠ CRÍTICO PRECIO EN GROUP BY: pop.price y p.price NUNCA pueden ir fuera de un SUM/AVG/MAX cuando la query tiene GROUP BY a nivel de orden/cliente/ejecutiva — MariaDB rompe con 'isn't in GROUP BY'. El precio es por renglón de purchase_order_product, NO por orden.\n" .
+            "  → MAL: ROUND((SUM(pop.quantity) - COALESCE(SUM(par.quantity),0)) * COALESCE(NULLIF(pop.price,0), p.price, 0), 2) AS valor_pendiente_usd\n" .
+            "  → BIEN: ROUND(SUM((pop.quantity - COALESCE(par.quantity,0)) * COALESCE(NULLIF(pop.price,0), p.price, 0)), 2) AS valor_pendiente_usd\n" .
+            "  → Regla general: mueve la multiplicación de cantidades × precio DENTRO del SUM. Nunca hagas SUM(cantidad) * precio — siempre SUM(cantidad * precio).\n" .
             "- NUNCA incluyas columnas id en SELECT. Siempre incluye NIT junto al nombre del cliente.\n" .
             "- ⚠ CLIENTES NUEVOS: cuando el usuario pida 'clientes nuevos', 'first order este año/mes', 'clientes que entraron este año' — NUNCA uses HAVING MIN(po.order_creation_date) >= fecha sobre OCs filtradas por status.\n" .
             "  → Ese patrón falla: un cliente con órdenes completadas en años anteriores pasa el filtro porque sus OCs viejas no tienen status activo.\n" .
