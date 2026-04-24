@@ -717,10 +717,16 @@ class MonthlyReportController extends Controller
             "pop.quantity es la cantidad PEDIDA, par.quantity es la cantidad REAL DESPACHADA.\n\n" .
             "EJECUTIVA — ÚNICA fuente de verdad = tabla executives:\n" .
             "⚠⚠ REGLA ABSOLUTA: SOLO son ejecutivas válidas las que existen en la tabla executives con is_active=1. Ninguna otra. La columna clients.executive tiene datos sucios (typos como 'mari.ortega', emails concatenados con coma, strings basura como 'executive', emails genéricos como 'sabores@') — esos clientes NO deben salir en reportes por ejecutiva.\n" .
-            "REGLA OBLIGATORIA: cualquier query que agrupe, filtre o muestre ejecutiva DEBE usar INNER JOIN (no LEFT) con executives:\n" .
+            "⚠ COLLATION CRÍTICA: clients.executive=utf8mb4_general_ci, executives.email=utf8mb4_unicode_ci.\n" .
+            "  → CADA VEZ que compares clients.executive (o cualquier columna derivada de ella, ej: ejecutiva_email dentro de un CTE) con executives.email, OBLIGATORIO usar COLLATE utf8mb4_unicode_ci en UNO de los lados. Sin COLLATE → error SQL 1267 'Illegal mix of collations'.\n" .
+            "  → Aplica en TODOS los lugares donde se compare: ON clauses de JOINs, igualdades en WHERE, uniones entre CTEs que traigan una columna y otra.\n" .
+            "PATRÓN PREFERIDO (más simple, COLLATE solo 1 vez): pon el INNER JOIN executives dentro de cada CTE que use clients.executive:\n" .
             "  INNER JOIN executives e ON e.email = c.executive COLLATE utf8mb4_unicode_ci AND e.is_active = 1\n" .
-            "Aplica tanto en queries sobre purchase_orders/partials como sobre sales_forecasts — cualquier cosa que toque clients.executive.\n" .
-            "⚠ COLLATION: clients.executive=utf8mb4_general_ci, executives.email=utf8mb4_unicode_ci → obligatorio COLLATE utf8mb4_unicode_ci al unir.\n" .
+            "  Así los CTEs emergen ya con e.id y e.name, y los UNION/LEFT JOIN externos no necesitan COLLATE.\n" .
+            "PATRÓN ALTERNATIVO (executives como tabla base con LEFT JOINs a CTEs): si traes la columna clients.executive en el CTE, el LEFT JOIN final TAMBIÉN necesita COLLATE:\n" .
+            "  LEFT JOIN creadas cr ON cr.ejecutiva_email COLLATE utf8mb4_unicode_ci = e.email\n" .
+            "Ambos patrones son válidos — pero NUNCA omitas el COLLATE. El del patrón preferido es menos propenso a errores.\n" .
+            "Aplica en queries sobre purchase_orders, partials y sales_forecasts — cualquier cosa que toque clients.executive.\n" .
             "Para mostrar el nombre real: usa e.name tal cual (ej: 'Monica Castaño', con tildes). NO uses SUBSTRING_INDEX/REPLACE del email — eso deforma los nombres.\n" .
             "GROUP BY e.id, e.name (nunca por el alias).\n" .
             "Consecuencia esperada: clientes con c.executive basura (comas, typos, emails genéricos) quedan fuera del reporte. Es el comportamiento correcto.\n\n" .
