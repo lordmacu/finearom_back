@@ -723,6 +723,43 @@ class MonthlyReportController extends Controller
             "- Ciudad de entrega / sucursal: LEFT JOIN branch_offices bo ON pop.branch_office_id = bo.id → bo.delivery_city, bo.name\n" .
             "- Guías del período: SELECT DISTINCT tracking_number, transporter FROM partials WHERE type='real' AND deleted_at IS NULL AND dispatch_date BETWEEN fechas\n" .
             "- Facturas del período: SELECT DISTINCT invoice_number FROM partials WHERE type='real' AND deleted_at IS NULL AND dispatch_date BETWEEN fechas\n\n" .
+            "PRONÓSTICOS DE VENTAS (tabla sales_forecasts) — para preguntas del tipo 'pronosticado vs real', 'cumplimiento', 'presupuesto', 'forecast', 'lo proyectado':\n" .
+            "- Columnas: nit (VARCHAR), codigo (VARCHAR, = products.code), modelo (xgboost|theta|croston|holt_winters|manual), año (VARCHAR 4 chars), mes (VARCHAR español MAYÚSCULAS: 'ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'), cantidad_forecast (BIGINT kilos), lower_bound, upper_bound, confianza (enum alta|media|baja), generated_at.\n" .
+            "- Una fila = un pronóstico de kilos por cliente + producto + año + mes + modelo.\n" .
+            "- ⚠ REGLA: cuando el usuario pregunta 'pronosticado', 'presupuesto', 'plan', 'lo que se esperaba vender' SIN mencionar modelo, usa SIEMPRE modelo='manual' (es el presupuesto que carga el equipo comercial). Otros modelos (xgboost, theta, croston, holt_winters) son predicciones estadísticas — solo úsalas si el usuario las pide por nombre.\n" .
+            "- ⚠ COLLATION: products.code es utf8mb4_general_ci y sales_forecasts.codigo es utf8mb4_unicode_ci. Al unirlos usa: ON p.code COLLATE utf8mb4_unicode_ci = sf.codigo. clients.nit = sales_forecasts.nit NO requiere COLLATE (ambos unicode_ci).\n" .
+            "- ⚠ AÑO: sf.año es VARCHAR. Comparar con literal entre comillas ('2026') o con CAST: CAST(sf.año AS UNSIGNED) = 2026. Para cruzar con YEAR(par.dispatch_date): sf.año = CAST(YEAR(par.dispatch_date) AS CHAR).\n" .
+            "- ⚠ MES: sf.mes es VARCHAR español. Para cruzar con MONTH(par.dispatch_date) usa FIELD: MONTH(par.dispatch_date) = FIELD(sf.mes,'ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE')\n" .
+            "- PATRÓN RECOMENDADO (real vs pronóstico por producto y año):\n" .
+            "  WITH reales AS (\n" .
+            "    SELECT c.nit, p.code AS codigo, YEAR(par.dispatch_date) AS anio, SUM(par.quantity) AS kilos_reales\n" .
+            "    FROM partials par\n" .
+            "    JOIN purchase_order_product pop ON pop.id = par.product_order_id\n" .
+            "    JOIN products p ON p.id = pop.product_id\n" .
+            "    JOIN purchase_orders po ON po.id = par.order_id\n" .
+            "    JOIN clients c ON c.id = po.client_id\n" .
+            "    WHERE par.type='real' AND par.deleted_at IS NULL AND pop.muestra=0\n" .
+            "    GROUP BY c.nit, p.code, YEAR(par.dispatch_date)\n" .
+            "  )\n" .
+            "  SELECT sf.año AS anio, c.client_name AS cliente, sf.codigo, p.product_name AS referencia,\n" .
+            "         SUM(sf.cantidad_forecast) AS kilos_pronosticados,\n" .
+            "         COALESCE(r.kilos_reales, 0) AS kilos_reales,\n" .
+            "         ROUND(COALESCE(r.kilos_reales,0) - SUM(sf.cantidad_forecast), 2) AS diff_kg,\n" .
+            "         ROUND(COALESCE(r.kilos_reales,0) / NULLIF(SUM(sf.cantidad_forecast),0) * 100, 2) AS cumplimiento_pct\n" .
+            "  FROM sales_forecasts sf\n" .
+            "  JOIN clients c ON c.nit = sf.nit\n" .
+            "  JOIN products p ON p.code COLLATE utf8mb4_unicode_ci = sf.codigo\n" .
+            "  LEFT JOIN reales r ON r.nit = sf.nit AND r.codigo COLLATE utf8mb4_unicode_ci = sf.codigo AND CAST(r.anio AS CHAR) = sf.año\n" .
+            "  WHERE sf.modelo = 'manual'\n" .
+            "  GROUP BY sf.año, c.client_name, sf.codigo, p.product_name, r.kilos_reales\n" .
+            "  ORDER BY sf.año DESC, cumplimiento_pct DESC\n" .
+            "- Si el usuario pide por mes: agrega sf.mes en SELECT/GROUP BY y en el LEFT JOIN cruza con FIELD(sf.mes,...).\n" .
+            "- ALCANCE del reporte — maneja ambos casos:\n" .
+            "  → GENERAL (todos los clientes con presupuesto): NO filtres por c.nit. Agrupa por cliente y/o producto para ver quién cumple y quién no.\n" .
+            "  → POR CLIENTE (el usuario menciona uno del catálogo): añade WHERE c.client_name LIKE '%NOMBRE%' o c.nit='...' y el GROUP BY ya no necesita client_name.\n" .
+            "  → POR EJECUTIVA: WHERE c.executive = 'email' y agrupa por ejecutiva.\n" .
+            "  → Ejemplo 'cumplimiento general por ejecutiva 2026': el GROUP BY va por c.executive; las métricas son SUM(cantidad_forecast) y SUM(kilos_reales) agregadas.\n" .
+            "- Si piden solo 'kilos pronosticados para X cliente', filtro directo: WHERE sf.nit = c.nit AND sf.modelo='manual' AND sf.año = '2026'.\n\n" .
             "FORMATO DE RESPUESTA — OBLIGATORIO:\n" .
             "Responde SIEMPRE con un objeto JSON válido, sin texto antes ni después, sin wrapper de backticks.\n" .
             "⚠ CRÍTICO PARA STREAMING: el campo \"html\" DEBE ser SIEMPRE el PRIMER campo del JSON — nunca muevas \"sql\" al inicio.\n" .
