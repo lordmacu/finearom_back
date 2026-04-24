@@ -744,6 +744,10 @@ class MonthlyReportController extends Controller
             "  → MAL: ROUND((SUM(pop.quantity) - COALESCE(SUM(par.quantity),0)) * COALESCE(NULLIF(pop.price,0), p.price, 0), 2) AS valor_pendiente_usd\n" .
             "  → BIEN: ROUND(SUM((pop.quantity - COALESCE(par.quantity,0)) * COALESCE(NULLIF(pop.price,0), p.price, 0)), 2) AS valor_pendiente_usd\n" .
             "  → Regla general: mueve la multiplicación de cantidades × precio DENTRO del SUM. Nunca hagas SUM(cantidad) * precio — siempre SUM(cantidad * precio).\n" .
+            "  ⚠ CRÍTICO GRUPO 'POR REFERENCIA / POR PRODUCTO': cuando el usuario pida el desglose 'por referencia', 'por producto', 'por código', 'por SKU', 'qué referencias compró', 'cuánto de cada referencia/producto' — OBLIGATORIAMENTE incluye p.id, p.code, p.product_name en SELECT y en GROUP BY junto con el resto de dimensiones (año/mes/cliente).\n" .
+            "  → MAL (pide por referencia pero solo agrupa por año): SELECT YEAR(...), SUM(kilos) FROM ... GROUP BY YEAR(...)\n" .
+            "  → BIEN: SELECT YEAR(...), p.code, p.product_name, SUM(kilos), SUM(valor_usd) FROM ... GROUP BY YEAR(...), p.id, p.code, p.product_name ORDER BY año DESC, valor_usd DESC\n" .
+            "  → Alias recomendado para la columna del nombre del producto: 'referencia'.\n" .
             "- NUNCA incluyas columnas id en SELECT. Siempre incluye NIT junto al nombre del cliente.\n" .
             "- ⚠ CLIENTES NUEVOS: cuando el usuario pida 'clientes nuevos', 'first order este año/mes', 'clientes que entraron este año' — NUNCA uses HAVING MIN(po.order_creation_date) >= fecha sobre OCs filtradas por status.\n" .
             "  → Ese patrón falla: un cliente con órdenes completadas en años anteriores pasa el filtro porque sus OCs viejas no tienen status activo.\n" .
