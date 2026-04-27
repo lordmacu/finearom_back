@@ -1183,6 +1183,9 @@ class PurchaseOrderController extends Controller
                 fn($e) => !empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)
             )));
 
+            // Forzar ejecutiva válida en CC (defensivo contra usuario que la quitó del formulario)
+            $ccEmails = $this->ensureExecutiveInCc($ccEmails, $order->client, $toEmail);
+
             // Validate TO email
             if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
                 Log::warning('sendStatusUpdateEmail: TO email inválido, abortando', [
@@ -1301,7 +1304,10 @@ class PurchaseOrderController extends Controller
 
             // Preparar CC: asegurarnos que no esté el TO repetido
             $ccEmails = array_diff($ccEmails, [$toEmail]);
-            $ccEmails = array_unique($ccEmails);
+            $ccEmails = array_values(array_unique($ccEmails));
+
+            // Forzar ejecutiva válida en CC (defensivo contra usuario que la quitó del formulario)
+            $ccEmails = $this->ensureExecutiveInCc($ccEmails, $order->client, $toEmail);
 
             Log::info('📧 CAMBIO DE ESTADO - Destinatarios finales', [
                 'order_id' => $order->id,
@@ -1663,6 +1669,12 @@ class PurchaseOrderController extends Controller
                 $stakeholderEmails
             )));
 
+            // Forzar ejecutiva válida en la lista de internos (siempre debe estar copiada)
+            $enforcedExec = $this->getEnforcedExecutiveEmails($order->client);
+            if (!empty($enforcedExec)) {
+                $allInternalEmails = array_values(array_unique(array_merge($allInternalEmails, $enforcedExec)));
+            }
+
             \Log::info('OBSERVACIONES - Emails identificados ---', [
                 'order_id' => $order->id,
                 'tagEmails' => $tagEmails,
@@ -1734,6 +1746,10 @@ class PurchaseOrderController extends Controller
                         $clientRecipients,
                         $stakeholderEmails
                     )));
+
+                    // Forzar ejecutiva válida en CC del email al cliente
+                    $clientCcRecipients = $this->ensureExecutiveInCc($clientCcRecipients, $order->client, $clientTo);
+
                     $clientCcAddresses = array_map(fn ($email) => new Address($email), $clientCcRecipients);
 
                     $clientMail = (new Email())
@@ -2577,6 +2593,9 @@ class PurchaseOrderController extends Controller
             [$primaryToEmail]
         )));
 
+        // Forzar ejecutiva válida en CC (defensivo contra usuario que la quitó del formulario)
+        $ccEmails = $this->ensureExecutiveInCc($ccEmails, $purchaseOrder->client, $primaryToEmail);
+
         // Validar TO antes de enviar
         if (!empty($primaryToEmail) && !filter_var(trim($primaryToEmail), FILTER_VALIDATE_EMAIL)) {
             Log::warning('EMAIL PEDIDOS - TO inválido, abortando email de pedido', [
@@ -2691,6 +2710,9 @@ class PurchaseOrderController extends Controller
             [$toEmail]
         )));
 
+        // Forzar ejecutiva válida en CC (defensivo contra usuario que la quitó del formulario)
+        $ccEmails = $this->ensureExecutiveInCc($ccEmails, $purchaseOrder->client, $toEmail);
+
         // Validar TO antes de enviar
         if (!empty($toEmail) && !filter_var(trim($toEmail), FILTER_VALIDATE_EMAIL)) {
             Log::warning('EMAIL DESPACHOS - TO inválido, aplicando fallback', [
@@ -2770,6 +2792,70 @@ class PurchaseOrderController extends Controller
         ]);
 
         return $pdf->output();
+    }
+
+    /**
+     * Devuelve los emails de la(s) ejecutiva(s) asignada(s) al cliente que existen
+     * en la tabla `executives` y están activas. Filtra typos y datos contaminados
+     * de `clients.executive` / `clients.executive_email`.
+     *
+     * Se usa para forzar que la ejecutiva siempre quede en CC en cualquier email
+     * de OC, sin importar lo que el usuario haya quitado del formulario.
+     */
+    private function getEnforcedExecutiveEmails($client): array
+    {
+        if (!$client) {
+            return [];
+        }
+
+        $candidates = [];
+        foreach ([$client->executive ?? null, $client->executive_email ?? null] as $raw) {
+            if (empty($raw)) continue;
+            foreach (explode(',', $raw) as $email) {
+                $email = strtolower(trim($email));
+                if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $candidates[] = $email;
+                }
+            }
+        }
+
+        if (empty($candidates)) {
+            return [];
+        }
+
+        $candidates = array_values(array_unique($candidates));
+
+        return \DB::table('executives')
+            ->whereIn(\DB::raw('LOWER(email)'), $candidates)
+            ->where('is_active', 1)
+            ->pluck('email')
+            ->map(fn($e) => trim($e))
+            ->filter(fn($e) => !empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Mergea los emails de la ejecutiva válida en un array de CC existente,
+     * excluyendo el TO. Se llama en cada flujo de email de OC para garantizar
+     * que la ejecutiva siempre esté copiada.
+     */
+    private function ensureExecutiveInCc(array $ccEmails, $client, ?string $toEmail = null): array
+    {
+        $execEmails = $this->getEnforcedExecutiveEmails($client);
+        if (empty($execEmails)) {
+            return $ccEmails;
+        }
+
+        $merged = array_merge($ccEmails, $execEmails);
+        $toLower = $toEmail ? strtolower(trim($toEmail)) : null;
+
+        return array_values(array_filter(
+            array_unique(array_map('trim', $merged)),
+            fn($e) => !empty($e)
+                && filter_var($e, FILTER_VALIDATE_EMAIL)
+                && (!$toLower || strtolower($e) !== $toLower)
+        ));
     }
 
     /**
