@@ -1589,10 +1589,8 @@ class PurchaseOrderController extends Controller
             // Remover el wrapper <figure class="table"> de CKEditor que puede causar problemas en clientes de correo
             $observationHtml = preg_replace('/<figure[^>]*class="table"[^>]*>(.*?)<\/figure>/s', '$1', $observationHtml);
 
-            // TEMPORAL: Comentado para pruebas - enviar todo el contenido al cliente también
-            // $tablesOnly = $this->extractHtmlTables($observationHtml);
-            $tablesOnly = $observationHtml; // Enviar contenido completo temporalmente
-            
+            // El email al cliente y al equipo interno reciben el mismo contenido (texto + tabla).
+            // La diferencia: el interno además incluye las observaciones internas (solo planta).
             // Usar siempre analista.operaciones@finearom.com como remitente
             $userEmail = 'analista.operaciones@finearom.com';
             
@@ -1703,13 +1701,9 @@ class PurchaseOrderController extends Controller
                 'final_subjectInternal' => $subjectInternal,
             ]);
 
-            // Restaurar extractHtmlTables para enviar solo tablas al cliente
-            $tablesOnly = $this->extractHtmlTables($observationHtml);
-
             \Illuminate\Support\Facades\Log::info('OBSERVACIONES - Contenido completo', [
                 'order_id' => $order->id,
                 'observationHtml_full' => $observationHtml,
-                'tablesOnly_full' => $tablesOnly,
                 'hasInternalObservation' => !empty($internalObservation),
             ]);
 
@@ -1717,11 +1711,10 @@ class PurchaseOrderController extends Controller
                 'order_id' => $order->id,
                 'clientRecipients_count' => count($clientRecipients),
                 'clientRecipients_empty' => empty($clientRecipients),
-                'tablesOnly_empty' => empty($tablesOnly),
-                'sendClientEmail' => !empty($clientRecipients) && !empty($tablesOnly),
+                'observationHtml_empty' => empty($observationHtml),
+                'sendClientEmail' => !empty($clientRecipients) && !empty($observationHtml),
                 'allInternalEmails_count' => count($allInternalEmails),
                 'allInternalEmails_empty' => empty($allInternalEmails),
-                'observationHtml_empty' => empty($observationHtml),
                 'internalObservation_empty' => empty($internalObservation),
                 'sendInternalEmail' => !empty($allInternalEmails) && (!empty($observationHtml) || !empty($internalObservation)),
             ]);
@@ -1733,11 +1726,11 @@ class PurchaseOrderController extends Controller
                 $clientRecipients,
                 fn($e) => !empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)
             ));
-            if (!empty($clientRecipients) && !empty($tablesOnly)) {
+            if (!empty($clientRecipients) && !empty($observationHtml)) {
                 try {
                     $clientBody = view('emails.purchase_order_observation', [
                         'order'           => $order,
-                        'observationHtml' => $tablesOnly, // Solo tablas
+                        'observationHtml' => $observationHtml, // Texto + tabla (igual que el interno)
                         'forClient'       => true,
                     ])->render();
 
@@ -1783,9 +1776,9 @@ class PurchaseOrderController extends Controller
             } else {
                 \Log::info('OBSERVACIONES - Email al cliente NO enviado', [
                     'order_id' => $order->id,
-                    'reason' => empty($clientRecipients) ? 'Sin destinatarios' : 'Sin contenido de tabla',
+                    'reason' => empty($clientRecipients) ? 'Sin destinatarios' : 'Sin contenido de observación',
                     'clientRecipients' => $clientRecipients,
-                    'tablesOnly_length' => strlen($tablesOnly ?? ''),
+                    'observationHtml_length' => strlen($observationHtml ?? ''),
                 ]);
             }
 
@@ -1852,32 +1845,6 @@ class PurchaseOrderController extends Controller
                 'message'  => $e->getMessage(),
             ]);
         }
-    }
-
-    /**
-     * Extrae solo tablas HTML del cuerpo (para correo al cliente).
-     */
-    private function extractHtmlTables(string $html): string
-    {
-        $dom = new \DOMDocument();
-        libxml_use_internal_errors(true);
-        $dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-        libxml_clear_errors();
-
-        $tables = $dom->getElementsByTagName('table');
-        if ($tables->length === 0) {
-            return '';
-        }
-
-        $newDom = new \DOMDocument();
-        $newDom->encoding = 'UTF-8';
-
-        foreach ($tables as $table) {
-            $imported = $newDom->importNode($table, true);
-            $newDom->appendChild($imported);
-        }
-
-        return $newDom->saveHTML() ?: '';
     }
 
     /**
