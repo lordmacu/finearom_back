@@ -33,12 +33,18 @@ class LogSentMessage
             return;
         }
 
-        // Extract recipients
-        $recipients = [];
-        foreach ($message->getTo() as $address) {
-            $recipients[] = $address->getAddress();
-        }
-        $recipientString = implode(', ', $recipients);
+        // Extract recipients (TO, CC, BCC)
+        $extractAddresses = function ($addresses) {
+            $out = [];
+            foreach ($addresses ?? [] as $address) {
+                $out[] = $address->getAddress();
+            }
+            return $out;
+        };
+        $toEmails  = $extractAddresses($message->getTo());
+        $ccEmails  = $extractAddresses($message->getCc());
+        $bccEmails = $extractAddresses($message->getBcc());
+        $recipientString = implode(', ', $toEmails);
 
         // Extract sender
         $from = $message->getFrom();
@@ -46,18 +52,31 @@ class LogSentMessage
 
         // Extract custom headers for context
         $processType = 'system_automatic';
-        $metadata = null;
-        
+        $metadata = [];
+
         $headers = $message->getHeaders();
         if ($headers->has('X-Process-Type')) {
             $processType = $headers->get('X-Process-Type')->getBody();
             $headers->remove('X-Process-Type'); // Clean up
         }
-        
+
         if ($headers->has('X-Metadata')) {
             $metaJson = $headers->get('X-Metadata')->getBody();
-            $metadata = json_decode($metaJson, true);
+            $decoded = json_decode($metaJson, true);
+            if (is_array($decoded)) {
+                $metadata = $decoded;
+            }
             $headers->remove('X-Metadata'); // Clean up
+        }
+
+        // Adjuntar siempre los destinatarios completos en metadata.
+        // Si X-Metadata ya trae cc_emails (caso status_change), no pisar.
+        $metadata['to_emails'] = $toEmails;
+        if (!array_key_exists('cc_emails', $metadata)) {
+            $metadata['cc_emails'] = $ccEmails;
+        }
+        if (!empty($bccEmails)) {
+            $metadata['bcc_emails'] = $bccEmails;
         }
 
         // Log the email
