@@ -65,7 +65,13 @@ class DashboardController extends Controller
                 })
                 ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
                 ->where('po.client_id', $client->id)
-                ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->whereRaw("COALESCE(
+                (SELECT MIN(pt.dispatch_date) FROM partials pt
+                 WHERE pt.order_id = po.id AND pt.product_order_id = pop.id
+                 AND pt.type = 'temporal' AND pt.deleted_at IS NULL),
+                pop.delivery_date,
+                po.dispatch_date
+            ) BETWEEN ? AND ?", [$startDate, $endDate])
                 ->select('pop.id as pop_id',
                     'pop.quantity',
                     DB::raw('CASE
@@ -1485,13 +1491,13 @@ class DashboardController extends Controller
     /**
      * Estadísticas por ejecutiva — versión corregida.
      *
-     * OC (valor planeado):
-     *   Todas las OC *creadas* en el período (order_creation_date).
-     *   TRM: po.trm → trm_daily en fecha creación → 4000
+     * OC / Pendientes (valor planeado y pendiente):
+     *   Filtra por fecha de despacho temporal (COALESCE de partials, delivery_date, dispatch_date).
+     *   TRM: po.trm ≥ 3400 → trm_daily en fecha creación → 4000
      *
      * Despachos (valor real):
      *   Partials tipo 'real' con dispatch_date en el período.
-     *   TRM: partials.trm >= 3400 → trm_daily en fecha despacho → 4000
+     *   TRM: partials.trm ≥ 3400 → trm_daily en fecha despacho → 4000
      *   (mismo criterio que AnalyzeQuery)
      *
      * Ambas queries excluyen muestras (muestra = 0).
@@ -1519,7 +1525,13 @@ class DashboardController extends Controller
             })
             ->join('products as p', 'pop.product_id', '=', 'p.id')
             ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
-            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
+            ->whereRaw("COALESCE(
+                (SELECT MIN(pt.dispatch_date) FROM partials pt
+                 WHERE pt.order_id = po.id AND pt.product_order_id = pop.id
+                 AND pt.type = 'temporal' AND pt.deleted_at IS NULL),
+                pop.delivery_date,
+                po.dispatch_date
+            ) BETWEEN ? AND ?", [$startDate, $endDate])
             ->selectRaw("
                 COALESCE(e.email, '__sin_ejecutiva') as executive_key,
                 COALESCE(e.name, 'Sin ejecutiva') as executive,
