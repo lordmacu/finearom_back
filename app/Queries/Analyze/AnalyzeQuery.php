@@ -73,14 +73,34 @@ class AnalyzeQuery
 
     private function ordersBase(Carbon $from, Carbon $to, string $type, ?string $status): Builder
     {
+        $dispatchDateExpression = $this->temporalDispatchDateExpression();
+
         $query = DB::table('purchase_orders')
             ->join('clients', 'purchase_orders.client_id', '=', 'clients.id')
             ->join('purchase_order_product', 'purchase_orders.id', '=', 'purchase_order_product.purchase_order_id')
             ->join('products', 'purchase_order_product.product_id', '=', 'products.id')
             ->leftJoin('trm_daily', 'purchase_orders.order_creation_date', '=', 'trm_daily.date')
-            ->whereBetween('purchase_orders.order_creation_date', [$from->toDateString(), $to->toDateString()]);
+            ->whereBetween(DB::raw($dispatchDateExpression), [$from->toDateString(), $to->toDateString()]);
 
         return $this->applyStatusFilter($query, $type, $status);
+    }
+
+    private function temporalDispatchDateExpression(
+        string $orderTable = 'purchase_orders',
+        string $orderProductTable = 'purchase_order_product'
+    ): string {
+        return "COALESCE(
+            (
+                SELECT MIN(pt.dispatch_date)
+                FROM partials pt
+                WHERE pt.order_id = {$orderTable}.id
+                  AND pt.product_order_id = {$orderProductTable}.id
+                  AND pt.type = \"temporal\"
+                  AND pt.deleted_at IS NULL
+            ),
+            {$orderProductTable}.delivery_date,
+            {$orderTable}.dispatch_date
+        )";
     }
 
     private function applyStatusFilter(Builder $query, string $type, ?string $status): Builder
@@ -354,13 +374,15 @@ class AnalyzeQuery
         $base = $this->base($from, $to, $type, $status);
 
         if ($type === 'temporal') {
+            $dispatchDateExpression = $this->temporalDispatchDateExpression();
+
             return $base
                 ->where('clients.id', $clientId)
                 ->selectRaw('purchase_orders.order_consecutive as consecutivo')
                 ->selectRaw('products.product_name as product')
                 ->selectRaw('purchase_order_product.id as partial')
                 ->selectRaw('purchase_order_product.quantity as quantity')
-                ->selectRaw('purchase_orders.order_creation_date as date')
+                ->selectRaw("{$dispatchDateExpression} as date")
                 ->selectRaw('(CASE
                     WHEN purchase_order_product.muestra = 1 THEN 0
                     WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
@@ -396,7 +418,8 @@ class AnalyzeQuery
                         END)
                     ) as total
                 ')
-                ->orderBy('purchase_orders.order_creation_date')
+                ->orderByRaw("{$dispatchDateExpression} IS NULL")
+                ->orderByRaw($dispatchDateExpression)
                 ->orderBy('purchase_orders.order_consecutive')
                 ->get();
         }

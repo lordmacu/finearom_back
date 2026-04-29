@@ -26,7 +26,7 @@ Nota: el rol `super-admin` pasa todos los permisos (Gate::before).
   - Si se omite, se incluyen solo los estados compatibles con el `type`.
 - `from` y `to` (opcional): fechas (ej: `2025-12-01`)
   - Para `type=real` filtran `partials.dispatch_date`.
-  - Para `type=temporal` filtran `purchase_orders.order_creation_date`.
+  - Para `type=temporal` filtran la fecha tentativa de despacho: primero `partials.dispatch_date` de parciales temporales creados por Marlon, luego `purchase_order_product.delivery_date` definido al crear la OC, y como fallback `purchase_orders.dispatch_date`.
 - `creation_date` (opcional): formato legacy `YYYY-MM-DD - YYYY-MM-DD`
 - `page` (opcional): default 1
 - `per_page` (opcional): default 10 (max 5000)
@@ -73,7 +73,7 @@ Nota: para `type=real`, los totales salen de parciales reales (`partials`). Para
 `GET /api/analyze/clients/{clientId}/partials`
 
 ### Query params
-Los mismos filtros que el endpoint de clientes (`status`, `type`, `from/to` o `creation_date`). Para `type=real` retorna parciales; para `type=temporal` retorna las líneas de producto de las órdenes pendientes/en proceso con la misma estructura de columnas para reutilizar la vista.
+Los mismos filtros que el endpoint de clientes (`status`, `type`, `from/to` o `creation_date`). Para `type=real` retorna parciales; para `type=temporal` retorna las líneas de producto de las órdenes pendientes/en proceso con la misma estructura de columnas para reutilizar la vista. En temporal, `date` es la fecha tentativa de despacho resuelta con prioridad Marlon → Francy → orden.
 
 ### Respuesta (200)
 ```json

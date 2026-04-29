@@ -37,7 +37,10 @@ class AnalyzeQueryTest extends TestCase
         $partialSql = $query->base($from, $to, 'temporal', 'parcial_status')->toSql();
 
         $this->assertStringContainsString('from `purchase_orders`', $pendingSql);
-        $this->assertStringContainsString('purchase_orders`.`order_creation_date` between', $pendingSql);
+        $this->assertStringContainsString('SELECT MIN(pt.dispatch_date)', $pendingSql);
+        $this->assertStringContainsString('purchase_order_product.delivery_date', $pendingSql);
+        $this->assertStringContainsString('purchase_orders.dispatch_date', $pendingSql);
+        $this->assertStringContainsString('between ? and ?', $pendingSql);
         $this->assertStringNotContainsString('from `partials`', $pendingSql);
         $this->assertStringContainsString('purchase_orders`.`status` = ?', $pendingSql);
         $this->assertStringContainsString('purchase_orders`.`status` = ?', $processingSql);
