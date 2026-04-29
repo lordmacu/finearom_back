@@ -1730,8 +1730,6 @@ class DashboardController extends Controller
             ->unique()
             ->values();
 
-        $totalValueCop = $ocRows->sum('value_cop');
-
         $result = [];
         foreach ($executives as $execKey) {
             $meta          = $executiveMeta[$execKey] ?? null;
@@ -1740,8 +1738,6 @@ class DashboardController extends Controller
             $fulfilled     = $fulfilledRows[$execKey] ?? null;
             $realDisp      = $realDispRows[$execKey] ?? null;
             $forecastRow   = $forecastRows[$execKey] ?? null;
-            $valueCop      = $row ? (float) $row->value_cop : 0.0;
-            $valueUsd      = $row ? (float) $row->value_usd : 0.0;
             $kilos         = $row ? (float) $row->total_kilos : 0.0;
             $pendingOrders = $row ? (int) $row->pending_orders : 0;
             $pendingUsd    = $row ? (float) $row->pending_value_usd : 0.0;
@@ -1750,6 +1746,8 @@ class DashboardController extends Controller
             $dispCop       = $disp ? (float) $disp->dispatched_cop       : 0.0;
             $dispUsd       = $disp ? (float) $disp->dispatched_usd       : 0.0;
             $dispKilos     = $disp ? (float) $disp->dispatched_kilos     : 0.0;
+            $valueUsd      = $dispUsd + $pendingUsd;
+            $valueCop      = $dispCop + $pendingCop;
             $fulfilledCop  = $fulfilled ? (float) $fulfilled->fulfilled_cop   : 0.0;
             $fulfilledKilos= $fulfilled ? (float) $fulfilled->fulfilled_kilos : 0.0;
             $realCop       = $realDisp    ? (float) $realDisp->real_cop        : 0.0;
@@ -1773,11 +1771,16 @@ class DashboardController extends Controller
                 'dispatched_kilos'     => round($dispKilos, 2),
                 'fulfilled_cop'        => round($fulfilledCop, 0),
                 'fulfilled_kilos'      => round($fulfilledKilos, 2),
-                'participation_pct'    => $totalValueCop > 0 ? round($valueCop / $totalValueCop * 100, 1) : 0.0,
                 'compliance_cop_pct'   => $forecastCop   > 0 ? round($realCop   / $forecastCop   * 100, 1) : 0.0,
                 'compliance_kilos_pct' => $forecastKilos > 0 ? round($realKilos / $forecastKilos * 100, 1) : 0.0,
             ];
         }
+
+        $totalValueCop = array_sum(array_column($result, 'value_cop'));
+        foreach ($result as &$item) {
+            $item['participation_pct'] = $totalValueCop > 0 ? round($item['value_cop'] / $totalValueCop * 100, 1) : 0.0;
+        }
+        unset($item);
 
         usort($result, fn($a, $b) => $b['value_cop'] <=> $a['value_cop']);
 
