@@ -2593,9 +2593,7 @@ class PurchaseOrderController extends Controller
                     }
                 });
 
-                // TODO: descomentar cuando se quiera activar el aviso de productos fuera del pronóstico en el email al cliente
-                // $forecastExceedances = $this->buildForecastExceedances($purchaseOrder);
-                $forecastExceedances = [];
+                $forecastExceedances = $this->buildForecastExceedances($purchaseOrder);
 
                 \Mail::to($primaryToEmail)
                     ->cc($ccEmails)
