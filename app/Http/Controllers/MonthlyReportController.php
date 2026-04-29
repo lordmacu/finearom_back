@@ -99,9 +99,9 @@ class MonthlyReportController extends Controller
                   "TRM de hoy ({$today}): \${$trmHoyStr} COP/USD — úsala SOLO para convertir valores de cartera a USD si te lo piden. Las órdenes tienen su propia TRM individual y no deben usar esta.\n\n" .
 
                   "NOTAS CLAVE — lee antes de responder:\n" .
-                  "- 'Total OC' = valor de las órdenes que tuvieron AL MENOS UN despacho real (dispatch_date) en el período — igual al dashboard\n" .
-                  "- 'Despachado / Facturado' = dinero ya enviado al cliente (suma de partials reales del período). 'Pendiente' = Total OC − Facturado\n" .
-                  "- 'Planeado' = OC con fecha de despacho programada dentro del período (subconjunto del total, NO igual al total)\n" .
+                   "- 'Total OC' = Facturado (Siigo) + Pendiente (OCs pending/processing con fecha de despacho en el período). Igual al dashboard.\n" .
+                   "- 'Facturado' = ventas registradas en Siigo en el período (mes). 'Pendiente' = OCs en estado pending/processing cuya fecha de despacho cae en el período. Total OC = Facturado + Pendiente.\n" .
+                   "- 'Fecha de despacho' para OCs pendientes/temporal = COALESCE(MIN(parciales_temporales.dispatch_date), delivery_date, dispatch_date). NUNCA uses order_creation_date para filtrar pendientes.\n" .
                   "- Cumplimiento% puede superar el 100%: es normal porque los despachos del período pueden incluir OC creadas en meses anteriores\n" .
                   "- ESTADÍSTICAS POR EJECUTIVA es la fuente de verdad para preguntas por ejecutiva — NO sumar desde el detalle de órdenes\n" .
                   "- La columna '$/kg USD' en ESTADÍSTICAS POR EJECUTIVA es el precio promedio ponderado por kilo en USD — úsala directamente, NO calcules sumando órdenes del detalle\n" .
@@ -684,8 +684,8 @@ class MonthlyReportController extends Controller
             "- \"Muestra (nivel línea)\" = pop.muestra=1 → solo esa línea es muestra (excluir esa línea de totales)\n" .
             "  → En consultas de valor/kilos SIEMPRE filtrar: AND pop.muestra=0\n" .
             "- \"Órdenes rezagadas\" = po.status='processing' AND order_creation_date <= CURDATE() - 7 días → órdenes que Marlon aprobó pero Alexa aún no despacha\n" .
-            "- \"Planeado del período\" = OCs cuya fecha de despacho estimada cae en el rango. Prioridad de fecha: 1) partial real dispatch_date, 2) partial temporal dispatch_date, 3) order_creation_date + 10 días hábiles como fallback. Este fallback incluye OCs sin ningún partial.\n" .
-            "REGLA: si el usuario dice 'creadas', 'del período', 'de este mes' → usa order_creation_date en purchase_orders.\n" .
+            "- \"Planeado/pendiente del período\" = OCs con fecha de despacho estimada en el rango. Fecha de despacho = COALESCE(MIN(partials_temporal.dispatch_date), pop.delivery_date, po.dispatch_date).\n" .
+            "REGLA: si el usuario dice 'creadas' → usa po.order_creation_date. Si dice 'pendientes', 'planeadas', 'con despacho en', 'del dashboard' → usa COALESCE(MIN(pt.dispatch_date), pop.delivery_date, po.dispatch_date).\n" .
             "Si dice 'despachadas', 'facturadas', 'enviadas' → usa partials.dispatch_date con type='real' AND deleted_at IS NULL.\n\n" .
             "LEAD TIME Y TIPOS DE CLIENTE:\n" .
             "- client_type tiene DOS clasificaciones distintas:\n" .
