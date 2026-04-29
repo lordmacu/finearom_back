@@ -19,8 +19,11 @@ Nota: el rol `super-admin` pasa todos los permisos (Gate::before).
 `GET /api/analyze/clients`
 
 ### Query params
-- `status` (opcional): `completed | pending | processing | parcial_status`
 - `type` (opcional): `real | temporal` (default `real`)
+- `status` (opcional):
+  - Para `type=real`: `completed | parcial_status`
+  - Para `type=temporal`: `pending | processing`
+  - Si se omite, se incluyen solo los estados compatibles con el `type`.
 - `from` y `to` (opcional): fechas (ej: `2025-12-01`)
 - `creation_date` (opcional): formato legacy `YYYY-MM-DD - YYYY-MM-DD`
 - `page` (opcional): default 1

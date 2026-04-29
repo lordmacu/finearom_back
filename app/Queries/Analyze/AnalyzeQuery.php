@@ -55,20 +55,19 @@ class AnalyzeQuery
             ->whereNull('partials.deleted_at')
             ->whereBetween('partials.dispatch_date', [$from->toDateString(), $to->toDateString()]);
 
+        $validByType = [
+            'real' => ['completed', 'parcial_status'],
+            'temporal' => ['pending', 'processing'],
+        ];
+
         if ($status) {
-            if ($status === 'completed') {
-                $query->whereIn('purchase_orders.status', ['parcial_status', 'completed']);
-            } elseif ($status === 'pending') {
-                $query->where('purchase_orders.status', 'pending');
-            } elseif ($status === 'processing') {
-                $query->where('purchase_orders.status', 'processing');
-            } elseif ($status === 'parcial_status') {
-                if ($type === 'temporal') {
-                    $query->where('purchase_orders.status', 'parcial_status');
-                } else {
-                    $query->whereRaw('1 = 0');
-                }
+            if (! in_array($status, $validByType[$type], true)) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->where('purchase_orders.status', $status);
             }
+        } else {
+            $query->whereIn('purchase_orders.status', $validByType[$type]);
         }
 
         return $query;
