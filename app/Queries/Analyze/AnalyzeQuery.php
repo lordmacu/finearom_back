@@ -78,7 +78,7 @@ class AnalyzeQuery
             ->join('purchase_order_product', 'purchase_orders.id', '=', 'purchase_order_product.purchase_order_id')
             ->join('products', 'purchase_order_product.product_id', '=', 'products.id')
             ->leftJoin('trm_daily', 'purchase_orders.order_creation_date', '=', 'trm_daily.date')
-            ->whereBetween('purchase_orders.order_creation_date', [$from->toDateString(), $to->toDateString()]);
+            ->whereRaw("{$this->temporalDispatchDateExpression()} BETWEEN ? AND ?", [$from->toDateString(), $to->toDateString()]);
 
         return $this->applyStatusFilter($query, $type, $status);
     }
