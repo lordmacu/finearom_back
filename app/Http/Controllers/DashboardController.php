@@ -1498,32 +1498,48 @@ class DashboardController extends Controller
      */
     private function calcExecutiveStatsV2(string $startDate, string $endDate): array
     {
+        $activeExecutives = DB::table('executives')
+            ->where('is_active', 1)
+            ->selectRaw('email as executive_key, name as executive, email as executive_email')
+            ->orderBy('name')
+            ->get()
+            ->keyBy('executive_key');
+
         // ── Query 1: OC creadas en el período ────────────────────────────────
-        $ocRows = DB::table('purchase_orders as po')
-            ->join('clients as c', 'po.client_id', '=', 'c.id')
-            ->join('purchase_order_product as pop', 'pop.purchase_order_id', '=', 'po.id')
-            ->join('products as p', 'pop.product_id', '=', 'p.id')
+        $ocRows = DB::table('executives as e')
+            ->leftJoin('clients as c', DB::raw('e.email COLLATE utf8mb4_general_ci'), '=', 'c.executive')
+            ->leftJoin('purchase_orders as po', function ($join) use ($startDate, $endDate) {
+                $join->on('po.client_id', '=', 'c.id')
+                    ->whereBetween('po.order_creation_date', [$startDate, $endDate]);
+            })
+            ->leftJoin('purchase_order_product as pop', function ($join) {
+                $join->on('pop.purchase_order_id', '=', 'po.id')
+                    ->where('pop.muestra', 0);
+            })
+            ->leftJoin('products as p', 'pop.product_id', '=', 'p.id')
             ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
-            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
-            ->where('pop.muestra', 0)
+            ->where('e.is_active', 1)
             ->selectRaw("
-                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                e.email as executive_key,
+                e.name as executive,
+                e.email as executive_email,
                 COUNT(DISTINCT po.id) as total_orders,
-                SUM(pop.quantity) as total_kilos,
-                SUM(
+                COALESCE(SUM(pop.quantity), 0) as total_kilos,
+                COALESCE(SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity
-                ) as value_usd,
-                SUM(
+                ), 0) as value_usd,
+                COALESCE(SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
                     (CASE
                         WHEN po.trm >= 3400 THEN po.trm
                         WHEN td.value IS NOT NULL THEN td.value
                         ELSE 4000
                     END)
-                ) as value_cop
+                ), 0) as value_cop
             ")
-            ->groupBy('c.executive')
-            ->get();
+            ->groupBy('e.id', 'e.name', 'e.email')
+            ->get()
+            ->keyBy('executive_key');
 
         // ── Query 2a: Facturado Siigo TOTAL del mes (tarjeta grande "Órdenes de Compra") ──
         // Este valor coincide con lo que muestra Siigo. Útil para ver actividad del mes.
@@ -1538,16 +1554,22 @@ class DashboardController extends Controller
 
         $dispRows = DB::table('siigo_sales as s')
             ->leftJoin('clients as c', DB::raw('c.nit COLLATE utf8mb4_unicode_ci'), '=', DB::raw('s.nit COLLATE utf8mb4_unicode_ci'))
+            ->leftJoin('executives as e', function ($join) {
+                $join->on(DB::raw('e.email COLLATE utf8mb4_general_ci'), '=', 'c.executive')
+                    ->where('e.is_active', 1);
+            })
             ->whereBetween('s.mes', [$fromMes, $toMes])
             ->selectRaw("
-                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COALESCE(e.email, '__sin_ejecutiva') as executive_key,
+                COALESCE(e.name, 'Sin ejecutiva') as executive,
+                e.email as executive_email,
                 SUM(s.cantidad) as dispatched_kilos,
                 SUM(s.valor) / {$avgTrmSiigo} as dispatched_usd,
                 SUM(s.valor) as dispatched_cop
             ")
-            ->groupBy('c.executive')
+            ->groupByRaw("COALESCE(e.email, '__sin_ejecutiva'), COALESCE(e.name, 'Sin ejecutiva'), e.email")
             ->get()
-            ->keyBy('executive');
+            ->keyBy('executive_key');
 
         // ── Query 2b: Facturado de OCs creadas en el período (para % Cumplimiento real) ─
         // Matching robusto: NIT cliente + código producto + cantidad exacta + siigo.mes ≥ mes de la OC.
@@ -1555,11 +1577,14 @@ class DashboardController extends Controller
         $fromMesForFulfilled = Carbon::parse($startDate)->format('Y-m');
         $fulfilledSql = "
             SELECT
-                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COALESCE(e.email, '__sin_ejecutiva') as executive_key,
+                COALESCE(e.name, 'Sin ejecutiva') as executive,
+                e.email as executive_email,
                 SUM(s.valor) as fulfilled_cop,
                 SUM(s.cantidad) as fulfilled_kilos
             FROM siigo_sales s
             JOIN clients c ON c.nit COLLATE utf8mb4_unicode_ci = s.nit COLLATE utf8mb4_unicode_ci
+            LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1
             WHERE s.mes >= ?
               AND EXISTS (
                 SELECT 1
@@ -1573,15 +1598,19 @@ class DashboardController extends Controller
                   AND pop.muestra = 0
                   AND DATE_FORMAT(po.order_creation_date, '%Y-%m') <= s.mes
               )
-            GROUP BY c.executive
+            GROUP BY COALESCE(e.email, '__sin_ejecutiva'), COALESCE(e.name, 'Sin ejecutiva'), e.email
         ";
         $fulfilledRaw = DB::select($fulfilledSql, [$fromMesForFulfilled, $startDate, $endDate]);
-        $fulfilledRows = collect($fulfilledRaw)->keyBy('executive');
+        $fulfilledRows = collect($fulfilledRaw)->keyBy('executive_key');
 
         // ── Query 3: Despachado real (partials type='real') — exclusivo para % Cumpl. ──
         $realDispRows = DB::table('partials as pt')
             ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
             ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->leftJoin('executives as e', function ($join) {
+                $join->on(DB::raw('e.email COLLATE utf8mb4_general_ci'), '=', 'c.executive')
+                    ->where('e.is_active', 1);
+            })
             ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
             ->join('products as p', 'pop.product_id', '=', 'p.id')
             ->leftJoin('trm_daily as td', 'pt.dispatch_date', '=', 'td.date')
@@ -1590,7 +1619,9 @@ class DashboardController extends Controller
             ->where('pop.muestra', 0)
             ->whereBetween('pt.dispatch_date', [$startDate, $endDate])
             ->selectRaw("
-                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COALESCE(e.email, '__sin_ejecutiva') as executive_key,
+                COALESCE(e.name, 'Sin ejecutiva') as executive,
+                e.email as executive_email,
                 SUM(pt.quantity) as real_kilos,
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
@@ -1603,9 +1634,9 @@ class DashboardController extends Controller
                     END)
                 ) as real_cop
             ")
-            ->groupBy('c.executive')
+            ->groupByRaw("COALESCE(e.email, '__sin_ejecutiva'), COALESCE(e.name, 'Sin ejecutiva'), e.email")
             ->get()
-            ->keyBy('executive');
+            ->keyBy('executive_key');
 
         // ── Query 4: Pronóstico manual (sales_forecasts) — exclusivo para % Cumpl. ──
         $mesesMap = [
@@ -1624,33 +1655,59 @@ class DashboardController extends Controller
         $forecastWhere = implode(' OR ', $forecastConditions);
         $forecastSql = "
             SELECT
-                COALESCE(NULLIF(c.executive, ''), 'Sin ejecutiva') as executive,
+                COALESCE(e.email, '__sin_ejecutiva') as executive_key,
+                COALESCE(e.name, 'Sin ejecutiva') as executive,
+                e.email as executive_email,
                 SUM(sf.cantidad_forecast * COALESCE(p.price, 0) * {$avgTrmSiigo}) as forecast_cop,
                 SUM(sf.cantidad_forecast) as forecast_kilos
             FROM sales_forecasts sf
             LEFT JOIN clients c ON c.nit COLLATE utf8mb4_unicode_ci = sf.nit COLLATE utf8mb4_unicode_ci
+            LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1
             LEFT JOIN (
                 SELECT MIN(id) as id, code FROM products
                 WHERE code IS NOT NULL AND code != '' GROUP BY code
             ) pu ON pu.code COLLATE utf8mb4_unicode_ci = sf.codigo COLLATE utf8mb4_unicode_ci
             LEFT JOIN products p ON p.id = pu.id
             WHERE sf.modelo = 'manual' AND ({$forecastWhere})
-            GROUP BY c.executive
+            GROUP BY COALESCE(e.email, '__sin_ejecutiva'), COALESCE(e.name, 'Sin ejecutiva'), e.email
         ";
-        $forecastRows = collect(DB::select($forecastSql, $forecastParams))->keyBy('executive');
+        $forecastRows = collect(DB::select($forecastSql, $forecastParams))->keyBy('executive_key');
+
+        $executiveMeta = $activeExecutives;
+        foreach ([$ocRows, $dispRows, $fulfilledRows, $realDispRows, $forecastRows] as $rows) {
+            foreach ($rows as $key => $row) {
+                if (! $executiveMeta->has($key)) {
+                    $executiveMeta->put($key, (object) [
+                        'executive_key' => $key,
+                        'executive' => $row->executive ?? ($key === '__sin_ejecutiva' ? 'Sin ejecutiva' : $key),
+                        'executive_email' => $row->executive_email ?? null,
+                    ]);
+                }
+            }
+        }
+
+        $executives = $executiveMeta->keys()
+            ->merge($ocRows->keys())
+            ->merge($dispRows->keys())
+            ->merge($fulfilledRows->keys())
+            ->merge($realDispRows->keys())
+            ->merge($forecastRows->keys())
+            ->unique()
+            ->values();
 
         $totalValueCop = $ocRows->sum('value_cop');
 
         $result = [];
-        foreach ($ocRows as $row) {
-            $exec          = $row->executive;
-            $disp          = $dispRows[$exec] ?? null;
-            $fulfilled     = $fulfilledRows[$exec] ?? null;
-            $realDisp      = $realDispRows[$exec] ?? null;
-            $forecastRow   = $forecastRows[$exec] ?? null;
-            $valueCop      = (float) $row->value_cop;
-            $valueUsd      = (float) $row->value_usd;
-            $kilos         = (float) $row->total_kilos;
+        foreach ($executives as $execKey) {
+            $meta          = $executiveMeta[$execKey] ?? null;
+            $row           = $ocRows[$execKey] ?? null;
+            $disp          = $dispRows[$execKey] ?? null;
+            $fulfilled     = $fulfilledRows[$execKey] ?? null;
+            $realDisp      = $realDispRows[$execKey] ?? null;
+            $forecastRow   = $forecastRows[$execKey] ?? null;
+            $valueCop      = $row ? (float) $row->value_cop : 0.0;
+            $valueUsd      = $row ? (float) $row->value_usd : 0.0;
+            $kilos         = $row ? (float) $row->total_kilos : 0.0;
             $dispCop       = $disp ? (float) $disp->dispatched_cop       : 0.0;
             $dispUsd       = $disp ? (float) $disp->dispatched_usd       : 0.0;
             $dispKilos     = $disp ? (float) $disp->dispatched_kilos     : 0.0;
@@ -1662,8 +1719,9 @@ class DashboardController extends Controller
             $forecastKilos = $forecastRow ? (float) $forecastRow->forecast_kilos : 0.0;
 
             $result[] = [
-                'executive'            => $exec,
-                'total_orders'         => (int) $row->total_orders,
+                'executive'            => $meta->executive ?? ($execKey === '__sin_ejecutiva' ? 'Sin ejecutiva' : $execKey),
+                'executive_email'      => $meta->executive_email ?? null,
+                'total_orders'         => $row ? (int) $row->total_orders : 0,
                 'value_usd'            => round($valueUsd, 2),
                 'value_cop'            => round($valueCop, 0),
                 'total_kilos'          => round($kilos, 2),
