@@ -176,7 +176,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Analyze (clientes / parciales)
     Route::get('/analyze/clients', [AnalyzeController::class, 'clients']);
-    Route::post('/analyze/clients/clear-cache', [AnalyzeController::class, 'clearAnalyzeCache']);
     Route::get('/analyze/clients/{clientId}/partials', [AnalyzeController::class, 'clientPartials']);
     Route::put('/analyze/partials/{partialId}', [AnalyzeController::class, 'updatePartial']);
     Route::delete('/analyze/partials/{partialId}', [AnalyzeController::class, 'deletePartial']);
