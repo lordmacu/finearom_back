@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ChatSession;
 use App\Models\PurchaseOrder;
+use App\Services\DashboardChatDeterministicResponseService;
 use App\Services\DhlService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -339,6 +340,23 @@ class MonthlyReportController extends Controller
 
 
         $model = $request->get('model', 'gpt-4.1');
+
+        $deterministicContent = app(DashboardChatDeterministicResponseService::class)
+            ->build($request->message, $periodStart, $periodEnd);
+
+        if ($deterministicContent !== null) {
+            $this->appendChatSessionMessages($session, $request->message, $deterministicContent);
+
+            if (str_starts_with($model, 'deepseek') || str_contains($request->header('Accept', ''), 'text/event-stream')) {
+                return $this->streamChatContent($deterministicContent);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $this->parseStructuredResponse($deterministicContent),
+                'thread_id' => $request->thread_id,
+            ]);
+        }
 
         if ($limitResponse = $this->checkAndIncrementModelLimit($model)) {
             return $limitResponse;
@@ -739,9 +757,14 @@ class MonthlyReportController extends Controller
             "- Columnas: nit (VARCHAR), codigo (VARCHAR, = products.code), modelo (xgboost|theta|croston|holt_winters|manual), año (VARCHAR 4 chars), mes (VARCHAR español MAYÚSCULAS: 'ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'), cantidad_forecast (BIGINT kilos), lower_bound, upper_bound, confianza (enum alta|media|baja), generated_at.\n" .
             "- Una fila = un pronóstico de kilos por cliente + producto + año + mes + modelo.\n" .
             "- ⚠ REGLA: cuando el usuario pregunta 'pronosticado', 'presupuesto', 'plan', 'lo que se esperaba vender' SIN mencionar modelo, usa SIEMPRE modelo='manual' (es el presupuesto que carga el equipo comercial). Otros modelos (xgboost, theta, croston, holt_winters) son predicciones estadísticas — solo úsalas si el usuario las pide por nombre.\n" .
-            "- ⚠ COLLATION: products.code es utf8mb4_general_ci y sales_forecasts.codigo es utf8mb4_unicode_ci. Al unirlos usa: ON p.code COLLATE utf8mb4_unicode_ci = sf.codigo. clients.nit = sales_forecasts.nit NO requiere COLLATE (ambos unicode_ci).\n" .
+            "- ⚠ COLLATION Y DUPLICADOS: products.code es utf8mb4_general_ci y sales_forecasts.codigo es utf8mb4_unicode_ci. products.code NO es único globalmente: el mismo código puede existir para varios clientes y a veces duplicado dentro del mismo cliente. NUNCA unas forecasts con products usando solo p.code = sf.codigo porque duplica kilos y valores.\n" .
+            "  → Join mínimo correcto: JOIN clients c ON c.nit = sf.nit y luego JOIN products p ON p.client_id = c.id AND p.code COLLATE utf8mb4_unicode_ci = sf.codigo.\n" .
+            "  → Si el query calcula valores agregados, usa CTE product_ranked con ROW_NUMBER() PARTITION BY p.client_id,p.code y rn=1 para asegurar UNA fila de precio por cliente+código antes de sumar.\n" .
+            "  → clients.nit = sales_forecasts.nit NO requiere COLLATE (ambos unicode_ci).\n" .
             "- ⚠ AÑO: sf.año es VARCHAR. Comparar con literal entre comillas ('2026') o con CAST: CAST(sf.año AS UNSIGNED) = 2026. Para cruzar con YEAR(par.dispatch_date): sf.año = CAST(YEAR(par.dispatch_date) AS CHAR).\n" .
             "- ⚠ MES: sf.mes es VARCHAR español. Para cruzar con MONTH(par.dispatch_date) usa FIELD: MONTH(par.dispatch_date) = FIELD(sf.mes,'ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE')\n" .
+            "- ⚠ INTENCIÓN 'total pronosticado por cliente' / 'total del presupuesto por cliente': AGRUPA SOLO por c.client_name,c.nit. NO incluyas referencia/producto/código en SELECT ni GROUP BY salvo que el usuario pida explícitamente 'por referencia', 'por producto', 'por código' o 'desglose'.\n" .
+            "- ⚠ Si piden 'en pesos', 'COP' o 'valor en pesos' para forecasts: calcula valor_usd = SUM(cantidad_forecast * precio) y valor_cop = valor_usd * TRM más reciente: COALESCE((SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000). Los forecasts no tienen TRM propia.\n" .
             "- PATRÓN RECOMENDADO (real vs pronóstico por producto y año):\n" .
             "  WITH reales AS (\n" .
             "    SELECT c.nit, p.code AS codigo, YEAR(par.dispatch_date) AS anio, SUM(par.quantity) AS kilos_reales\n" .
@@ -760,7 +783,7 @@ class MonthlyReportController extends Controller
             "         ROUND(COALESCE(r.kilos_reales,0) / NULLIF(SUM(sf.cantidad_forecast),0) * 100, 2) AS cumplimiento_pct\n" .
             "  FROM sales_forecasts sf\n" .
             "  JOIN clients c ON c.nit = sf.nit\n" .
-            "  JOIN products p ON p.code COLLATE utf8mb4_unicode_ci = sf.codigo\n" .
+            "  JOIN products p ON p.client_id = c.id AND p.code COLLATE utf8mb4_unicode_ci = sf.codigo\n" .
             "  LEFT JOIN reales r ON r.nit = sf.nit AND r.codigo COLLATE utf8mb4_unicode_ci = sf.codigo AND CAST(r.anio AS CHAR) = sf.año\n" .
             "  WHERE sf.modelo = 'manual'\n" .
             "  GROUP BY sf.año, c.client_name, sf.codigo, p.product_name, r.kilos_reales\n" .
@@ -1143,6 +1166,39 @@ class MonthlyReportController extends Controller
         }
 
         return $content;
+    }
+
+    private function appendChatSessionMessages(?ChatSession $session, string $userMessage, string $assistantContent): void
+    {
+        if (! $session) {
+            return;
+        }
+
+        $now = now()->toDateTimeString();
+        $messages = $session->messages ?? [];
+        $messages[] = ['role' => 'user', 'content' => $userMessage, 'time' => $now];
+        $messages[] = ['role' => 'assistant', 'content' => $assistantContent, 'time' => $now];
+        $session->update(['messages' => $messages]);
+    }
+
+    private function streamChatContent(string $content): StreamedResponse
+    {
+        return response()->stream(function () use ($content) {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            echo 'data: ' . json_encode(['token' => $content]) . "\n\n";
+            flush();
+
+            echo 'data: ' . json_encode(['done' => true, 'content' => $content]) . "\n\n";
+            flush();
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache',
+            'X-Accel-Buffering' => 'no',
+            'Connection' => 'keep-alive',
+        ]);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
