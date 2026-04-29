@@ -20,6 +20,11 @@ class TrmDailyWarmup
         ?string $status,
         ?int $clientId = null
     ): void {
+        if ($type === 'temporal') {
+            $this->warmTemporalOrdersForAnalyze($from, $to, $status, $clientId);
+            return;
+        }
+
         $query = DB::table('partials')
             ->join('purchase_orders', 'partials.order_id', '=', 'purchase_orders.id')
             ->join('clients', 'purchase_orders.client_id', '=', 'clients.id')
@@ -74,5 +79,56 @@ class TrmDailyWarmup
             }
         }
     }
-}
 
+    private function warmTemporalOrdersForAnalyze(
+        Carbon $from,
+        Carbon $to,
+        ?string $status,
+        ?int $clientId = null
+    ): void {
+        $query = DB::table('purchase_orders')
+            ->join('clients', 'purchase_orders.client_id', '=', 'clients.id')
+            ->leftJoin('trm_daily', 'purchase_orders.order_creation_date', '=', 'trm_daily.date')
+            ->whereBetween('purchase_orders.order_creation_date', [$from->toDateString(), $to->toDateString()])
+            ->whereNull('trm_daily.date');
+
+        if ($clientId) {
+            $query->where('clients.id', $clientId);
+        }
+
+        if ($status) {
+            if (in_array($status, ['pending', 'processing'], true)) {
+                $query->where('purchase_orders.status', $status);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } else {
+            $query->whereIn('purchase_orders.status', ['pending', 'processing']);
+        }
+
+        $missingDates = $query
+            ->distinct()
+            ->orderBy('purchase_orders.order_creation_date')
+            ->pluck('purchase_orders.order_creation_date')
+            ->map(fn ($d) => Carbon::parse($d)->toDateString())
+            ->values();
+
+        foreach ($missingDates as $date) {
+            try {
+                $result = $this->soapClient->fetch($date);
+                TrmDaily::updateOrCreate(
+                    ['date' => $date],
+                    [
+                        'value' => $result['value'],
+                        'source' => 'soap',
+                        'metadata' => $result,
+                        'is_weekend' => false,
+                        'is_holiday' => false,
+                    ]
+                );
+            } catch (\Throwable $e) {
+                Log::warning('TRM warmup failed for date ' . $date . ': ' . $e->getMessage());
+            }
+        }
+    }
+}

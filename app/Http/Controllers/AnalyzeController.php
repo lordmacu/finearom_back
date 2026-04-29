@@ -74,7 +74,7 @@ class AnalyzeController extends Controller
                     'totals' => [
                         'total_cop' => (float) ($totals->total_cop ?? 0),
                         'total_usd' => (float) ($totals->total_usd ?? 0),
-                        'total_cop_siigo' => $this->analyzeQuery->totalSiigo($from, $to),
+                        'total_cop_siigo' => $type === 'temporal' ? 0 : $this->analyzeQuery->totalSiigo($from, $to),
                     ],
                 ];
             }
@@ -96,7 +96,7 @@ class AnalyzeController extends Controller
                 'totals' => [
                     'total_cop' => (float) ($totals->total_cop ?? 0),
                     'total_usd' => (float) ($totals->total_usd ?? 0),
-                    'total_cop_siigo' => $this->analyzeQuery->totalSiigo($from, $to),
+                    'total_cop_siigo' => $type === 'temporal' ? 0 : $this->analyzeQuery->totalSiigo($from, $to),
                 ],
             ];
         });
@@ -209,6 +209,7 @@ class AnalyzeController extends Controller
     private function generateAnalyzeClientsCacheKey($from, $to, $type, $status, $paginate, $perPage, $page): string
     {
         $params = [
+            'version' => 2,
             'from' => $from->toDateString(),
             'to' => $to->toDateString(),
             'type' => $type,

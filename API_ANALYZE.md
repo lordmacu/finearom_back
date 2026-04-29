@@ -25,6 +25,8 @@ Nota: el rol `super-admin` pasa todos los permisos (Gate::before).
   - Para `type=temporal`: `pending | processing`
   - Si se omite, se incluyen solo los estados compatibles con el `type`.
 - `from` y `to` (opcional): fechas (ej: `2025-12-01`)
+  - Para `type=real` filtran `partials.dispatch_date`.
+  - Para `type=temporal` filtran `purchase_orders.order_creation_date`.
 - `creation_date` (opcional): formato legacy `YYYY-MM-DD - YYYY-MM-DD`
 - `page` (opcional): default 1
 - `per_page` (opcional): default 10 (max 5000)
@@ -62,7 +64,7 @@ Nota: el rol `super-admin` pasa todos los permisos (Gate::before).
 }
 ```
 
-Nota: `total_cop_siigo` en `data` es la suma de `siigo_sales.valor` para el NIT del cliente en el rango de meses. En `totals` es la suma global de todos los clientes.
+Nota: para `type=real`, los totales salen de parciales reales (`partials`). Para `type=temporal`, los totales salen de las órdenes pendientes/en proceso y sus líneas (`purchase_orders` + `purchase_order_product`), no de parciales temporales. `total_cop_siigo` en `data` es la suma de `siigo_sales.valor` para el NIT del cliente en el rango de meses. En `totals` es la suma global de todos los clientes.
 
 ---
 
@@ -71,7 +73,7 @@ Nota: `total_cop_siigo` en `data` es la suma de `siigo_sales.valor` para el NIT 
 `GET /api/analyze/clients/{clientId}/partials`
 
 ### Query params
-Los mismos filtros que el endpoint de clientes (`status`, `type`, `from/to` o `creation_date`).
+Los mismos filtros que el endpoint de clientes (`status`, `type`, `from/to` o `creation_date`). Para `type=real` retorna parciales; para `type=temporal` retorna las líneas de producto de las órdenes pendientes/en proceso con la misma estructura de columnas para reutilizar la vista.
 
 ### Respuesta (200)
 ```json

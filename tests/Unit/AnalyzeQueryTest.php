@@ -25,7 +25,7 @@ class AnalyzeQueryTest extends TestCase
         $this->assertStringContainsString('1 = 0', $pendingSql);
     }
 
-    public function test_temporal_partials_allow_pending_and_processing_only(): void
+    public function test_temporal_orders_allow_pending_and_processing_only(): void
     {
         $query = new AnalyzeQuery();
         $from = Carbon::parse('2026-04-01');
@@ -36,6 +36,9 @@ class AnalyzeQueryTest extends TestCase
         $allSql = $query->base($from, $to, 'temporal', null)->toSql();
         $partialSql = $query->base($from, $to, 'temporal', 'parcial_status')->toSql();
 
+        $this->assertStringContainsString('from `purchase_orders`', $pendingSql);
+        $this->assertStringContainsString('purchase_orders`.`order_creation_date` between', $pendingSql);
+        $this->assertStringNotContainsString('from `partials`', $pendingSql);
         $this->assertStringContainsString('purchase_orders`.`status` = ?', $pendingSql);
         $this->assertStringContainsString('purchase_orders`.`status` = ?', $processingSql);
         $this->assertStringContainsString('purchase_orders`.`status` in (?, ?)', $allSql);
