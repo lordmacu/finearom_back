@@ -12,7 +12,7 @@ class AnalyzeQuery
 {
     private const VALID_STATUSES_BY_TYPE = [
         'real' => ['completed', 'parcial_status'],
-        'temporal' => ['pending', 'processing'],
+        'temporal' => ['pending', 'processing', 'parcial_status'],
     ];
 
     public function resolveDateRange(array $validated): array
@@ -78,7 +78,17 @@ class AnalyzeQuery
             ->join('purchase_order_product', 'purchase_orders.id', '=', 'purchase_order_product.purchase_order_id')
             ->join('products', 'purchase_order_product.product_id', '=', 'products.id')
             ->leftJoin('trm_daily', 'purchase_orders.order_creation_date', '=', 'trm_daily.date')
-            ->whereRaw("{$this->temporalDispatchDateExpression()} BETWEEN ? AND ?", [$from->toDateString(), $to->toDateString()]);
+            ->whereRaw("{$this->temporalDispatchDateExpression()} BETWEEN ? AND ?", [$from->toDateString(), $to->toDateString()])
+            ->whereRaw("
+                purchase_orders.status != 'parcial_status'
+                OR EXISTS (
+                    SELECT 1 FROM partials pt
+                    WHERE pt.order_id = purchase_orders.id
+                      AND pt.product_order_id = purchase_order_product.id
+                      AND pt.type = 'temporal'
+                      AND pt.deleted_at IS NULL
+                )
+            ");
 
         return $this->applyStatusFilter($query, $type, $status);
     }
