@@ -81,12 +81,21 @@ class AnalyzeQuery
             ->whereRaw("{$this->temporalDispatchDateExpression()} BETWEEN ? AND ?", [$from->toDateString(), $to->toDateString()])
             ->whereRaw("
                 purchase_orders.status != 'parcial_status'
-                OR EXISTS (
-                    SELECT 1 FROM partials pt
-                    WHERE pt.order_id = purchase_orders.id
-                      AND pt.product_order_id = purchase_order_product.id
-                      AND pt.type = 'temporal'
-                      AND pt.deleted_at IS NULL
+                OR (
+                    EXISTS (
+                        SELECT 1 FROM partials pt
+                        WHERE pt.order_id = purchase_orders.id
+                          AND pt.product_order_id = purchase_order_product.id
+                          AND pt.type = 'temporal'
+                          AND pt.deleted_at IS NULL
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM partials pt
+                        WHERE pt.order_id = purchase_orders.id
+                          AND pt.product_order_id = purchase_order_product.id
+                          AND pt.type = 'real'
+                          AND pt.deleted_at IS NULL
+                    )
                 )
             ");
 
