@@ -44,4 +44,18 @@ class AnalyzeQueryTest extends TestCase
         $this->assertStringContainsString('purchase_orders`.`status` in (?, ?)', $allSql);
         $this->assertStringContainsString('1 = 0', $partialSql);
     }
+
+    public function test_temporal_client_partials_date_uses_operational_dispatch_date(): void
+    {
+        $query = new AnalyzeQuery();
+
+        $sql = (function () {
+            return $this->temporalDispatchDateExpression();
+        })->call($query);
+
+        $this->assertStringContainsString('MIN(pt.dispatch_date)', $sql);
+        $this->assertStringContainsString('pt.type = \'temporal\'', $sql);
+        $this->assertStringContainsString('purchase_order_product.delivery_date', $sql);
+        $this->assertStringNotContainsString('purchase_orders.order_creation_date', $sql);
+    }
 }

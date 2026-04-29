@@ -83,6 +83,24 @@ class AnalyzeQuery
         return $this->applyStatusFilter($query, $type, $status);
     }
 
+    private function temporalDispatchDateExpression(
+        string $orderTable = 'purchase_orders',
+        string $orderProductTable = 'purchase_order_product'
+    ): string {
+        return "COALESCE(
+            (
+                SELECT MIN(pt.dispatch_date)
+                FROM partials pt
+                WHERE pt.order_id = {$orderTable}.id
+                  AND pt.product_order_id = {$orderProductTable}.id
+                  AND pt.type = 'temporal'
+                  AND pt.deleted_at IS NULL
+            ),
+            {$orderProductTable}.delivery_date,
+            {$orderTable}.dispatch_date
+        )";
+    }
+
     private function applyStatusFilter(Builder $query, string $type, ?string $status): Builder
     {
         $validStatuses = self::VALID_STATUSES_BY_TYPE[$type] ?? [];
@@ -354,13 +372,15 @@ class AnalyzeQuery
         $base = $this->base($from, $to, $type, $status);
 
         if ($type === 'temporal') {
+            $dispatchDateExpression = $this->temporalDispatchDateExpression();
+
             return $base
                 ->where('clients.id', $clientId)
                 ->selectRaw('purchase_orders.order_consecutive as consecutivo')
                 ->selectRaw('products.product_name as product')
                 ->selectRaw('purchase_order_product.id as partial')
                 ->selectRaw('purchase_order_product.quantity as quantity')
-                ->selectRaw('purchase_orders.order_creation_date as date')
+                ->selectRaw("{$dispatchDateExpression} as date")
                 ->selectRaw('(CASE
                     WHEN purchase_order_product.muestra = 1 THEN 0
                     WHEN purchase_order_product.price > 0 THEN purchase_order_product.price
@@ -396,7 +416,8 @@ class AnalyzeQuery
                         END)
                     ) as total
                 ')
-                ->orderBy('purchase_orders.order_creation_date')
+                ->orderByRaw("{$dispatchDateExpression} IS NULL")
+                ->orderByRaw($dispatchDateExpression)
                 ->orderBy('purchase_orders.order_consecutive')
                 ->get();
         }

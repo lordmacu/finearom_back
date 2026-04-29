@@ -73,7 +73,7 @@ Nota: para `type=real`, los totales salen de parciales reales (`partials`). Para
 `GET /api/analyze/clients/{clientId}/partials`
 
 ### Query params
-Los mismos filtros que el endpoint de clientes (`status`, `type`, `from/to` o `creation_date`). Para `type=real` retorna parciales; para `type=temporal` retorna las líneas de producto de las órdenes pendientes/en proceso con la misma estructura de columnas para reutilizar la vista.
+Los mismos filtros que el endpoint de clientes (`status`, `type`, `from/to` o `creation_date`). Para `type=real` retorna parciales; para `type=temporal` retorna las líneas de producto de las órdenes pendientes/en proceso con la misma estructura de columnas para reutilizar la vista. En temporal, `date` es la fecha de despacho operativa: primero la fecha temporal de Marlon (`partials.dispatch_date`), luego la fecha inicial de Francy (`purchase_order_product.delivery_date`).
 
 ### Respuesta (200)
 ```json
