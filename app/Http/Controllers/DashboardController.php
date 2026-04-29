@@ -1482,32 +1482,12 @@ class DashboardController extends Controller
         }
     }
 
-    private function temporalDispatchDateExpression(string $orderAlias = 'po', string $orderProductAlias = 'pop'): string
-    {
-        return "COALESCE(
-            (
-                SELECT MIN(pt_temporal.dispatch_date)
-                FROM partials pt_temporal
-                WHERE pt_temporal.order_id = {$orderAlias}.id
-                  AND pt_temporal.product_order_id = {$orderProductAlias}.id
-                  AND pt_temporal.type = 'temporal'
-                  AND pt_temporal.deleted_at IS NULL
-            ),
-            {$orderProductAlias}.delivery_date,
-            {$orderAlias}.dispatch_date
-        )";
-    }
-
     /**
      * Estadísticas por ejecutiva — versión corregida.
      *
      * OC (valor planeado):
      *   Todas las OC *creadas* en el período (order_creation_date).
      *   TRM: po.trm → trm_daily en fecha creación → 4000
-     *
-     * Pendiente operativo:
-     *   OC en pending/processing con fecha tentativa de despacho en el período.
-     *   Fecha tentativa: parcial temporal de Marlon → delivery_date de Francy → po.dispatch_date.
      *
      * Despachos (valor real):
      *   Partials tipo 'real' con dispatch_date en el período.
@@ -1558,42 +1538,27 @@ class DashboardController extends Controller
                     END)
                 ), 0) as value_cop
             ")
-            ->groupByRaw("COALESCE(e.email, '__sin_ejecutiva'), COALESCE(e.name, 'Sin ejecutiva'), e.email")
-            ->get()
-            ->keyBy('executive_key');
-
-        $pendingDateExpression = $this->temporalDispatchDateExpression('po', 'pop');
-        $pendingRows = DB::table('purchase_orders as po')
-            ->join('clients as c', 'po.client_id', '=', 'c.id')
-            ->leftJoin('executives as e', function ($join) {
-                $join->on(DB::raw('e.email COLLATE utf8mb4_general_ci'), '=', 'c.executive')
-                    ->where('e.is_active', 1);
-            })
-            ->join('purchase_order_product as pop', function ($join) {
-                $join->on('pop.purchase_order_id', '=', 'po.id')
-                    ->where('pop.muestra', 0);
-            })
-            ->join('products as p', 'pop.product_id', '=', 'p.id')
-            ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
-            ->whereIn('po.status', ['pending', 'processing'])
-            ->whereBetween(DB::raw($pendingDateExpression), [$startDate, $endDate])
             ->selectRaw("
-                COALESCE(e.email, '__sin_ejecutiva') as executive_key,
-                COALESCE(e.name, 'Sin ejecutiva') as executive,
-                e.email as executive_email,
-                COUNT(DISTINCT po.id) as pending_orders,
-                COALESCE(SUM(pop.quantity), 0) as pending_kilos,
-                COALESCE(SUM(
-                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity
-                ), 0) as pending_value_usd,
-                COALESCE(SUM(
-                    (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
-                    (CASE
-                        WHEN po.trm >= 3400 THEN po.trm
-                        WHEN td.value IS NOT NULL THEN td.value
-                        ELSE 4000
-                    END)
-                ), 0) as pending_value_cop
+                COUNT(DISTINCT CASE WHEN po.status IN ('pending', 'processing') THEN po.id END) as pending_orders,
+                COALESCE(SUM(CASE
+                    WHEN po.status IN ('pending', 'processing') THEN pop.quantity
+                    ELSE 0
+                END), 0) as pending_kilos,
+                COALESCE(SUM(CASE
+                    WHEN po.status IN ('pending', 'processing')
+                        THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity
+                    ELSE 0
+                END), 0) as pending_value_usd,
+                COALESCE(SUM(CASE
+                    WHEN po.status IN ('pending', 'processing')
+                        THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
+                            (CASE
+                                WHEN po.trm >= 3400 THEN po.trm
+                                WHEN td.value IS NOT NULL THEN td.value
+                                ELSE 4000
+                            END)
+                    ELSE 0
+                END), 0) as pending_value_cop
             ")
             ->groupByRaw("COALESCE(e.email, '__sin_ejecutiva'), COALESCE(e.name, 'Sin ejecutiva'), e.email")
             ->get()
@@ -1732,7 +1697,7 @@ class DashboardController extends Controller
         $forecastRows = collect(DB::select($forecastSql, $forecastParams))->keyBy('executive_key');
 
         $executiveMeta = $activeExecutives;
-        foreach ([$ocRows, $pendingRows, $dispRows, $fulfilledRows, $realDispRows, $forecastRows] as $rows) {
+        foreach ([$ocRows, $dispRows, $fulfilledRows, $realDispRows, $forecastRows] as $rows) {
             foreach ($rows as $key => $row) {
                 if (! $executiveMeta->has($key)) {
                     $executiveMeta->put($key, (object) [
@@ -1746,7 +1711,6 @@ class DashboardController extends Controller
 
         $executives = $executiveMeta->keys()
             ->merge($ocRows->keys())
-            ->merge($pendingRows->keys())
             ->merge($dispRows->keys())
             ->merge($fulfilledRows->keys())
             ->merge($realDispRows->keys())
@@ -1760,7 +1724,6 @@ class DashboardController extends Controller
         foreach ($executives as $execKey) {
             $meta          = $executiveMeta[$execKey] ?? null;
             $row           = $ocRows[$execKey] ?? null;
-            $pendingRow    = $pendingRows[$execKey] ?? null;
             $disp          = $dispRows[$execKey] ?? null;
             $fulfilled     = $fulfilledRows[$execKey] ?? null;
             $realDisp      = $realDispRows[$execKey] ?? null;
@@ -1768,10 +1731,10 @@ class DashboardController extends Controller
             $valueCop      = $row ? (float) $row->value_cop : 0.0;
             $valueUsd      = $row ? (float) $row->value_usd : 0.0;
             $kilos         = $row ? (float) $row->total_kilos : 0.0;
-            $pendingOrders = $pendingRow ? (int) $pendingRow->pending_orders : 0;
-            $pendingUsd    = $pendingRow ? (float) $pendingRow->pending_value_usd : 0.0;
-            $pendingCop    = $pendingRow ? (float) $pendingRow->pending_value_cop : 0.0;
-            $pendingKilos  = $pendingRow ? (float) $pendingRow->pending_kilos : 0.0;
+            $pendingOrders = $row ? (int) $row->pending_orders : 0;
+            $pendingUsd    = $row ? (float) $row->pending_value_usd : 0.0;
+            $pendingCop    = $row ? (float) $row->pending_value_cop : 0.0;
+            $pendingKilos  = $row ? (float) $row->pending_kilos : 0.0;
             $dispCop       = $disp ? (float) $disp->dispatched_cop       : 0.0;
             $dispUsd       = $disp ? (float) $disp->dispatched_usd       : 0.0;
             $dispKilos     = $disp ? (float) $disp->dispatched_kilos     : 0.0;
