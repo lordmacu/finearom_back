@@ -79,7 +79,7 @@ class AnalyzeQuery
             ->join('products', 'purchase_order_product.product_id', '=', 'products.id')
             ->leftJoin('trm_daily', 'purchase_orders.order_creation_date', '=', 'trm_daily.date')
             ->whereRaw("{$this->temporalDispatchDateExpression()} BETWEEN ? AND ?", [$from->toDateString(), $to->toDateString()])
-            ->whereRaw("
+            ->whereRaw("(
                 purchase_orders.status != 'parcial_status'
                 OR (
                     EXISTS (
@@ -97,7 +97,7 @@ class AnalyzeQuery
                           AND pt.deleted_at IS NULL
                     )
                 )
-            ");
+            )");
 
         return $this->applyStatusFilter($query, $type, $status);
     }
