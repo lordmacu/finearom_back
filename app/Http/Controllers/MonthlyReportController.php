@@ -99,8 +99,8 @@ class MonthlyReportController extends Controller
                   "TRM de hoy ({$today}): \${$trmHoyStr} COP/USD — úsala SOLO para convertir valores de cartera a USD si te lo piden. Las órdenes tienen su propia TRM individual y no deben usar esta.\n\n" .
 
                   "NOTAS CLAVE — lee antes de responder:\n" .
-                   "- 'Total OC' = Facturado (Siigo) + Pendiente (OCs pending/processing con fecha de despacho en el período). Igual al dashboard.\n" .
-                   "- 'Facturado' = ventas registradas en Siigo en el período (mes). 'Pendiente' = OCs en estado pending/processing cuya fecha de despacho cae en el período. Total OC = Facturado + Pendiente.\n" .
+                   "- 'Total OC' = Facturado (Siigo) + Pendiente (OCs pending/processing/parcial_status con fecha de despacho en el período). Igual al dashboard.\n" .
+                   "- 'Facturado' = ventas registradas en Siigo en el período (mes). 'Pendiente' = OCs en estado pending/processing + productos de OCs parcial_status que tienen parcial temporal pero NO real (aún sin despachar). Total OC = Facturado + Pendiente.\n" .
                    "- 'Fecha de despacho' para OCs pendientes/temporal = COALESCE(MIN(parciales_temporales.dispatch_date), delivery_date, dispatch_date). NUNCA uses order_creation_date para filtrar pendientes.\n" .
                   "- Cumplimiento% puede superar el 100%: es normal porque los despachos del período pueden incluir OC creadas en meses anteriores\n" .
                   "- ESTADÍSTICAS POR EJECUTIVA es la fuente de verdad para preguntas por ejecutiva — NO sumar desde el detalle de órdenes\n" .
@@ -626,7 +626,7 @@ class MonthlyReportController extends Controller
             "- WHERE po.status IN ('processing','parcial_status') → SIN filtro de fecha de creación\n" .
             "- WHERE po.status = 'pending' → SIN filtro de fecha de creación\n" .
             "- Órdenes 'estancadas', 'sin despacho', 'sin movimiento' → filtra por status + DATEDIFF(CURDATE(), po.order_creation_date) > X\n" .
-            "- Pipeline (órdenes pending o processing sin completar) → sin filtro de fecha de creación\n" .
+            "- Pipeline (órdenes pending/processing/parcial_status sin completar) → sin filtro de fecha de creación\n" .
             "  → Ejemplo estancadas: WHERE po.status='processing' AND par.id IS NULL AND DATEDIFF(CURDATE(), po.order_creation_date) > 15\n" .
             "  → Ejemplo kilos pendientes: WHERE po.status='parcial_status' (sin BETWEEN)\n\n" .
             "CÓMO SABER QUÉ QUEDA PENDIENTE EN UNA OC (parcial_status):\n" .

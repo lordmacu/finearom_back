@@ -1551,18 +1551,41 @@ class DashboardController extends Controller
                 ), 0) as value_cop
             ")
             ->selectRaw("
-                COUNT(DISTINCT CASE WHEN po.status IN ('pending', 'processing') THEN po.id END) as pending_orders,
+                COUNT(DISTINCT CASE
+                    WHEN po.status IN ('pending', 'processing') THEN po.id
+                    WHEN po.status = 'parcial_status'
+                         AND EXISTS (SELECT 1 FROM partials pt WHERE pt.order_id = po.id AND pt.product_order_id = pop.id AND pt.type = 'temporal' AND pt.deleted_at IS NULL)
+                         AND NOT EXISTS (SELECT 1 FROM partials pt WHERE pt.order_id = po.id AND pt.product_order_id = pop.id AND pt.type = 'real' AND pt.deleted_at IS NULL)
+                    THEN po.id
+                END) as pending_orders,
                 COALESCE(SUM(CASE
                     WHEN po.status IN ('pending', 'processing') THEN pop.quantity
+                    WHEN po.status = 'parcial_status'
+                         AND EXISTS (SELECT 1 FROM partials pt WHERE pt.order_id = po.id AND pt.product_order_id = pop.id AND pt.type = 'temporal' AND pt.deleted_at IS NULL)
+                         AND NOT EXISTS (SELECT 1 FROM partials pt WHERE pt.order_id = po.id AND pt.product_order_id = pop.id AND pt.type = 'real' AND pt.deleted_at IS NULL)
+                    THEN pop.quantity
                     ELSE 0
                 END), 0) as pending_kilos,
                 COALESCE(SUM(CASE
                     WHEN po.status IN ('pending', 'processing')
                         THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity
+                    WHEN po.status = 'parcial_status'
+                         AND EXISTS (SELECT 1 FROM partials pt WHERE pt.order_id = po.id AND pt.product_order_id = pop.id AND pt.type = 'temporal' AND pt.deleted_at IS NULL)
+                         AND NOT EXISTS (SELECT 1 FROM partials pt WHERE pt.order_id = po.id AND pt.product_order_id = pop.id AND pt.type = 'real' AND pt.deleted_at IS NULL)
+                        THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity
                     ELSE 0
                 END), 0) as pending_value_usd,
                 COALESCE(SUM(CASE
                     WHEN po.status IN ('pending', 'processing')
+                        THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
+                            (CASE
+                                WHEN po.trm >= 3400 THEN po.trm
+                                WHEN td.value IS NOT NULL THEN td.value
+                                ELSE 4000
+                            END)
+                    WHEN po.status = 'parcial_status'
+                         AND EXISTS (SELECT 1 FROM partials pt WHERE pt.order_id = po.id AND pt.product_order_id = pop.id AND pt.type = 'temporal' AND pt.deleted_at IS NULL)
+                         AND NOT EXISTS (SELECT 1 FROM partials pt WHERE pt.order_id = po.id AND pt.product_order_id = pop.id AND pt.type = 'real' AND pt.deleted_at IS NULL)
                         THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
                             (CASE
                                 WHEN po.trm >= 3400 THEN po.trm
