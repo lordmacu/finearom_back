@@ -1506,22 +1506,23 @@ class DashboardController extends Controller
             ->keyBy('executive_key');
 
         // ── Query 1: OC creadas en el período ────────────────────────────────
-        $ocRows = DB::table('executives as e')
-            ->leftJoin('clients as c', DB::raw('e.email COLLATE utf8mb4_general_ci'), '=', 'c.executive')
-            ->leftJoin('purchase_orders as po', function ($join) use ($startDate, $endDate) {
-                $join->on('po.client_id', '=', 'c.id')
-                    ->whereBetween('po.order_creation_date', [$startDate, $endDate]);
+        // Pendiente operativo = OCs en pending/processing, sin mezclar con Siigo.
+        $ocRows = DB::table('purchase_orders as po')
+            ->join('clients as c', 'po.client_id', '=', 'c.id')
+            ->leftJoin('executives as e', function ($join) {
+                $join->on(DB::raw('e.email COLLATE utf8mb4_general_ci'), '=', 'c.executive')
+                    ->where('e.is_active', 1);
             })
-            ->leftJoin('purchase_order_product as pop', function ($join) {
+            ->join('purchase_order_product as pop', function ($join) {
                 $join->on('pop.purchase_order_id', '=', 'po.id')
                     ->where('pop.muestra', 0);
             })
-            ->leftJoin('products as p', 'pop.product_id', '=', 'p.id')
+            ->join('products as p', 'pop.product_id', '=', 'p.id')
             ->leftJoin('trm_daily as td', 'po.order_creation_date', '=', 'td.date')
-            ->where('e.is_active', 1)
+            ->whereBetween('po.order_creation_date', [$startDate, $endDate])
             ->selectRaw("
-                e.email as executive_key,
-                e.name as executive,
+                COALESCE(e.email, '__sin_ejecutiva') as executive_key,
+                COALESCE(e.name, 'Sin ejecutiva') as executive,
                 e.email as executive_email,
                 COUNT(DISTINCT po.id) as total_orders,
                 COALESCE(SUM(pop.quantity), 0) as total_kilos,
@@ -1537,7 +1538,29 @@ class DashboardController extends Controller
                     END)
                 ), 0) as value_cop
             ")
-            ->groupBy('e.id', 'e.name', 'e.email')
+            ->selectRaw("
+                COUNT(DISTINCT CASE WHEN po.status IN ('pending', 'processing') THEN po.id END) as pending_orders,
+                COALESCE(SUM(CASE
+                    WHEN po.status IN ('pending', 'processing') THEN pop.quantity
+                    ELSE 0
+                END), 0) as pending_kilos,
+                COALESCE(SUM(CASE
+                    WHEN po.status IN ('pending', 'processing')
+                        THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity
+                    ELSE 0
+                END), 0) as pending_value_usd,
+                COALESCE(SUM(CASE
+                    WHEN po.status IN ('pending', 'processing')
+                        THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
+                            (CASE
+                                WHEN po.trm >= 3400 THEN po.trm
+                                WHEN td.value IS NOT NULL THEN td.value
+                                ELSE 4000
+                            END)
+                    ELSE 0
+                END), 0) as pending_value_cop
+            ")
+            ->groupByRaw("COALESCE(e.email, '__sin_ejecutiva'), COALESCE(e.name, 'Sin ejecutiva'), e.email")
             ->get()
             ->keyBy('executive_key');
 
@@ -1708,6 +1731,10 @@ class DashboardController extends Controller
             $valueCop      = $row ? (float) $row->value_cop : 0.0;
             $valueUsd      = $row ? (float) $row->value_usd : 0.0;
             $kilos         = $row ? (float) $row->total_kilos : 0.0;
+            $pendingOrders = $row ? (int) $row->pending_orders : 0;
+            $pendingUsd    = $row ? (float) $row->pending_value_usd : 0.0;
+            $pendingCop    = $row ? (float) $row->pending_value_cop : 0.0;
+            $pendingKilos  = $row ? (float) $row->pending_kilos : 0.0;
             $dispCop       = $disp ? (float) $disp->dispatched_cop       : 0.0;
             $dispUsd       = $disp ? (float) $disp->dispatched_usd       : 0.0;
             $dispKilos     = $disp ? (float) $disp->dispatched_kilos     : 0.0;
@@ -1725,6 +1752,10 @@ class DashboardController extends Controller
                 'value_usd'            => round($valueUsd, 2),
                 'value_cop'            => round($valueCop, 0),
                 'total_kilos'          => round($kilos, 2),
+                'pending_orders'       => $pendingOrders,
+                'pending_usd'          => round($pendingUsd, 2),
+                'pending_cop'          => round($pendingCop, 0),
+                'pending_kilos'        => round($pendingKilos, 2),
                 'dispatched_usd'       => round($dispUsd, 2),
                 'dispatched_cop'       => round($dispCop, 0),
                 'dispatched_kilos'     => round($dispKilos, 2),
