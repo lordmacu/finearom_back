@@ -18,8 +18,8 @@ return [
 
     'coordinadora_client_id'     => env('COORDINADORA_CLIENT_ID', ''),
     'coordinadora_client_secret' => env('COORDINADORA_CLIENT_SECRET', ''),
-    'coordinadora_base_url'      => env('COORDINADORA_BASE_URL', 'https://apiv2.coordinadora.com'),
     'coordinadora_auth_url'      => env('COORDINADORA_AUTH_URL', 'https://api.coordinadora.tech'),
+    'coordinadora_guias_url'     => env('COORDINADORA_GUIAS_URL', 'https://guias-service.coordinadora.com'),
 
     'siigo_proxy_url'      => env('SIIGO_PROXY_URL', ''),
     'siigo_proxy_username' => env('SIIGO_PROXY_USERNAME', ''),
