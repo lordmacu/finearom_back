@@ -6,6 +6,7 @@ use App\Models\ChatSession;
 use App\Models\PurchaseOrder;
 use App\Services\DashboardChatDeterministicResponseService;
 use App\Services\DhlService;
+use App\Services\CoordinadoraService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -385,15 +386,15 @@ class MonthlyReportController extends Controller
 
             // Detectar número de guía DHL e inyectar datos de tracking en tiempo real
             $userMessage    = $request->message;
-            $dhlResult     = $this->fetchDhlContextForMessage($userMessage);
-            if ($dhlResult === null) {
+            $courierResult = $this->fetchDhlContextForMessage($userMessage);
+            if ($courierResult === null) {
                 $messageForApi = $userMessage;
                 $dhlSystemNote = '';
-            } elseif ($dhlResult['has_dhl']) {
-                $messageForApi = $userMessage . "\n\n[DATOS DE SEGUIMIENTO DHL — consultados en tiempo real]:\n" . $dhlResult['text'];
+            } elseif ($courierResult['has_courier']) {
+                $messageForApi = $userMessage . "\n\n[DATOS DE SEGUIMIENTO — consultados en tiempo real]:\n" . $courierResult['text'];
                 $dhlSystemNote = $this->buildDhlSystemNote();
             } else {
-                $extra = $dhlResult['text'] ? "\n\n" . $dhlResult['text'] : '';
+                $extra = $courierResult['text'] ? "\n\n" . $courierResult['text'] : '';
                 $messageForApi = $userMessage . $extra;
                 $dhlSystemNote = '';
             }
@@ -1021,18 +1022,29 @@ class MonthlyReportController extends Controller
         if (preg_match('/\b(\d{10,12})\b/', $message, $matches)) {
             $trackingNumber = $matches[1];
             $isDhl = strlen($trackingNumber) === 10;
+            $isCoordinadora = strlen($trackingNumber) === 11;
 
             if ($isDhl) {
                 $result = $dhl->trackShipment($trackingNumber);
                 if (!$result['success']) {
-                    if (!empty($result['not_found'])) return ['has_dhl' => false, 'text' => ''];
-                    return ['has_dhl' => false, 'text' => "Error técnico al consultar DHL: {$result['error']}"];
+                    if (!empty($result['not_found'])) return ['has_courier' => false, 'text' => ''];
+                    return ['has_courier' => false, 'text' => "Error técnico al consultar DHL: {$result['error']}"];
                 }
-                return ['has_dhl' => true, 'text' => $dhl->formatForChat($result['data'])];
+                return ['has_courier' => true, 'text' => $dhl->formatForChat($result['data'])];
             }
 
-            // Coordinadora/Aldia/FedEx — solo buscar en Finearom, sin llamar DHL
-            return ['has_dhl' => false, 'text' => ''];
+            if ($isCoordinadora) {
+                $coordinadora = app(CoordinadoraService::class);
+                $result = $coordinadora->trackShipment($trackingNumber);
+                if (!$result['success']) {
+                    if (!empty($result['not_found'])) return ['has_courier' => false, 'text' => ''];
+                    return ['has_courier' => false, 'text' => "Error técnico al consultar Coordinadora: {$result['message']}"];
+                }
+                return ['has_courier' => true, 'text' => $coordinadora->formatForChat($result['data'])];
+            }
+
+            // Aldia/FedEx (12 dígitos) — solo buscar en Finearom, sin llamar API
+            return ['has_courier' => false, 'text' => ''];
         }
 
         // 2. Número de OC — 4 dígitos + guión + dígitos/guiones
@@ -1047,7 +1059,7 @@ class MonthlyReportController extends Controller
                 ->first();
 
             if (!$order) {
-                return ['has_dhl' => false, 'text' => "La orden {$orderConsecutive} no existe en la base de datos de Finearom."];
+                return ['has_courier' => false, 'text' => "La orden {$orderConsecutive} no existe en la base de datos de Finearom."];
             }
 
             $orderInfo = implode("\n", [
@@ -1058,7 +1070,9 @@ class MonthlyReportController extends Controller
                 "  Fecha creación: {$order->order_creation_date}",
             ]);
 
-            // Solo llamar DHL para guías cuyo transportador sea DHL (10 dígitos exactos)
+            $dhl = app(DhlService::class);
+
+            // Buscar guías DHL (10 dígitos)
             $dhlTrackings = DB::table('partials')
                 ->where('order_id', $order->id)
                 ->where('type', 'real')
@@ -1071,27 +1085,55 @@ class MonthlyReportController extends Controller
                 ->unique()
                 ->values();
 
-            if ($dhlTrackings->isEmpty()) {
-                return ['has_dhl' => false, 'text' => $orderInfo];
+            // Buscar guías Coordinadora (11 dígitos)
+            $coordinadoraTrackings = DB::table('partials')
+                ->where('order_id', $order->id)
+                ->where('type', 'real')
+                ->whereNull('deleted_at')
+                ->whereNotNull('tracking_number')
+                ->where('tracking_number', '!=', '')
+                ->whereRaw("LOWER(transporter) = 'coordinadora'")
+                ->whereRaw("tracking_number REGEXP '^[0-9]{11}$'")
+                ->pluck('tracking_number')
+                ->unique()
+                ->values();
+
+            if ($dhlTrackings->isEmpty() && $coordinadoraTrackings->isEmpty()) {
+                return ['has_courier' => false, 'text' => $orderInfo];
             }
 
-            $dhlLines = [];
+            $trackingLines = [];
+
             foreach ($dhlTrackings as $tracking) {
                 $result = $dhl->trackShipment($tracking);
                 if (!$result['success']) {
                     if (empty($result['not_found'])) {
-                        $dhlLines[] = "--- Guía {$tracking} ---\nError al consultar DHL: {$result['error']}";
+                        $trackingLines[] = "--- Guía DHL {$tracking} ---\nError al consultar: {$result['error']}";
                     }
                     continue;
                 }
-                $dhlLines[] = "--- Guía {$tracking} ---\n" . $dhl->formatForChat($result['data']);
+                $trackingLines[] = "--- Guía DHL {$tracking} ---\n" . $dhl->formatForChat($result['data']);
             }
 
-            if (empty($dhlLines)) {
-                return ['has_dhl' => false, 'text' => $orderInfo];
+            if ($coordinadoraTrackings->isNotEmpty()) {
+                $coordinadora = app(CoordinadoraService::class);
+                foreach ($coordinadoraTrackings as $tracking) {
+                    $result = $coordinadora->trackShipment($tracking);
+                    if (!$result['success']) {
+                        if (empty($result['not_found'])) {
+                            $trackingLines[] = "--- Guía Coordinadora {$tracking} ---\nError al consultar: {$result['message']}";
+                        }
+                        continue;
+                    }
+                    $trackingLines[] = "--- Guía Coordinadora {$tracking} ---\n" . $coordinadora->formatForChat($result['data']);
+                }
             }
 
-            return ['has_dhl' => true, 'text' => $orderInfo . "\n\nSeguimiento DHL:\n" . implode("\n\n", $dhlLines)];
+            if (empty($trackingLines)) {
+                return ['has_courier' => false, 'text' => $orderInfo];
+            }
+
+            return ['has_courier' => true, 'text' => $orderInfo . "\n\nSeguimiento:\n" . implode("\n\n", $trackingLines)];
         }
 
         return null;
