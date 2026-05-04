@@ -2211,101 +2211,129 @@ class PurchaseOrderController extends Controller
      */
     public function show(int $id): JsonResponse
     {
-        $purchaseOrder = PurchaseOrder::with([
-            'client',
-            'products', // Eager load productos via belongsToMany
-            'partials'
-        ])->findOrFail($id);
+        try {
+            \Log::info("🔍 show() - Iniciando carga de orden {$id}");
 
-        // Transformar la estructura para que sea compatible con el frontend
-        // El frontend espera products con pivot
-        $purchaseOrder->products->transform(function ($product) use ($purchaseOrder) {
-            // Convertir el producto a array
-            $productData = $product->toArray();
+            $purchaseOrder = PurchaseOrder::with([
+                'client',
+                'products', // Eager load productos via belongsToMany
+                'partials'
+            ])->findOrFail($id);
 
-            // Los datos del pivot ya vienen en $product->pivot desde belongsToMany
-            // Solo necesitamos asegurar que todos los campos estén presentes
-            $productData['pivot'] = [
-                'id' => $product->pivot->id,
-                'purchase_order_id' => $product->pivot->purchase_order_id,
-                'product_id' => $product->pivot->product_id,
-                'quantity' => $product->pivot->quantity,
-                'price' => $product->pivot->price,
-                'branch_office_id' => $product->pivot->branch_office_id,
-                'new_win' => $product->pivot->new_win,
-                'muestra' => $product->pivot->muestra,
-                'delivery_date' => $product->pivot->delivery_date,
-                'parcial' => $product->pivot->parcial,
-            ];
+            \Log::info("✅ show() - Orden cargada", [
+                'id' => $purchaseOrder->id,
+                'products_count' => count($purchaseOrder->products),
+                'partials_count' => count($purchaseOrder->partials)
+            ]);
 
-            // Inicializar arrays de parciales
-            $productData['partials'] = [];
-            $productData['realPartials'] = [];
+            // Transformar la estructura para que sea compatible con el frontend
+            // El frontend espera products con pivot
+            $purchaseOrder->products->transform(function ($product) use ($purchaseOrder) {
+                // Convertir el producto a array
+                $productData = $product->toArray();
 
-            // Filtrar parciales que pertenecen a este producto
-            foreach ($purchaseOrder->partials as $partial) {
-                if ($partial->product_order_id === $product->pivot->id) {
-                    $partialData = [
-                        'quantity' => $partial->quantity,
-                        'date' => $partial->dispatch_date ? (is_string($partial->dispatch_date) ? explode('T', $partial->dispatch_date)[0] : $partial->dispatch_date->format('Y-m-d')) : null,
-                        'product_id' => $partial->product_id,
-                        'order_id' => $partial->order_id,
-                        'tracking_number' => $partial->tracking_number,
-                        'transporter' => $partial->transporter,
-                        'trm' => $partial->trm,
-                        'invoice_number' => $partial->invoice_number,
-                        'product_order_id' => $partial->product_order_id
-                    ];
+                // Los datos del pivot ya vienen en $product->pivot desde belongsToMany
+                // Solo necesitamos asegurar que todos los campos estén presentes
+                $productData['pivot'] = [
+                    'id' => $product->pivot->id,
+                    'purchase_order_id' => $product->pivot->purchase_order_id,
+                    'product_id' => $product->pivot->product_id,
+                    'quantity' => $product->pivot->quantity,
+                    'price' => $product->pivot->price,
+                    'branch_office_id' => $product->pivot->branch_office_id,
+                    'new_win' => $product->pivot->new_win,
+                    'muestra' => $product->pivot->muestra,
+                    'delivery_date' => $product->pivot->delivery_date,
+                    'parcial' => $product->pivot->parcial,
+                ];
 
-                    if ($partial->type === 'temporal') {
-                        $productData['partials'][] = $partialData;
-                    } else {
-                        $productData['realPartials'][] = $partialData;
+                // Inicializar arrays de parciales
+                $productData['partials'] = [];
+                $productData['realPartials'] = [];
+
+                // Filtrar parciales que pertenecen a este producto
+                foreach ($purchaseOrder->partials as $partial) {
+                    if ($partial->product_order_id === $product->pivot->id) {
+                        $partialData = [
+                            'quantity' => $partial->quantity,
+                            'date' => $partial->dispatch_date ? (is_string($partial->dispatch_date) ? explode('T', $partial->dispatch_date)[0] : $partial->dispatch_date->format('Y-m-d')) : null,
+                            'product_id' => $partial->product_id,
+                            'order_id' => $partial->order_id,
+                            'tracking_number' => $partial->tracking_number,
+                            'transporter' => $partial->transporter,
+                            'trm' => $partial->trm,
+                            'invoice_number' => $partial->invoice_number,
+                            'product_order_id' => $partial->product_order_id
+                        ];
+
+                        if ($partial->type === 'temporal') {
+                            $productData['partials'][] = $partialData;
+                        } else {
+                            $productData['realPartials'][] = $partialData;
+                        }
                     }
                 }
-            }
 
-            return $productData;
-        });
+                return $productData;
+            });
 
-        // Serializar a array plano para evitar problemas de encoding del modelo Eloquent
-        $data = $purchaseOrder->toArray();
-
-        // Intentar encode con sustitución de UTF-8 inválido para identificar los campos con problema
-        $encoded = json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE);
-        if ($encoded === false) {
-            $jsonError = json_last_error_msg();
-            \Log::error('JSON encode failed en show() incluso con sustitución UTF-8', [
-                'order_id' => $id,
-                'json_error' => $jsonError,
+            \Log::info("✅ show() - Productos transformados", [
+                'transformed_count' => count($purchaseOrder->products)
             ]);
-        }
 
-        // Buscar campos problemáticos para loggear
-        $problematicFields = [];
-        array_walk_recursive($data, function ($value, $key) use (&$problematicFields) {
-            if (is_string($value) && json_encode($value) === false) {
-                $problematicFields[$key] = [
-                    'error' => json_last_error_msg(),
-                    'hex_preview' => substr(bin2hex($value), 0, 200),
-                ];
+            // Serializar a array plano para evitar problemas de encoding del modelo Eloquent
+            $data = $purchaseOrder->toArray();
+
+            \Log::info("✅ show() - Datos serializados", [
+                'data_keys' => array_keys($data),
+                'has_products' => isset($data['products']),
+                'products_count' => count($data['products'] ?? [])
+            ]);
+
+            // Intentar encode con sustitución de UTF-8 inválido para identificar los campos con problema
+            $encoded = json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE);
+            if ($encoded === false) {
+                $jsonError = json_last_error_msg();
+                \Log::error('JSON encode failed en show() incluso con sustitución UTF-8', [
+                    'order_id' => $id,
+                    'json_error' => $jsonError,
+                ]);
             }
-        });
 
-        if (!empty($problematicFields)) {
-            \Log::error('Campos con encoding inválido en orden ' . $id, $problematicFields);
-            // Limpiar los campos problemáticos convirtiendo a UTF-8 válido
-            array_walk_recursive($data, function (&$value) {
-                if (is_string($value)) {
-                    $value = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
-                    if (json_encode($value) === false) {
-                        $value = utf8_encode($value);
-                    }
+            // Buscar campos problemáticos para loggear
+            $problematicFields = [];
+            array_walk_recursive($data, function ($value, $key) use (&$problematicFields) {
+                if (is_string($value) && json_encode($value) === false) {
+                    $problematicFields[$key] = [
+                        'error' => json_last_error_msg(),
+                        'hex_preview' => substr(bin2hex($value), 0, 200),
+                    ];
                 }
             });
-        }
 
-        return response()->json($data);
+            if (!empty($problematicFields)) {
+                \Log::error('Campos con encoding inválido en orden ' . $id, $problematicFields);
+                // Limpiar los campos problemáticos convirtiendo a UTF-8 válido
+                array_walk_recursive($data, function (&$value) {
+                    if (is_string($value)) {
+                        $value = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+                        if (json_encode($value) === false) {
+                            $value = utf8_encode($value);
+                        }
+                    }
+                });
+            }
+
+            \Log::info("✅ show() - Retornando respuesta 200", ['order_id' => $id]);
+            return response()->json($data);
+        } catch (\Exception $e) {
+            \Log::error('❌ show() - Error exception', [
+                'order_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
     }
 
     /**
