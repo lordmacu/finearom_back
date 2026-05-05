@@ -135,11 +135,13 @@ class RecaudoImportController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            $fullTrace = $e->getTraceAsString();
             Log::error('❌ RecaudoImport - Error general: ' . $e->getMessage(), [
                 'code' => $e->getCode(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
-                'trace' => substr($e->getTraceAsString(), 0, 500)
+                'trace' => $fullTrace,
+                'previous_exception' => $e->getPrevious() ? $e->getPrevious()->getMessage() : null
             ]);
 
             return response()->json([
@@ -147,7 +149,9 @@ class RecaudoImportController extends Controller
                 'message' => 'Error al importar el archivo: ' . $e->getMessage(),
                 'error_code' => $e->getCode(),
                 'error_file' => basename($e->getFile()) . ':' . $e->getLine(),
-                'error_trace' => substr($e->getTraceAsString(), 0, 300)
+                'error_class' => get_class($e),
+                'error_trace' => $fullTrace,
+                'previous_exception' => $e->getPrevious() ? $e->getPrevious()->getMessage() : null
             ], 500);
         }
     }
