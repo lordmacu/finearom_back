@@ -59,63 +59,45 @@ class RecaudoImportController extends Controller
             $errors = [];
             $dataStartRow = $headerRow + 1;
 
-            Log::info('🔄 RecaudoImport - Iniciando transacción de base de datos');
-            DB::beginTransaction();
+            Log::info('🔄 RecaudoImport - Iniciando transacción usando DB::transaction()');
 
             try {
-                Log::info('🗑️ RecaudoImport - Truncando tabla de recaudos');
-                // Usar DB::statement para mantener la transacción activa
-                DB::statement('TRUNCATE TABLE recaudos');
+                // Usar DB::transaction() que es más robusto
+                DB::transaction(function () use ($dataStartRow, $highestRow, &$imported, $worksheet) {
+                    Log::info('🗑️ RecaudoImport - Truncando tabla de recaudos');
+                    Recaudo::truncate();
 
-                $rows = [];
-                for ($row = $dataStartRow; $row <= $highestRow; $row++) {
-                    $rowData = $this->extractRowData($worksheet, $row);
+                    $rows = [];
+                    for ($row = $dataStartRow; $row <= $highestRow; $row++) {
+                        $rowData = $this->extractRowData($worksheet, $row);
 
-                    if (!$this->isValidRow($rowData)) {
-                        continue;
-                    }
-
-                    $rows[] = [
-                        'fecha_recaudo'    => $rowData['fecha_recaudo'],
-                        'numero_recibo'    => $rowData['numero_recibo'],
-                        'fecha_vencimiento'=> $rowData['fecha_vencimiento'],
-                        'numero_factura'   => $rowData['numero_factura'],
-                        'nit'              => $rowData['nit'],
-                        'cliente'          => $rowData['cliente'],
-                        'dias'             => $rowData['dias'],
-                        'valor_cancelado'  => $rowData['valor_cancelado'],
-                        'observaciones'    => $rowData['observaciones'] ?? null,
-                    ];
-                    $imported++;
-                }
-
-                Log::info('📝 RecaudoImport - Filas preparadas para insertar: ' . count($rows));
-
-                // Usar inserciones directas de SQL para mantener la transacción
-                foreach (array_chunk($rows, 500) as $chunk) {
-                    Log::info('💾 RecaudoImport - Insertando chunk de ' . count($chunk) . ' registros');
-                    // Construir query INSERT manualmente
-                    if (!empty($chunk)) {
-                        $table = 'recaudos';
-                        $columns = array_keys($chunk[0]);
-                        $columnList = implode(',', $columns);
-                        $placeholders = [];
-                        $bindings = [];
-
-                        foreach ($chunk as $row) {
-                            $placeholders[] = '(' . implode(',', array_fill(0, count($row), '?')) . ')';
-                            $bindings = array_merge($bindings, array_values($row));
+                        if (!$this->isValidRow($rowData)) {
+                            continue;
                         }
 
-                        $query = "INSERT INTO $table ($columnList) VALUES " . implode(',', $placeholders);
-                        DB::statement($query, $bindings);
+                        $rows[] = [
+                            'fecha_recaudo'    => $rowData['fecha_recaudo'],
+                            'numero_recibo'    => $rowData['numero_recibo'],
+                            'fecha_vencimiento'=> $rowData['fecha_vencimiento'],
+                            'numero_factura'   => $rowData['numero_factura'],
+                            'nit'              => $rowData['nit'],
+                            'cliente'          => $rowData['cliente'],
+                            'dias'             => $rowData['dias'],
+                            'valor_cancelado'  => $rowData['valor_cancelado'],
+                            'observaciones'    => $rowData['observaciones'] ?? null,
+                        ];
+                        $imported++;
                     }
-                }
 
-                Log::info('✅ RecaudoImport - Haciendo commit de la transacción');
-                DB::commit();
-                Log::info('✅ RecaudoImport - Transacción commiteada exitosamente');
+                    Log::info('📝 RecaudoImport - Filas preparadas para insertar: ' . count($rows));
 
+                    foreach (array_chunk($rows, 500) as $chunk) {
+                        Log::info('💾 RecaudoImport - Insertando chunk de ' . count($chunk) . ' registros');
+                        Recaudo::insert($chunk);
+                    }
+
+                    Log::info('✅ RecaudoImport - Transacción completada exitosamente');
+                });
             } catch (\Exception $e) {
                 Log::error('❌ RecaudoImport - Error en transacción: ' . $e->getMessage(), [
                     'code' => $e->getCode(),
@@ -123,11 +105,6 @@ class RecaudoImportController extends Controller
                     'line' => $e->getLine(),
                     'trace' => $e->getTraceAsString()
                 ]);
-
-                if (DB::transactionLevel() > 0) {
-                    Log::info('🔄 RecaudoImport - Haciendo rollback');
-                    DB::rollBack();
-                }
                 throw $e;
             }
 
