@@ -64,7 +64,8 @@ class RecaudoImportController extends Controller
 
             try {
                 Log::info('🗑️ RecaudoImport - Truncando tabla de recaudos');
-                Recaudo::truncate();
+                // Usar DB::statement para mantener la transacción activa
+                DB::statement('TRUNCATE TABLE recaudos');
 
                 $rows = [];
                 for ($row = $dataStartRow; $row <= $highestRow; $row++) {
@@ -90,9 +91,25 @@ class RecaudoImportController extends Controller
 
                 Log::info('📝 RecaudoImport - Filas preparadas para insertar: ' . count($rows));
 
+                // Usar inserciones directas de SQL para mantener la transacción
                 foreach (array_chunk($rows, 500) as $chunk) {
                     Log::info('💾 RecaudoImport - Insertando chunk de ' . count($chunk) . ' registros');
-                    Recaudo::insert($chunk);
+                    // Construir query INSERT manualmente
+                    if (!empty($chunk)) {
+                        $table = 'recaudos';
+                        $columns = array_keys($chunk[0]);
+                        $columnList = implode(',', $columns);
+                        $placeholders = [];
+                        $bindings = [];
+
+                        foreach ($chunk as $row) {
+                            $placeholders[] = '(' . implode(',', array_fill(0, count($row), '?')) . ')';
+                            $bindings = array_merge($bindings, array_values($row));
+                        }
+
+                        $query = "INSERT INTO $table ($columnList) VALUES " . implode(',', $placeholders);
+                        DB::statement($query, $bindings);
+                    }
                 }
 
                 Log::info('✅ RecaudoImport - Haciendo commit de la transacción');
