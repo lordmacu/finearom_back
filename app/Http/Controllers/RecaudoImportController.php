@@ -35,12 +35,18 @@ class RecaudoImportController extends Controller
         ]);
 
         try {
+            Log::info('🔍 RecaudoImport - Iniciando importación');
+
             $file = $request->file('file');
+            Log::info('📄 RecaudoImport - Archivo cargado: ' . $file->getClientOriginalName());
+
             $spreadsheet = IOFactory::load($file->getRealPath());
             $worksheet = $spreadsheet->getSheet(0);
 
             $highestRow = $worksheet->getHighestRow();
             $headerRow = $this->findHeaderRow($worksheet, $highestRow);
+
+            Log::info('📊 RecaudoImport - Filas detectadas: ' . $highestRow . ', Header en fila: ' . ($headerRow ?? 'no encontrado'));
 
             if (!$headerRow) {
                 return response()->json([
@@ -53,9 +59,11 @@ class RecaudoImportController extends Controller
             $errors = [];
             $dataStartRow = $headerRow + 1;
 
+            Log::info('🔄 RecaudoImport - Iniciando transacción de base de datos');
             DB::beginTransaction();
 
             try {
+                Log::info('🗑️ RecaudoImport - Truncando tabla de recaudos');
                 Recaudo::truncate();
 
                 $rows = [];
@@ -80,33 +88,66 @@ class RecaudoImportController extends Controller
                     $imported++;
                 }
 
+                Log::info('📝 RecaudoImport - Filas preparadas para insertar: ' . count($rows));
+
                 foreach (array_chunk($rows, 500) as $chunk) {
+                    Log::info('💾 RecaudoImport - Insertando chunk de ' . count($chunk) . ' registros');
                     Recaudo::insert($chunk);
                 }
 
+                Log::info('✅ RecaudoImport - Haciendo commit de la transacción');
                 DB::commit();
-
-                // Limpiar caché de customers después de importar recaudos
-                $this->carteraQuery->clearCustomersCache();
-
-                return response()->json([
-                    'success' => true,
-                    'message' => "Se importaron {$imported} registros correctamente",
-                    'inserted_or_updated' => $imported,
-                    'total' => $highestRow - $headerRow,
-                    'errors' => $errors,
-                ]);
+                Log::info('✅ RecaudoImport - Transacción commiteada exitosamente');
 
             } catch (\Exception $e) {
-                DB::rollBack();
+                Log::error('❌ RecaudoImport - Error en transacción: ' . $e->getMessage(), [
+                    'code' => $e->getCode(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+
+                if (DB::transactionLevel() > 0) {
+                    Log::info('🔄 RecaudoImport - Haciendo rollback');
+                    DB::rollBack();
+                }
                 throw $e;
             }
 
+            // Limpiar caché de customers después de importar recaudos (fuera de transacción)
+            try {
+                Log::info('🧹 RecaudoImport - Limpiando caché de customers');
+                $this->carteraQuery->clearCustomersCache();
+                Log::info('✅ RecaudoImport - Caché limpiado exitosamente');
+            } catch (\Exception $cacheError) {
+                Log::warning('⚠️ RecaudoImport - Error limpiando caché: ' . $cacheError->getMessage());
+                // Continuar aunque falle el caché
+            }
+
+            Log::info('🎉 RecaudoImport - Importación completada: ' . $imported . ' registros');
+
+            return response()->json([
+                'success' => true,
+                'message' => "Se importaron {$imported} registros correctamente",
+                'inserted_or_updated' => $imported,
+                'total' => $highestRow - $headerRow,
+                'errors' => $errors,
+            ]);
+
         } catch (\Exception $e) {
-            Log::error('Error importando recaudos: ' . $e->getMessage());
+            Log::error('❌ RecaudoImport - Error general: ' . $e->getMessage(), [
+                'code' => $e->getCode(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => substr($e->getTraceAsString(), 0, 500)
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Error al importar el archivo: ' . $e->getMessage()
+                'message' => 'Error al importar el archivo: ' . $e->getMessage(),
+                'error_code' => $e->getCode(),
+                'error_file' => basename($e->getFile()) . ':' . $e->getLine(),
+                'error_trace' => substr($e->getTraceAsString(), 0, 300)
             ], 500);
         }
     }
