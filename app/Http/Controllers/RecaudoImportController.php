@@ -39,6 +39,7 @@ class RecaudoImportController extends Controller
 
             $file = $request->file('file');
             Log::info('📄 RecaudoImport - Archivo cargado: ' . $file->getClientOriginalName());
+            Log::info('📄 RecaudoImport - Tamaño archivo: ' . $file->getSize() . ' bytes');
 
             $spreadsheet = IOFactory::load($file->getRealPath());
             $worksheet = $spreadsheet->getSheet(0);
@@ -59,19 +60,23 @@ class RecaudoImportController extends Controller
             $errors = [];
             $dataStartRow = $headerRow + 1;
 
-            Log::info('🔄 RecaudoImport - Iniciando transacción usando DB::transaction()');
+            Log::info('🔄 RecaudoImport - Sin usar transacción (problema conocido con BD)');
 
             try {
-                // Usar DB::transaction() que es más robusto
-                DB::transaction(function () use ($dataStartRow, $highestRow, &$imported, $worksheet) {
-                    Log::info('🗑️ RecaudoImport - Truncando tabla de recaudos');
-                    Recaudo::truncate();
+                Log::info('🗑️ RecaudoImport - Truncando tabla de recaudos');
+                Recaudo::truncate();
+                Log::info('✅ RecaudoImport - Tabla truncada exitosamente');
 
-                    $rows = [];
-                    for ($row = $dataStartRow; $row <= $highestRow; $row++) {
+                $rows = [];
+                Log::info('📖 RecaudoImport - Leyendo filas desde ' . $dataStartRow . ' hasta ' . $highestRow);
+
+                for ($row = $dataStartRow; $row <= $highestRow; $row++) {
+                    try {
                         $rowData = $this->extractRowData($worksheet, $row);
+                        Log::debug('📋 RecaudoImport - Fila ' . $row . ' extraída', ['data' => $rowData]);
 
                         if (!$this->isValidRow($rowData)) {
+                            Log::debug('⊘ RecaudoImport - Fila ' . $row . ' inválida, saltando');
                             continue;
                         }
 
@@ -87,19 +92,38 @@ class RecaudoImportController extends Controller
                             'observaciones'    => $rowData['observaciones'] ?? null,
                         ];
                         $imported++;
+                    } catch (\Exception $rowError) {
+                        Log::error('❌ RecaudoImport - Error procesando fila ' . $row, [
+                            'message' => $rowError->getMessage(),
+                            'trace' => $rowError->getTraceAsString()
+                        ]);
+                        $errors[] = 'Fila ' . $row . ': ' . $rowError->getMessage();
                     }
+                }
 
-                    Log::info('📝 RecaudoImport - Filas preparadas para insertar: ' . count($rows));
+                Log::info('📝 RecaudoImport - Filas válidas preparadas para insertar: ' . count($rows));
 
-                    foreach (array_chunk($rows, 500) as $chunk) {
-                        Log::info('💾 RecaudoImport - Insertando chunk de ' . count($chunk) . ' registros');
-                        Recaudo::insert($chunk);
+                if (count($rows) > 0) {
+                    foreach (array_chunk($rows, 500) as $chunkIndex => $chunk) {
+                        try {
+                            Log::info('💾 RecaudoImport - Insertando chunk ' . ($chunkIndex + 1) . ' de ' . count($chunk) . ' registros');
+                            Recaudo::insert($chunk);
+                            Log::info('✅ RecaudoImport - Chunk ' . ($chunkIndex + 1) . ' insertado exitosamente');
+                        } catch (\Exception $insertError) {
+                            Log::error('❌ RecaudoImport - Error insertando chunk ' . ($chunkIndex + 1), [
+                                'message' => $insertError->getMessage(),
+                                'trace' => substr($insertError->getTraceAsString(), 0, 500)
+                            ]);
+                            throw $insertError;
+                        }
                     }
+                } else {
+                    Log::warning('⚠️ RecaudoImport - No hay filas válidas para insertar');
+                }
 
-                    Log::info('✅ RecaudoImport - Transacción completada exitosamente');
-                });
+                Log::info('✅ RecaudoImport - Importación completada sin transacción');
             } catch (\Exception $e) {
-                Log::error('❌ RecaudoImport - Error en transacción: ' . $e->getMessage(), [
+                Log::error('❌ RecaudoImport - Error en importación: ' . $e->getMessage(), [
                     'code' => $e->getCode(),
                     'file' => $e->getFile(),
                     'line' => $e->getLine(),
@@ -108,17 +132,16 @@ class RecaudoImportController extends Controller
                 throw $e;
             }
 
-            // Limpiar caché de customers después de importar recaudos (fuera de transacción)
+            // Limpiar caché de customers después de importar recaudos
             try {
                 Log::info('🧹 RecaudoImport - Limpiando caché de customers');
                 $this->carteraQuery->clearCustomersCache();
                 Log::info('✅ RecaudoImport - Caché limpiado exitosamente');
             } catch (\Exception $cacheError) {
                 Log::warning('⚠️ RecaudoImport - Error limpiando caché: ' . $cacheError->getMessage());
-                // Continuar aunque falle el caché
             }
 
-            Log::info('🎉 RecaudoImport - Importación completada: ' . $imported . ' registros');
+            Log::info('🎉 RecaudoImport - Importación completada: ' . $imported . ' registros importados');
 
             return response()->json([
                 'success' => true,
