@@ -132,28 +132,7 @@ class ClientController extends Controller
 
     public function show(int $clientId): JsonResponse
     {
-        $cacheKey = "clients.show.{$clientId}";
-        $cacheTimestampKey = "{$cacheKey}.timestamp";
-
-        // Verificar si el caché es válido comparando timestamps
-        $cachedTimestamp = Cache::get($cacheTimestampKey);
-        $lastModified = Cache::get('clients.last_modified', 0);
-
-        if ($cachedTimestamp && $cachedTimestamp < $lastModified) {
-            // El caché está desactualizado, eliminarlo
-            Cache::forget($cacheKey);
-            Cache::forget($cacheTimestampKey);
-        }
-
-        // Caché permanente (solo se invalida manualmente en CRUD)
-        $client = Cache::rememberForever($cacheKey, function () use ($clientId) {
-            return Client::query()->findOrFail($clientId);
-        });
-
-        // Guardar timestamp del caché si es la primera vez (permanente)
-        if (!Cache::has($cacheTimestampKey)) {
-            Cache::forever($cacheTimestampKey, now()->timestamp);
-        }
+        $client = Client::query()->findOrFail($clientId);
 
         return response()->json([
             'success' => true,
