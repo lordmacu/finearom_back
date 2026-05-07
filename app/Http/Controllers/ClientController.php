@@ -912,7 +912,7 @@ class ClientController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Token inválido o expirado',
+                'message' => 'Token inválido. Por favor solicite un nuevo enlace.',
             ], 403);
         }
     }
