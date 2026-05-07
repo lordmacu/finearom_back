@@ -14,10 +14,12 @@ class ClientStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // Admin: solo client_name y nit son obligatorios. Email opcional;
+            // si viene, debe ser único.
             'client_name' => ['required', 'string', 'max:255'],
-            'nit' => ['nullable', 'string', 'max:255', 'unique:clients,nit'],
+            'nit' => ['required', 'string', 'max:255', 'unique:clients,nit'],
             'payment_type' => ['nullable', 'in:cash,credit'],
-            'email' => ['required', 'string', 'max:255', 'unique:clients,email'],
+            'email' => ['nullable', 'string', 'max:255', 'unique:clients,email'],
             'executive_email' => ['nullable', 'string', 'max:500'],
             'executive_phone' => ['nullable', 'string', 'max:255'],
             'phone' => ['nullable', 'string', 'max:255'],

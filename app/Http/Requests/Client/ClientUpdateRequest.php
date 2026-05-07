@@ -16,7 +16,9 @@ class ClientUpdateRequest extends FormRequest
         $clientId = $this->route('clientId');
 
         // Si es el flujo público, el ID viene encriptado en el token
+        $isExternalFlow = false;
         if (!$clientId && $this->route('token')) {
+            $isExternalFlow = true;
             try {
                 $clientId = decrypt($this->route('token'));
             } catch (\Exception $e) {
@@ -24,11 +26,17 @@ class ClientUpdateRequest extends FormRequest
             }
         }
 
+        // Flujo admin: solo client_name es obligatorio (nit no se edita).
+        // Flujo externo (cliente llena el link público): client_name y email
+        // obligatorios.
+        $clientNameRule = 'required';
+        $emailRule = $isExternalFlow ? 'required' : 'nullable';
+
         return [
-            'client_name' => ['required', 'string', 'max:255'],
+            'client_name' => [$clientNameRule, 'string', 'max:255'],
             'nit' => ['nullable', 'string', 'max:255', 'unique:clients,nit,' . $clientId],
             'payment_type' => ['nullable', 'in:cash,credit'],
-            'email' => ['required', 'string', 'max:255', 'unique:clients,email,' . $clientId],
+            'email' => [$emailRule, 'string', 'max:255', 'unique:clients,email,' . $clientId],
             'executive_email' => ['nullable', 'string', 'max:500'],
             'executive_phone' => ['nullable', 'string', 'max:255'],
             'phone' => ['nullable', 'string', 'max:255'],

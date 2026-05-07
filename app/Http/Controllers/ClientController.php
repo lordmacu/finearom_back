@@ -977,7 +977,8 @@ class ClientController extends Controller
 
     private function prepareClientPayload(array $data, Request $request): array
     {
-        // Default client_type since it's required by DB but not present in form
+        // client_type es NOT NULL en la BD pero el form no lo expone,
+        // así que asignamos el default.
         if (!isset($data['client_type'])) {
             $data['client_type'] = 'pareto';
         }
