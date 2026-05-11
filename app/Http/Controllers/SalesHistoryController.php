@@ -93,35 +93,55 @@ class SalesHistoryController extends Controller
 
     /**
      * GET /sales-history/clients
-     * Retorna la lista de clientes únicos.
+     * Retorna la lista de clientes únicos: los que tienen historial de ventas
+     * O pronósticos guardados (sales_forecasts). Así un cliente al que solo se
+     * le cargaron pronósticos manuales también aparece en el selector.
      */
     public function clients(): JsonResponse
     {
-        $clients = DB::table('sales_history as sh')
-            ->join('clients as c', DB::raw('c.nit COLLATE utf8mb4_general_ci'), '=', 'sh.nit')
-            ->select('sh.nit', 'c.client_name as cliente', 'c.client_type as cliente_tipo')
-            ->groupBy('sh.nit', 'c.client_name', 'c.client_type')
-            ->orderBy('c.client_name')
-            ->get();
+        $clients = DB::select("
+            SELECT c.nit,
+                   c.client_name AS cliente,
+                   c.client_type AS cliente_tipo
+            FROM clients c
+            WHERE c.nit IN (
+                SELECT nit FROM sales_history
+                UNION
+                SELECT nit FROM sales_forecasts
+            )
+            GROUP BY c.nit, c.client_name, c.client_type
+            ORDER BY c.client_name
+        ");
 
         return response()->json(['data' => $clients]);
     }
 
     /**
      * GET /sales-history/products?nit=xxx
-     * Retorna los productos únicos de un cliente.
+     * Retorna los productos únicos de un cliente: los que tienen historial
+     * O pronósticos guardados para ese NIT. Si el código no existe en la
+     * tabla products, igual se devuelve usando el código como referencia.
      */
     public function products(Request $request): JsonResponse
     {
         $request->validate(['nit' => ['required', 'string']]);
 
-        $products = DB::table('sales_history as sh')
-            ->join('products as p', DB::raw('p.code COLLATE utf8mb4_general_ci'), '=', 'sh.codigo')
-            ->select('sh.codigo', 'p.product_name as referencia', 'p.categories as categoria')
-            ->where('sh.nit', $request->nit)
-            ->groupBy('sh.codigo', 'p.product_name', 'p.categories')
-            ->orderBy('p.product_name')
-            ->get();
+        $nit = $request->nit;
+
+        $products = DB::select("
+            SELECT codes.codigo,
+                   COALESCE(p.product_name, codes.codigo) AS referencia,
+                   p.categories AS categoria
+            FROM (
+                SELECT codigo FROM sales_history WHERE nit = ?
+                UNION
+                SELECT codigo FROM sales_forecasts WHERE nit = ?
+            ) codes
+            LEFT JOIN products p
+                ON p.code COLLATE utf8mb4_unicode_ci = codes.codigo
+            GROUP BY codes.codigo, p.product_name, p.categories
+            ORDER BY referencia
+        ", [$nit, $nit]);
 
         return response()->json(['data' => $products]);
     }
@@ -171,14 +191,18 @@ class SalesHistoryController extends Controller
             $cantidades[] = (int) $row->cantidad;
         }
 
-        // Info del producto/cliente via JOIN
-        $info = DB::table('sales_history as sh')
-            ->leftJoin('clients as c', DB::raw('c.nit COLLATE utf8mb4_general_ci'), '=', 'sh.nit')
-            ->leftJoin('products as p', DB::raw('p.code COLLATE utf8mb4_general_ci'), '=', 'sh.codigo')
-            ->select('c.client_name as cliente', 'p.product_name as referencia', 'p.categories as categoria')
-            ->where('sh.nit', $request->nit)
-            ->where('sh.codigo', $request->codigo)
-            ->first();
+        // Info del producto/cliente directamente desde clients/products
+        // (no depende de que exista historial de ventas).
+        $cliente = DB::table('clients')->where('nit', $request->nit)->value('client_name');
+        $producto = DB::table('products')
+            ->where(DB::raw('code COLLATE utf8mb4_unicode_ci'), $request->codigo)
+            ->first(['product_name', 'categories']);
+
+        $info = (object) [
+            'cliente'    => $cliente,
+            'referencia' => $producto->product_name ?? $request->codigo,
+            'categoria'  => $producto->categories ?? null,
+        ];
 
         return response()->json([
             'data' => [
