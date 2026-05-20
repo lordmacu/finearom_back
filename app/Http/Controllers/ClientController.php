@@ -216,32 +216,11 @@ class ClientController extends Controller
 
     public function branchOffices(int $clientId): JsonResponse
     {
-        $cacheKey = "branch_offices.client.{$clientId}";
-        $cacheTimestampKey = "{$cacheKey}.timestamp";
-
-        // Verificar si el caché es válido comparando timestamps
-        $cachedTimestamp = Cache::get($cacheTimestampKey);
-        $lastModified = Cache::get('branch_offices.last_modified', 0);
-
-        if ($cachedTimestamp && $cachedTimestamp < $lastModified) {
-            // El caché está desactualizado, eliminarlo
-            Cache::forget($cacheKey);
-            Cache::forget($cacheTimestampKey);
-        }
-
-        // Caché permanente (solo se invalida manualmente en CRUD)
-        $offices = Cache::rememberForever($cacheKey, function () use ($clientId) {
-            $client = Client::query()->findOrFail($clientId);
-            return BranchOffice::query()
-                ->where('client_id', $client->id)
-                ->orderBy('id')
-                ->get();
-        });
-
-        // Guardar timestamp del caché si es la primera vez (permanente)
-        if (!Cache::has($cacheTimestampKey)) {
-            Cache::forever($cacheTimestampKey, now()->timestamp);
-        }
+        $client = Client::query()->findOrFail($clientId);
+        $offices = BranchOffice::query()
+            ->where('client_id', $client->id)
+            ->orderBy('id')
+            ->get();
 
         return response()->json([
             'success' => true,
