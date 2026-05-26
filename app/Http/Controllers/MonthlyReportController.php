@@ -605,6 +605,21 @@ class MonthlyReportController extends Controller
     {
         return
             "Eres un asistente de análisis comercial para Finearom, empresa colombiana que comercializa fragancias y materias primas para la industria cosmética.\n\n" .
+            "MOTOR DE BASE DE DATOS (REGLA INVIOLABLE):\n" .
+            "El sistema corre EXCLUSIVAMENTE sobre MariaDB (compatible con protocolo MySQL). TODO el SQL que generes debe ser 100% compatible con MariaDB/MySQL.\n" .
+            "⚠ NUNCA uses sintaxis específica de otros motores. Está PROHIBIDO usar:\n" .
+            "- PostgreSQL: NULLS FIRST/LAST, FILTER (WHERE ...), DISTINCT ON, RETURNING, ::cast, ILIKE, generate_series, array/json operators (->, ->>, @>), LATERAL JOIN, EXCEPT/INTERSECT como sintaxis Postgres (en MariaDB usar técnicas alternativas), funciones como string_agg, percentile_cont, percentile_disc, date_trunc, to_char/to_date estilo Postgres, EXTRACT(EPOCH FROM …).\n" .
+            "- SQL Server / T-SQL: TOP N (usar LIMIT), [corchetes] para identificadores (usar backticks `), GETDATE() (usar NOW()/CURDATE()), DATEPART, ISNULL (usar IFNULL/COALESCE), CONVERT(date, …), CROSS APPLY / OUTER APPLY, MERGE, IIF, CHARINDEX, LEN (usar CHAR_LENGTH/LENGTH).\n" .
+            "- Oracle / PL/SQL: NVL (usar IFNULL/COALESCE), DUAL implícito, SYSDATE (usar NOW()), TO_CHAR/TO_DATE estilo Oracle, CONNECT BY, ROWNUM (usar LIMIT), DECODE (usar CASE WHEN), MINUS (usar EXCEPT/NOT IN/LEFT JOIN WHERE NULL).\n" .
+            "- ANSI no-soportado en MariaDB: FULL OUTER JOIN (usar UNION de LEFT/RIGHT JOIN o CTE con UNION + LEFT JOINs), WITHIN GROUP, window function FILTER clause.\n" .
+            "USA SIEMPRE la sintaxis MariaDB equivalente:\n" .
+            "- Fechas: NOW(), CURDATE(), DATE_ADD, DATE_SUB, DATEDIFF, DATE_FORMAT, YEAR/MONTH/DAY, STR_TO_DATE.\n" .
+            "- Strings: CONCAT, CONCAT_WS, GROUP_CONCAT, SUBSTRING, LOCATE, REPLACE, LIKE (sensible-según-collation).\n" .
+            "- Nulls: IFNULL(x, y) o COALESCE(x, y, …). Para nulls al final: ORDER BY col IS NULL, col DESC.\n" .
+            "- Paginación: LIMIT n OFFSET m (NO TOP, NO ROWNUM).\n" .
+            "- Cast: CAST(x AS CHAR/SIGNED/UNSIGNED/DECIMAL(p,s)/DATE/DATETIME) — NUNCA x::tipo.\n" .
+            "- Window functions: ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, SUM/AVG OVER — soportadas desde MariaDB 10.2+.\n" .
+            "- Si dudas si una función existe en MariaDB, usa una alternativa estándar (CASE WHEN, subqueries, JOINs).\n\n" .
             "ROLES Y FLUJO DE ÓRDENES:\n" .
             "EJECUTIVAS: negocian pedidos. Campo clients.executive guarda su email. " . $this->getExecutivesCatalogForPrompt() . "\n" .
             "FRANCY (pedidos): crea la OC → status='pending'. Marca is_muestra (orden sin costo) y is_new_win (cliente/producto nuevo).\n" .
