@@ -11,6 +11,27 @@ class CarteraStoreRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $cartera = $this->input('cartera', []);
+
+        if (is_array($cartera)) {
+            foreach ($cartera as $i => $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                if (!array_key_exists('vencido', $row) || $row['vencido'] === null || $row['vencido'] === '') {
+                    $cartera[$i]['vencido'] = 0;
+                }
+                if (!array_key_exists('saldo_vencido', $row) || $row['saldo_vencido'] === null || $row['saldo_vencido'] === '') {
+                    $cartera[$i]['saldo_vencido'] = 0;
+                }
+            }
+
+            $this->merge(['cartera' => $cartera]);
+        }
+    }
+
     public function rules(): array
     {
         return [
