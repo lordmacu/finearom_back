@@ -19,9 +19,11 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Shared\Date as SpreadsheetDate;
 
 class MonthlyReportController extends Controller
 {
@@ -1539,6 +1541,11 @@ class MonthlyReportController extends Controller
         $sheet->setTitle('Consulta');
 
         $colCount = count($columns);
+        $rowCount = count($rows);
+
+        // Detección de tipo por columna (numeric / date / text) usando muestreo
+        // de hasta 30 filas no vacías por columna
+        $colTypes = $this->detectColumnTypes($rows, $colCount);
 
         // Encabezados
         foreach ($columns as $i => $label) {
@@ -1546,12 +1553,31 @@ class MonthlyReportController extends Controller
             $sheet->setCellValue("{$letter}1", (string) $label);
         }
         $lastColLetter = Coordinate::stringFromColumnIndex($colCount);
-        $headerRange = "A1:{$lastColLetter}1";
-        $sheet->getStyle($headerRange)->getFont()->setBold(true);
-        $sheet->getStyle($headerRange)->getFill()
-            ->setFillType(Fill::FILL_SOLID)
-            ->getStartColor()->setRGB('E5E7EB');
-        $sheet->getStyle($headerRange)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $headerRange   = "A1:{$lastColLetter}1";
+
+        // Estilo header (azul corporativo, texto blanco, centrado)
+        $sheet->getStyle($headerRange)->applyFromArray([
+            'font' => [
+                'bold'  => true,
+                'color' => ['rgb' => 'FFFFFF'],
+                'size'  => 11,
+            ],
+            'fill' => [
+                'fillType'   => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => '4472C4'],
+            ],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_CENTER,
+                'vertical'   => Alignment::VERTICAL_CENTER,
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color'       => ['rgb' => '305496'],
+                ],
+            ],
+        ]);
+        $sheet->getRowDimension(1)->setRowHeight(22);
         $sheet->freezePane('A2');
 
         // Filas de datos
@@ -1561,10 +1587,19 @@ class MonthlyReportController extends Controller
             foreach ($values as $i => $v) {
                 $letter = Coordinate::stringFromColumnIndex($i + 1);
                 $coord  = "{$letter}{$r}";
+                $type   = $colTypes[$i] ?? 'text';
+
                 if ($v === null || $v === '') {
                     $sheet->setCellValue($coord, null);
-                } elseif (is_numeric($v)) {
+                } elseif ($type === 'numeric' && is_numeric($v)) {
                     $sheet->setCellValue($coord, $v + 0);
+                } elseif ($type === 'date' && $this->isDateLike($v)) {
+                    $ts = strtotime((string) $v);
+                    if ($ts !== false) {
+                        $sheet->setCellValue($coord, SpreadsheetDate::PHPToExcel($ts));
+                    } else {
+                        $sheet->setCellValueExplicit($coord, (string) $v, DataType::TYPE_STRING);
+                    }
                 } else {
                     $sheet->setCellValueExplicit($coord, (string) $v, DataType::TYPE_STRING);
                 }
@@ -1572,10 +1607,49 @@ class MonthlyReportController extends Controller
             $r++;
         }
 
+        $lastRow   = $rowCount + 1; // header + datos
+        $dataRange = "A2:{$lastColLetter}{$lastRow}";
+        $fullRange = "A1:{$lastColLetter}{$lastRow}";
+
+        if ($rowCount > 0) {
+            // Bordes finos para todo el rango de datos
+            $sheet->getStyle($fullRange)->getBorders()->getAllBorders()
+                ->setBorderStyle(Border::BORDER_THIN)
+                ->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFD0D7E5'));
+
+            // Zebra striping en filas pares
+            for ($rowIdx = 2; $rowIdx <= $lastRow; $rowIdx++) {
+                if ($rowIdx % 2 === 0) {
+                    $sheet->getStyle("A{$rowIdx}:{$lastColLetter}{$rowIdx}")
+                        ->getFill()
+                        ->setFillType(Fill::FILL_SOLID)
+                        ->getStartColor()->setRGB('F4F6FA');
+                }
+            }
+
+            // Formato por tipo de columna
+            for ($i = 0; $i < $colCount; $i++) {
+                $letter = Coordinate::stringFromColumnIndex($i + 1);
+                $colRange = "{$letter}2:{$letter}{$lastRow}";
+                if (($colTypes[$i] ?? 'text') === 'numeric') {
+                    $sheet->getStyle($colRange)->getNumberFormat()->setFormatCode('#,##0.00');
+                    $sheet->getStyle($colRange)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+                } elseif (($colTypes[$i] ?? 'text') === 'date') {
+                    $sheet->getStyle($colRange)->getNumberFormat()->setFormatCode('yyyy-mm-dd');
+                    $sheet->getStyle($colRange)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                }
+            }
+        }
+
         // Auto-size columnas
         for ($i = 1; $i <= $colCount; $i++) {
             $letter = Coordinate::stringFromColumnIndex($i);
             $sheet->getColumnDimension($letter)->setAutoSize(true);
+        }
+
+        // Auto-filter en el encabezado
+        if ($rowCount > 0) {
+            $sheet->setAutoFilter($fullRange);
         }
 
         $writer = new XlsxWriter($spreadsheet);
@@ -1586,6 +1660,51 @@ class MonthlyReportController extends Controller
             'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'Cache-Control'       => 'no-store, no-cache, must-revalidate',
         ]);
+    }
+
+    /**
+     * Detecta el tipo (numeric|date|text) de cada columna usando un muestreo de filas no vacías.
+     */
+    private function detectColumnTypes(array $rows, int $colCount): array
+    {
+        $types = array_fill(0, $colCount, 'text');
+        $sampleLimit = 30;
+
+        for ($i = 0; $i < $colCount; $i++) {
+            $numeric = 0;
+            $date    = 0;
+            $checked = 0;
+            foreach ($rows as $row) {
+                if ($checked >= $sampleLimit) break;
+                $v = $row[$i] ?? null;
+                if ($v === null || $v === '') continue;
+                $checked++;
+                if (is_numeric($v)) {
+                    $numeric++;
+                } elseif ($this->isDateLike($v)) {
+                    $date++;
+                }
+            }
+            if ($checked === 0) {
+                $types[$i] = 'text';
+            } elseif ($numeric === $checked) {
+                $types[$i] = 'numeric';
+            } elseif ($date === $checked) {
+                $types[$i] = 'date';
+            } else {
+                $types[$i] = 'text';
+            }
+        }
+        return $types;
+    }
+
+    /**
+     * Heurística: ¿el valor parece una fecha (YYYY-MM-DD o YYYY-MM-DD HH:MM:SS)?
+     */
+    private function isDateLike($value): bool
+    {
+        if (!is_string($value)) return false;
+        return (bool) preg_match('/^\d{4}-\d{2}-\d{2}(\s+\d{2}:\d{2}(:\d{2})?)?$/', trim($value));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
