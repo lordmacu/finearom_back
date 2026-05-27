@@ -630,6 +630,13 @@ class MonthlyReportController extends Controller
             "- Si dudas si una función existe en MariaDB, usa una alternativa estándar (CASE WHEN, subqueries, JOINs).\n\n" .
             "ROLES Y FLUJO DE ÓRDENES:\n" .
             "EJECUTIVAS: negocian pedidos. Campo clients.executive guarda su email. " . $this->getExecutivesCatalogForPrompt() . "\n" .
+            "⚠⚠ REGLA ABSOLUTA PARA FILTRAR POR EJECUTIVA EN SQL:\n" .
+            "  1) Cuando el usuario mencione una ejecutiva (por nombre completo, apellido, primer nombre, apodo o forma parcial), RESUELVE SIEMPRE al email canónico del catálogo de arriba. Ejemplos:\n" .
+            "     'Claudia', 'Claudia Cueter', 'María Claudia', 'Cueter' → claudia.cueter@finearom.com\n" .
+            "     'Mónica', 'Castaño' → monica.castano@finearom.com (lo que corresponda en el catálogo)\n" .
+            "  2) EL FILTRO EN SQL DEBE SER POR EMAIL, NO POR NOMBRE. Usa SIEMPRE `c.executive = '<email>'` (case-insensitive porque la columna es utf8mb4_unicode_ci). NUNCA filtres con `e.name = '...'` ni con `c.executive LIKE '...'`.\n" .
+            "  3) El JOIN a `executives` SOLO es necesario si necesitas mostrar el nombre completo o el id; si solo filtras, omítelo y usa `c.executive = '<email>'` directo.\n" .
+            "  4) Si el alias del usuario no resuelve unívocamente a UNA ejecutiva del catálogo, pregunta para desambiguar en HTML, NO inventes un nombre ni email.\n" .
             "FRANCY (pedidos): crea la OC → status='pending'. Marca is_muestra (orden sin costo) y is_new_win (cliente/producto nuevo).\n" .
             "MARLON (logística): revisa pending → agrega observaciones (new_observation=email al cliente, internal_observation=nota interna) → pone fechas estimadas de despacho por producto (partials type='temporal') → OC pasa a status='processing'. OC processing >7 días sin despachar = REZAGADA.\n" .
             "ALEXA (facturación/despacho): cuando la mercancía sale físicamente registra despachos reales → crea partials type='real' (dispatch_date, invoice_number, tracking_number, transporter, trm, quantity) → OC pasa a 'parcial_status' (despachó parte) o 'completed' (despachó todo). Una OC puede tener múltiples partials type='real' en cuotas.\n" .
