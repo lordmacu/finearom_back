@@ -16,6 +16,9 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
 
 class MonthlyReportController extends Controller
 {
@@ -1504,6 +1507,79 @@ class MonthlyReportController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()], 422);
         }
+    }
+
+    /**
+     * Exporta filas/columnas (resultados de runQuery) a un archivo .xlsx real.
+     * Body: { columns: [string], rows: [[mixed]], filename?: string }
+     */
+    public function exportXlsx(Request $request)
+    {
+        $request->validate([
+            'columns'    => 'required|array|min:1',
+            'columns.*'  => 'nullable|string|max:255',
+            'rows'       => 'required|array',
+            'rows.*'     => 'array',
+            'filename'   => 'nullable|string|max:120',
+        ]);
+
+        $columns  = array_values($request->input('columns'));
+        $rows     = $request->input('rows', []);
+        $rawName  = $request->input('filename') ?: 'consulta_' . now('America/Bogota')->format('Y-m-d_His');
+        $filename = preg_replace('/[^A-Za-z0-9._-]/', '_', $rawName);
+        if (!str_ends_with(strtolower($filename), '.xlsx')) {
+            $filename .= '.xlsx';
+        }
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Consulta');
+
+        // Encabezados
+        foreach ($columns as $i => $label) {
+            $cell = $sheet->getCellByColumnAndRow($i + 1, 1);
+            $cell->setValue((string) $label);
+        }
+        $lastColLetter = $sheet->getCellByColumnAndRow(count($columns), 1)->getColumn();
+        $headerRange = "A1:{$lastColLetter}1";
+        $sheet->getStyle($headerRange)->getFont()->setBold(true);
+        $sheet->getStyle($headerRange)->getFill()
+            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->getStartColor()->setRGB('E5E7EB');
+        $sheet->getStyle($headerRange)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->freezePane('A2');
+
+        // Filas de datos
+        $r = 2;
+        foreach ($rows as $row) {
+            $values = array_values((array) $row);
+            foreach ($values as $i => $v) {
+                $cell = $sheet->getCellByColumnAndRow($i + 1, $r);
+                if (is_numeric($v) && $v !== '') {
+                    $cell->setValue($v + 0);
+                } elseif ($v === null) {
+                    $cell->setValue(null);
+                } else {
+                    $cell->setValueExplicit((string) $v, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+                }
+            }
+            $r++;
+        }
+
+        // Auto-size columnas
+        foreach (range(1, count($columns)) as $i) {
+            $letter = $sheet->getCellByColumnAndRow($i, 1)->getColumn();
+            $sheet->getColumnDimension($letter)->setAutoSize(true);
+        }
+
+        $writer = new XlsxWriter($spreadsheet);
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control'       => 'no-store, no-cache, must-revalidate',
+        ]);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

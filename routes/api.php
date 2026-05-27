@@ -525,6 +525,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/dashboard/chat/start-v2',          [\App\Http\Controllers\MonthlyReportController::class, 'chatStartV2']);
     Route::post('/dashboard/chat/message',           [\App\Http\Controllers\MonthlyReportController::class, 'chatMessage']);
     Route::post('/dashboard/chat/run-query',         [\App\Http\Controllers\MonthlyReportController::class, 'runQuery']);
+    Route::post('/dashboard/chat/export-xlsx',       [\App\Http\Controllers\MonthlyReportController::class, 'exportXlsx']);
     Route::get('/dashboard/chat/model-limits',          [\App\Http\Controllers\MonthlyReportController::class, 'chatModelLimits']);
     Route::get('/dashboard/chat/sessions',              [\App\Http\Controllers\MonthlyReportController::class, 'chatSessions']);
     Route::delete('/dashboard/chat/sessions',           [\App\Http\Controllers\MonthlyReportController::class, 'chatSessionDeleteAll']);
