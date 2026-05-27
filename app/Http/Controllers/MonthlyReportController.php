@@ -1340,14 +1340,12 @@ class MonthlyReportController extends Controller
      * Solo permite SELECT — bloquea cualquier otra operación DML/DDL.
      */
     /**
-     * Reescribe sintaxis Postgres/Oracle común que la IA puede colar a la query
+     * Reescribe sintaxis Postgres/Oracle/SQL-Server común que la IA puede colar a la query
      * y la convierte a equivalentes válidos en MariaDB/MySQL.
      */
     private function sanitizeSqlForMariaDb(string $sql): string
     {
         // NULLS LAST / NULLS FIRST → patrón MariaDB (IS NULL / IS NOT NULL + ORDER)
-        // Soporta: <expr> [ASC|DESC] NULLS LAST/FIRST  donde <expr> es identificador
-        // simple (con calificador opcional a.b), o función simple func(...).
         $sql = preg_replace_callback(
             '/((?:`[^`]+`|[A-Za-z_][\w.]*)(?:\s*\([^()]*\))?)\s+(ASC|DESC)?\s*NULLS\s+(LAST|FIRST)\b/i',
             function ($m) {
@@ -1362,6 +1360,102 @@ class MonthlyReportController extends Controller
 
         // ILIKE → LIKE (las collations *_ci ya son case-insensitive en MariaDB)
         $sql = preg_replace('/\bILIKE\b/i', 'LIKE', $sql);
+
+        // ::TYPE casts (Postgres) → CAST(expr AS type_mariadb)
+        $pgTypeMap = [
+            'int'              => 'SIGNED',
+            'int2'             => 'SIGNED',
+            'int4'             => 'SIGNED',
+            'int8'             => 'SIGNED',
+            'integer'          => 'SIGNED',
+            'bigint'           => 'SIGNED',
+            'smallint'         => 'SIGNED',
+            'text'             => 'CHAR',
+            'varchar'          => 'CHAR',
+            'char'             => 'CHAR',
+            'date'             => 'DATE',
+            'timestamp'        => 'DATETIME',
+            'timestamptz'      => 'DATETIME',
+            'numeric'          => 'DECIMAL',
+            'decimal'          => 'DECIMAL',
+            'float'            => 'DECIMAL',
+            'real'             => 'DECIMAL',
+            'double'           => 'DECIMAL',
+            'bool'             => 'UNSIGNED',
+            'boolean'          => 'UNSIGNED',
+        ];
+        $sql = preg_replace_callback(
+            // Captura LHS: identificador (opcional con llamada de función PEGADA al identificador) o paréntesis balanceado simple.
+            // El paréntesis pegado al identificador (sin espacio) es función; un paréntesis suelto es agrupación.
+            '/((?:`[^`]+`|[A-Za-z_][\w.]*)(?:\([^()]*\))?|\([^()]+\))::([A-Za-z_]\w*)(\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?/i',
+            function ($m) use ($pgTypeMap) {
+                $expr     = $m[1];
+                $typeRaw  = strtolower($m[2]);
+                $args     = $m[3] ?? '';
+                $mariaType = $pgTypeMap[$typeRaw] ?? null;
+                if ($mariaType === null) {
+                    return $m[0]; // tipo desconocido, dejar igual
+                }
+                $cast = $mariaType . ($args ? trim($args) : '');
+                return "CAST({$expr} AS {$cast})";
+            },
+            $sql
+        );
+
+        // EXTRACT(EPOCH FROM x) → UNIX_TIMESTAMP(x)
+        $sql = preg_replace_callback(
+            '/EXTRACT\s*\(\s*EPOCH\s+FROM\s+([^()]+(?:\([^()]*\))?[^()]*)\)/i',
+            fn($m) => 'UNIX_TIMESTAMP(' . trim($m[1]) . ')',
+            $sql
+        );
+
+        // string_agg(expr, sep) → GROUP_CONCAT(expr SEPARATOR sep)
+        $sql = preg_replace_callback(
+            '/\bstring_agg\s*\(\s*([^,()]+(?:\([^()]*\))?[^,()]*)\s*,\s*((?:\'[^\']*\'|"[^"]*"|[^()]+?))\s*\)/i',
+            fn($m) => 'GROUP_CONCAT(' . trim($m[1]) . ' SEPARATOR ' . trim($m[2]) . ')',
+            $sql
+        );
+
+        // date_trunc('unit', expr) → equivalente MariaDB
+        $sql = preg_replace_callback(
+            "/\\bdate_trunc\\s*\\(\\s*'(\\w+)'\\s*,\\s*([^()]+(?:\\([^()]*\\))?[^()]*)\\)/i",
+            function ($m) {
+                $unit = strtolower($m[1]);
+                $expr = trim($m[2]);
+                switch ($unit) {
+                    case 'day':   return "DATE({$expr})";
+                    case 'month': return "DATE_FORMAT({$expr}, '%Y-%m-01')";
+                    case 'year':  return "DATE_FORMAT({$expr}, '%Y-01-01')";
+                    case 'hour':  return "DATE_FORMAT({$expr}, '%Y-%m-%d %H:00:00')";
+                    case 'minute':return "DATE_FORMAT({$expr}, '%Y-%m-%d %H:%i:00')";
+                    default:      return $m[0]; // unidad no mapeada, dejar igual
+                }
+            },
+            $sql
+        );
+
+        // SYSDATE (Oracle) → NOW()
+        $sql = preg_replace('/\bSYSDATE\b(?!\s*\()/i', 'NOW()', $sql);
+
+        // NVL(x, y) (Oracle) → IFNULL(x, y)
+        $sql = preg_replace('/\bNVL\s*\(/i', 'IFNULL(', $sql);
+
+        // GETDATE() (SQL Server) → NOW()
+        $sql = preg_replace('/\bGETDATE\s*\(\s*\)/i', 'NOW()', $sql);
+
+        // ISNULL(x, y) (SQL Server) → IFNULL(x, y)
+        // Cuidado: ISNULL(x) sin 2do arg en MariaDB es un test booleano; sólo reescribimos la forma de 2 args.
+        $sql = preg_replace_callback(
+            '/\bISNULL\s*\(\s*([^,()]+(?:\([^()]*\))?[^,()]*)\s*,\s*([^()]+(?:\([^()]*\))?[^()]*)\)/i',
+            fn($m) => 'IFNULL(' . trim($m[1]) . ', ' . trim($m[2]) . ')',
+            $sql
+        );
+
+        // LEN(x) (SQL Server) → CHAR_LENGTH(x)
+        $sql = preg_replace('/\bLEN\s*\(/i', 'CHAR_LENGTH(', $sql);
+
+        // CHARINDEX(needle, haystack) (SQL Server) → LOCATE(needle, haystack)
+        $sql = preg_replace('/\bCHARINDEX\s*\(/i', 'LOCATE(', $sql);
 
         return $sql;
     }
