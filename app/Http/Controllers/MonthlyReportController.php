@@ -19,6 +19,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 
 class MonthlyReportController extends Controller
 {
@@ -1535,16 +1538,18 @@ class MonthlyReportController extends Controller
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Consulta');
 
+        $colCount = count($columns);
+
         // Encabezados
         foreach ($columns as $i => $label) {
-            $cell = $sheet->getCellByColumnAndRow($i + 1, 1);
-            $cell->setValue((string) $label);
+            $letter = Coordinate::stringFromColumnIndex($i + 1);
+            $sheet->setCellValue("{$letter}1", (string) $label);
         }
-        $lastColLetter = $sheet->getCellByColumnAndRow(count($columns), 1)->getColumn();
+        $lastColLetter = Coordinate::stringFromColumnIndex($colCount);
         $headerRange = "A1:{$lastColLetter}1";
         $sheet->getStyle($headerRange)->getFont()->setBold(true);
         $sheet->getStyle($headerRange)->getFill()
-            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->setFillType(Fill::FILL_SOLID)
             ->getStartColor()->setRGB('E5E7EB');
         $sheet->getStyle($headerRange)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->freezePane('A2');
@@ -1554,21 +1559,22 @@ class MonthlyReportController extends Controller
         foreach ($rows as $row) {
             $values = array_values((array) $row);
             foreach ($values as $i => $v) {
-                $cell = $sheet->getCellByColumnAndRow($i + 1, $r);
-                if (is_numeric($v) && $v !== '') {
-                    $cell->setValue($v + 0);
-                } elseif ($v === null) {
-                    $cell->setValue(null);
+                $letter = Coordinate::stringFromColumnIndex($i + 1);
+                $coord  = "{$letter}{$r}";
+                if ($v === null || $v === '') {
+                    $sheet->setCellValue($coord, null);
+                } elseif (is_numeric($v)) {
+                    $sheet->setCellValue($coord, $v + 0);
                 } else {
-                    $cell->setValueExplicit((string) $v, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit($coord, (string) $v, DataType::TYPE_STRING);
                 }
             }
             $r++;
         }
 
         // Auto-size columnas
-        foreach (range(1, count($columns)) as $i) {
-            $letter = $sheet->getCellByColumnAndRow($i, 1)->getColumn();
+        for ($i = 1; $i <= $colCount; $i++) {
+            $letter = Coordinate::stringFromColumnIndex($i);
             $sheet->getColumnDimension($letter)->setAutoSize(true);
         }
 
