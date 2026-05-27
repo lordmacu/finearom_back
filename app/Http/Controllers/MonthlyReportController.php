@@ -789,8 +789,18 @@ class MonthlyReportController extends Controller
             "- ⚠ MES: sf.mes es VARCHAR español. Para cruzar con MONTH(par.dispatch_date) usa FIELD: MONTH(par.dispatch_date) = FIELD(sf.mes,'ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE')\n" .
             "- ⚠ INTENCIÓN 'total pronosticado por cliente' / 'total del presupuesto por cliente': AGRUPA SOLO por c.client_name,c.nit. NO incluyas referencia/producto/código en SELECT ni GROUP BY salvo que el usuario pida explícitamente 'por referencia', 'por producto', 'por código' o 'desglose'.\n" .
             "- ⚠ Si piden 'en pesos', 'COP' o 'valor en pesos' para forecasts: calcula valor_usd = SUM(cantidad_forecast * precio) y valor_cop = valor_usd * TRM más reciente: COALESCE((SELECT value FROM trm_daily WHERE date <= CURDATE() ORDER BY date DESC LIMIT 1), 4000). Los forecasts no tienen TRM propia.\n" .
-            "- PATRÓN RECOMENDADO (real vs pronóstico por producto y año):\n" .
-            "  WITH reales AS (\n" .
+            "- ⚠⚠⚠ REGLA ABSOLUTA (anti-duplicación de forecasts):\n" .
+            "  La tabla `products` tiene DUPLICADOS REALES por (client_id, code) — el mismo código puede aparecer 2-3 veces con el mismo o distinto product_name. Si haces `JOIN products p ON p.client_id=c.id AND p.code=sf.codigo` SIN deduplicar, cada forecast se multiplica por el número de duplicados.\n" .
+            "  Ejemplo confirmado: Jabones El Tigre, code 14400, tiene 2 filas en products → SUM(cantidad_forecast) reporta 1000 cuando el real son 500.\n" .
+            "  Esto NO se detecta visualmente porque GROUP BY product_name colapsa filas idénticas pero el SUM ya quedó duplicado.\n" .
+            "  ⇒ SIEMPRE que la query sume/agregue `sf.cantidad_forecast` y JOIN a products, USA EL CTE `product_ranked` PRIMERO y filtra `p.rn = 1` en la JOIN al outer.\n" .
+            "- PATRÓN RECOMENDADO (real vs pronóstico por producto y año) — USA EXACTAMENTE ESTA ESTRUCTURA:\n" .
+            "  WITH product_ranked AS (\n" .
+            "    SELECT id, client_id, code, product_name,\n" .
+            "           ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn\n" .
+            "    FROM products\n" .
+            "  ),\n" .
+            "  reales AS (\n" .
             "    SELECT c.nit, p.code AS codigo, YEAR(par.dispatch_date) AS anio, SUM(par.quantity) AS kilos_reales\n" .
             "    FROM partials par\n" .
             "    JOIN purchase_order_product pop ON pop.id = par.product_order_id\n" .
@@ -807,11 +817,13 @@ class MonthlyReportController extends Controller
             "         ROUND(COALESCE(r.kilos_reales,0) / NULLIF(SUM(sf.cantidad_forecast),0) * 100, 2) AS cumplimiento_pct\n" .
             "  FROM sales_forecasts sf\n" .
             "  JOIN clients c ON c.nit = sf.nit\n" .
-            "  JOIN products p ON p.client_id = c.id AND p.code = sf.codigo\n" .
+            "  JOIN product_ranked p ON p.client_id = c.id AND p.code = sf.codigo AND p.rn = 1\n" .
             "  LEFT JOIN reales r ON r.nit = sf.nit AND r.codigo = sf.codigo AND CAST(r.anio AS CHAR) = sf.año\n" .
             "  WHERE sf.modelo = 'manual'\n" .
             "  GROUP BY sf.año, c.client_name, sf.codigo, p.product_name, r.kilos_reales\n" .
             "  ORDER BY sf.año DESC, kilos_faltantes DESC\n" .
+            "  → product_ranked NO afecta el CTE `reales` (los partials apuntan a un product_id específico, no se duplican). product_ranked SOLO se usa en el OUTER JOIN para que el código del forecast empate con UNA fila de products, no varias.\n" .
+            "  → Si la query NO suma cantidad_forecast (ej. solo cuenta clientes distintos), el JOIN simple a products es seguro. Pero ante CUALQUIER `SUM(sf.cantidad_forecast)` o `SUM(sf.cantidad_forecast * price)`, usa product_ranked.\n" .
             "- ⚠ EXCLUIR CANCELADAS: en el CTE `reales` SIEMPRE filtra `po.status != 'cancelled'` — los partials de OCs canceladas no cuentan como despacho real.\n" .
             "- ⚠ INTERPRETACIÓN 'qué falta por vender' / 'qué no ha salido' / 'pendientes' / 'brechas': el usuario pregunta por productos donde lo despachado es MENOR a lo pronosticado (no solo cero). Filtra `WHERE pronosticado > COALESCE(real, 0)` (NO uses `real = 0`). Incluye `kilos_faltantes = pronosticado - COALESCE(real,0)` y `cumplimiento_pct` para que se vea el avance parcial. Ordena por `kilos_faltantes DESC`.\n" .
             "- ⚠ INTERPRETACIÓN 'sin despachar nada' / 'no se ha despachado en absoluto' / 'cero ventas': SÍ filtra `COALESCE(real,0) = 0` — el usuario pidió específicamente los que no han salido del todo.\n" .
