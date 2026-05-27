@@ -1339,6 +1339,33 @@ class MonthlyReportController extends Controller
      * Ejecuta una query SELECT enviada por el frontend (generada por la IA).
      * Solo permite SELECT — bloquea cualquier otra operación DML/DDL.
      */
+    /**
+     * Reescribe sintaxis Postgres/Oracle común que la IA puede colar a la query
+     * y la convierte a equivalentes válidos en MariaDB/MySQL.
+     */
+    private function sanitizeSqlForMariaDb(string $sql): string
+    {
+        // NULLS LAST / NULLS FIRST → patrón MariaDB (IS NULL / IS NOT NULL + ORDER)
+        // Soporta: <expr> [ASC|DESC] NULLS LAST/FIRST  donde <expr> es identificador
+        // simple (con calificador opcional a.b), o función simple func(...).
+        $sql = preg_replace_callback(
+            '/((?:`[^`]+`|[A-Za-z_][\w.]*)(?:\s*\([^()]*\))?)\s+(ASC|DESC)?\s*NULLS\s+(LAST|FIRST)\b/i',
+            function ($m) {
+                $expr = trim($m[1]);
+                $dir  = strtoupper($m[2] ?? '') ?: 'ASC';
+                $pos  = strtoupper($m[3]);
+                $nullCheck = $pos === 'LAST' ? 'IS NULL' : 'IS NOT NULL';
+                return "{$expr} {$nullCheck}, {$expr} {$dir}";
+            },
+            $sql
+        );
+
+        // ILIKE → LIKE (las collations *_ci ya son case-insensitive en MariaDB)
+        $sql = preg_replace('/\bILIKE\b/i', 'LIKE', $sql);
+
+        return $sql;
+    }
+
     public function runQuery(Request $request): JsonResponse
     {
         $request->validate(['sql' => 'required|string|max:5000']);
@@ -1358,6 +1385,8 @@ class MonthlyReportController extends Controller
                 return response()->json(['success' => false, 'message' => 'Query no permitida'], 422);
             }
         }
+
+        $sql = $this->sanitizeSqlForMariaDb($sql);
 
         try {
             $results = DB::select($sql);
