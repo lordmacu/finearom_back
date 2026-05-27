@@ -787,7 +787,7 @@ class MonthlyReportController extends Controller
             "    FROM partials par\n" .
             "    JOIN purchase_order_product pop ON pop.id = par.product_order_id\n" .
             "    JOIN products p ON p.id = pop.product_id\n" .
-            "    JOIN purchase_orders po ON po.id = par.order_id\n" .
+            "    JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'\n" .
             "    JOIN clients c ON c.id = po.client_id\n" .
             "    WHERE par.type='real' AND par.deleted_at IS NULL AND pop.muestra=0\n" .
             "    GROUP BY c.nit, p.code, YEAR(par.dispatch_date)\n" .
@@ -795,15 +795,18 @@ class MonthlyReportController extends Controller
             "  SELECT sf.año AS anio, c.client_name AS cliente, sf.codigo, p.product_name AS referencia,\n" .
             "         SUM(sf.cantidad_forecast) AS kilos_pronosticados,\n" .
             "         COALESCE(r.kilos_reales, 0) AS kilos_reales,\n" .
-            "         ROUND(COALESCE(r.kilos_reales,0) - SUM(sf.cantidad_forecast), 2) AS diff_kg,\n" .
+            "         ROUND(SUM(sf.cantidad_forecast) - COALESCE(r.kilos_reales,0), 2) AS kilos_faltantes,\n" .
             "         ROUND(COALESCE(r.kilos_reales,0) / NULLIF(SUM(sf.cantidad_forecast),0) * 100, 2) AS cumplimiento_pct\n" .
             "  FROM sales_forecasts sf\n" .
             "  JOIN clients c ON c.nit = sf.nit\n" .
-            "  JOIN products p ON p.client_id = c.id AND p.code COLLATE utf8mb4_unicode_ci = sf.codigo\n" .
-            "  LEFT JOIN reales r ON r.nit = sf.nit AND r.codigo COLLATE utf8mb4_unicode_ci = sf.codigo AND CAST(r.anio AS CHAR) = sf.año\n" .
+            "  JOIN products p ON p.client_id = c.id AND p.code = sf.codigo\n" .
+            "  LEFT JOIN reales r ON r.nit = sf.nit AND r.codigo = sf.codigo AND CAST(r.anio AS CHAR) = sf.año\n" .
             "  WHERE sf.modelo = 'manual'\n" .
             "  GROUP BY sf.año, c.client_name, sf.codigo, p.product_name, r.kilos_reales\n" .
-            "  ORDER BY sf.año DESC, cumplimiento_pct DESC\n" .
+            "  ORDER BY sf.año DESC, kilos_faltantes DESC\n" .
+            "- ⚠ EXCLUIR CANCELADAS: en el CTE `reales` SIEMPRE filtra `po.status != 'cancelled'` — los partials de OCs canceladas no cuentan como despacho real.\n" .
+            "- ⚠ INTERPRETACIÓN 'qué falta por vender' / 'qué no ha salido' / 'pendientes' / 'brechas': el usuario pregunta por productos donde lo despachado es MENOR a lo pronosticado (no solo cero). Filtra `WHERE pronosticado > COALESCE(real, 0)` (NO uses `real = 0`). Incluye `kilos_faltantes = pronosticado - COALESCE(real,0)` y `cumplimiento_pct` para que se vea el avance parcial. Ordena por `kilos_faltantes DESC`.\n" .
+            "- ⚠ INTERPRETACIÓN 'sin despachar nada' / 'no se ha despachado en absoluto' / 'cero ventas': SÍ filtra `COALESCE(real,0) = 0` — el usuario pidió específicamente los que no han salido del todo.\n" .
             "- Si el usuario pide por mes: agrega sf.mes en SELECT/GROUP BY y en el LEFT JOIN cruza con FIELD(sf.mes,...).\n" .
             "- ALCANCE del reporte — maneja ambos casos:\n" .
             "  → GENERAL (todos los clientes con presupuesto): NO filtres por c.nit. Agrupa por cliente y/o producto para ver quién cumple y quién no.\n" .
