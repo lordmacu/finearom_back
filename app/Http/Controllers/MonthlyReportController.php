@@ -407,10 +407,15 @@ class MonthlyReportController extends Controller
                 $dhlSystemNote = '';
             }
 
-            // System con período incluido (estable todo el día → prefix cache de DeepSeek aplica)
-            // La TRM cambia diario, pero dentro del mismo día todas las requests comparten el mismo prefijo.
-            $systemContent = $this->buildSystemPrompt() . "\n\n" . $this->buildPeriodContext($periodStart, $periodEnd, now('America/Bogota')->toDateString(), $trmNowStr);
-            $systemMessages = [['role' => 'system', 'content' => $systemContent]];
+            // 3 mensajes system separados → maximiza el cache prefix de DeepSeek:
+            //   1) Stable (rules + 30 ejemplos): NUNCA cambia → siempre cache HIT
+            //   2) Catálogos (executives + clients): cambia raramente
+            //   3) Período (fechas + TRM): cambia cada request → no se cachea
+            $systemMessages = [
+                ['role' => 'system', 'content' => $this->buildSystemPrompt()],
+                ['role' => 'system', 'content' => $this->buildCatalogsBlock()],
+                ['role' => 'system', 'content' => $this->buildPeriodContext($periodStart, $periodEnd, now('America/Bogota')->toDateString(), $trmNowStr)],
+            ];
             if ($dhlSystemNote) {
                 $systemMessages[] = ['role' => 'system', 'content' => $dhlSystemNote];
             }
@@ -629,7 +634,7 @@ class MonthlyReportController extends Controller
             "- Window functions: ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, SUM/AVG OVER — soportadas desde MariaDB 10.2+.\n" .
             "- Si dudas si una función existe en MariaDB, usa una alternativa estándar (CASE WHEN, subqueries, JOINs).\n\n" .
             "ROLES Y FLUJO DE ÓRDENES:\n" .
-            "EJECUTIVAS: negocian pedidos. Campo clients.executive guarda su email. " . $this->getExecutivesCatalogForPrompt() . "\n" .
+            "EJECUTIVAS: negocian pedidos. Campo clients.executive guarda su email. (El catálogo de ejecutivas activas se inyecta en un mensaje system aparte.)\n" .
             "⚠⚠ REGLA ABSOLUTA PARA FILTRAR POR EJECUTIVA EN SQL:\n" .
             "  1) Cuando el usuario mencione una ejecutiva (por nombre completo, apellido, primer nombre, apodo o forma parcial), RESUELVE SIEMPRE al email canónico del catálogo de arriba. Ejemplos:\n" .
             "     'Claudia', 'Claudia Cueter', 'María Claudia', 'Cueter' → claudia.cueter@finearom.com\n" .
@@ -927,7 +932,571 @@ class MonthlyReportController extends Controller
             "UNION ALL SELECT 'despacho real (Alexa)',3,par_r.dispatch_date,po.order_consecutive,po.status,c.client_name,c.nit,REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),par_r.invoice_number,par_r.tracking_number,par_r.transporter,par_r.quantity FROM partials par_r JOIN purchase_orders po ON po.id=par_r.order_id JOIN clients c ON c.id=po.client_id WHERE par_r.tracking_number='{N}' AND par_r.type='real' AND par_r.deleted_at IS NULL\n" .
             "ORDER BY fase_orden DESC, fecha DESC\n" .
             "showing: fase, fecha, OC, cliente, estado, factura, guía, kilos. available: transportador, NIT, ejecutiva.\n\n" .
-            $this->getClientsCatalogForPrompt();
+            $this->buildExamplesBlock();
+    }
+
+    /**
+     * 30 queries de referencia validadas contra producción.
+     * 100% estático — no llama BD. Sirve para que la IA infiera relaciones y patrones de JOIN
+     * cuando construya queries nuevas. Está incluido en el system prompt principal (cacheable por DeepSeek).
+     */
+    private function buildExamplesBlock(): string
+    {
+        return <<<'EOT'
+
+═══════════════════════════════════════════════════════════════════════════
+30 EJEMPLOS DE QUERIES DE REFERENCIA (validadas en producción)
+USA ESTAS COMO PLANTILLA — INFIERE LAS RELACIONES Y JOINS, ADAPTA PARÁMETROS.
+═══════════════════════════════════════════════════════════════════════════
+
+─── A. ÓRDENES DE COMPRA ──────────────────────────────────────────────────
+
+# 1. OCs creadas en un rango de fechas con totales
+SELECT po.order_consecutive, c.client_name, c.nit, po.order_creation_date, po.status,
+       po.is_new_win, po.is_muestra,
+       COUNT(DISTINCT pop.id) AS lineas,
+       SUM(pop.quantity) AS kilos_totales,
+       SUM(pop.quantity * pop.price) AS valor_usd
+FROM purchase_orders po
+JOIN clients c ON c.id = po.client_id
+LEFT JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0
+WHERE po.order_creation_date BETWEEN '2026-05-01' AND '2026-05-31'
+  AND po.status != 'cancelled'
+GROUP BY po.id, po.order_consecutive, c.client_name, c.nit, po.order_creation_date, po.status, po.is_new_win, po.is_muestra
+ORDER BY po.order_creation_date DESC;
+
+# 2. OCs pendientes con días desde creación
+SELECT po.order_consecutive, c.client_name, po.order_creation_date,
+       DATEDIFF(CURDATE(), po.order_creation_date) AS dias_pendiente,
+       SUM(pop.quantity) AS kilos_solicitados
+FROM purchase_orders po
+JOIN clients c ON c.id = po.client_id
+LEFT JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0
+WHERE po.status = 'pending'
+GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date
+ORDER BY dias_pendiente DESC;
+
+# 3. OCs rezagadas: processing >7 días sin partials reales
+SELECT po.order_consecutive, c.client_name, po.order_creation_date,
+       DATEDIFF(CURDATE(), po.order_creation_date) AS dias_sin_despacho,
+       SUM(pop.quantity) AS kilos_solicitados
+FROM purchase_orders po
+JOIN clients c ON c.id = po.client_id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0
+WHERE po.status = 'processing'
+  AND DATEDIFF(CURDATE(), po.order_creation_date) > 7
+  AND NOT EXISTS (
+    SELECT 1 FROM partials par
+    WHERE par.order_id = po.id AND par.type = 'real' AND par.deleted_at IS NULL
+  )
+GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date
+ORDER BY dias_sin_despacho DESC;
+
+# 4. OCs creadas por ejecutiva en un mes (count + kilos)
+SELECT e.name AS ejecutiva, COUNT(DISTINCT po.id) AS ocs_creadas,
+       SUM(pop.quantity) AS kilos_solicitados
+FROM purchase_orders po
+JOIN clients c ON c.id = po.client_id
+JOIN executives e ON e.email = c.executive AND e.is_active = 1
+LEFT JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0
+WHERE po.order_creation_date BETWEEN '2026-05-01' AND '2026-05-31'
+  AND po.status != 'cancelled'
+GROUP BY e.id, e.name
+ORDER BY kilos_solicitados DESC;
+
+# 5. Top 20 OCs por valor USD del año
+SELECT po.order_consecutive, c.client_name, po.order_creation_date, po.status,
+       SUM(pop.quantity) AS kilos,
+       SUM(pop.quantity * pop.price) AS valor_usd
+FROM purchase_orders po
+JOIN clients c ON c.id = po.client_id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0
+WHERE YEAR(po.order_creation_date) = 2026
+  AND po.status != 'cancelled'
+GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date, po.status
+ORDER BY valor_usd DESC
+LIMIT 20;
+
+# 6. Kilos pendientes en OCs parcial_status (pedido - despachado > 0)
+WITH despachado AS (
+  SELECT par.product_order_id, SUM(par.quantity) AS kilos_reales
+  FROM partials par
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+  GROUP BY par.product_order_id
+)
+SELECT po.order_consecutive, c.client_name, p.code, p.product_name,
+       pop.quantity AS kilos_pedidos,
+       COALESCE(d.kilos_reales, 0) AS kilos_despachados,
+       pop.quantity - COALESCE(d.kilos_reales, 0) AS kilos_pendientes
+FROM purchase_orders po
+JOIN clients c ON c.id = po.client_id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0
+JOIN products p ON p.id = pop.product_id
+LEFT JOIN despachado d ON d.product_order_id = pop.id
+WHERE po.status = 'parcial_status'
+  AND pop.quantity > COALESCE(d.kilos_reales, 0)
+ORDER BY kilos_pendientes DESC;
+
+─── B. DESPACHOS (partials reales) ────────────────────────────────────────
+
+# 7. Despachos del mes con factura, guía, TRM
+SELECT par.dispatch_date, po.order_consecutive, c.client_name,
+       p.code, p.product_name, par.quantity AS kilos,
+       par.invoice_number, par.tracking_number, par.transporter,
+       (par.trm + 0) AS trm
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN products p ON p.id = pop.product_id
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+JOIN clients c ON c.id = po.client_id
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
+ORDER BY par.dispatch_date DESC;
+
+# 8. Top 10 productos más despachados del mes (con product_ranked)
+WITH product_ranked AS (
+  SELECT id, client_id, code, product_name,
+         ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
+  FROM products
+)
+SELECT p.code, p.product_name, SUM(par.quantity) AS kilos_despachados,
+       COUNT(DISTINCT po.client_id) AS clientes_atendidos
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+JOIN product_ranked p ON p.id = pop.product_id AND p.rn = 1
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
+GROUP BY p.code, p.product_name
+ORDER BY kilos_despachados DESC
+LIMIT 10;
+
+# 9. Promedio de días entre creación de OC y primer despacho real
+WITH primer_real AS (
+  SELECT par.order_id, MIN(par.dispatch_date) AS first_dispatch
+  FROM partials par
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+  GROUP BY par.order_id
+)
+SELECT AVG(DATEDIFF(pr.first_dispatch, po.order_creation_date)) AS dias_promedio,
+       MIN(DATEDIFF(pr.first_dispatch, po.order_creation_date)) AS dias_min,
+       MAX(DATEDIFF(pr.first_dispatch, po.order_creation_date)) AS dias_max,
+       COUNT(*) AS ocs_consideradas
+FROM purchase_orders po
+JOIN primer_real pr ON pr.order_id = po.id
+WHERE YEAR(pr.first_dispatch) = 2026
+  AND po.status != 'cancelled';
+
+# 10. Top 10 clientes por kilos despachados del año
+SELECT c.client_name, c.nit, SUM(par.quantity) AS kilos_despachados,
+       COUNT(DISTINCT po.id) AS ocs_atendidas
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+JOIN clients c ON c.id = po.client_id
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND YEAR(par.dispatch_date) = 2026
+GROUP BY c.id, c.client_name, c.nit
+ORDER BY kilos_despachados DESC
+LIMIT 10;
+
+# 11. Productos despachados del mes con valor USD y COP
+SELECT par.dispatch_date, c.client_name, p.code, p.product_name,
+       par.quantity AS kilos, pop.price AS precio_usd,
+       (par.quantity * pop.price) AS valor_usd,
+       (par.trm + 0) AS trm,
+       (par.quantity * pop.price * (par.trm + 0)) AS valor_cop
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN products p ON p.id = pop.product_id
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+JOIN clients c ON c.id = po.client_id
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
+ORDER BY valor_usd DESC;
+
+# 12. Total facturado mes a mes del año (kilos, USD, COP)
+SELECT MONTH(par.dispatch_date) AS mes_num,
+       DATE_FORMAT(par.dispatch_date, '%Y-%m') AS mes,
+       SUM(par.quantity) AS kilos,
+       SUM(par.quantity * pop.price) AS valor_usd,
+       SUM(par.quantity * pop.price * (par.trm + 0)) AS valor_cop
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND YEAR(par.dispatch_date) = 2026
+GROUP BY MONTH(par.dispatch_date), DATE_FORMAT(par.dispatch_date, '%Y-%m')
+ORDER BY mes_num;
+
+─── C. PRONÓSTICOS (modelo manual = presupuesto comercial) ────────────────
+
+# 13. Pronóstico vs real por producto en un mes (con product_ranked OBLIGATORIO)
+WITH product_ranked AS (
+  SELECT id, client_id, code, product_name,
+         ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
+  FROM products
+),
+reales AS (
+  SELECT c.nit, p.code AS codigo, SUM(par.quantity) AS kilos_reales
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN products p ON p.id = pop.product_id
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
+  GROUP BY c.nit, p.code
+)
+SELECT c.client_name AS cliente, sf.codigo, p.product_name AS referencia,
+       SUM(sf.cantidad_forecast) AS kilos_pronosticados,
+       COALESCE(r.kilos_reales, 0) AS kilos_reales,
+       SUM(sf.cantidad_forecast) - COALESCE(r.kilos_reales, 0) AS kilos_faltantes,
+       ROUND(COALESCE(r.kilos_reales, 0) / NULLIF(SUM(sf.cantidad_forecast), 0) * 100, 2) AS cumplimiento_pct
+FROM sales_forecasts sf
+JOIN clients c ON c.nit = sf.nit
+JOIN product_ranked p ON p.client_id = c.id AND p.code = sf.codigo AND p.rn = 1
+LEFT JOIN reales r ON r.nit = sf.nit AND r.codigo = sf.codigo
+WHERE sf.modelo = 'manual' AND sf.año = '2026' AND sf.mes = 'MAYO'
+GROUP BY c.client_name, sf.codigo, p.product_name, r.kilos_reales
+ORDER BY kilos_faltantes DESC;
+
+# 14. Pronóstico vs real por cliente (sin desglose de producto — no necesita product_ranked)
+WITH reales AS (
+  SELECT c.nit, SUM(par.quantity) AS kilos_reales
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
+  GROUP BY c.nit
+)
+SELECT c.client_name AS cliente, c.nit,
+       SUM(sf.cantidad_forecast) AS kilos_pronosticados,
+       COALESCE(r.kilos_reales, 0) AS kilos_reales,
+       SUM(sf.cantidad_forecast) - COALESCE(r.kilos_reales, 0) AS kilos_faltantes,
+       ROUND(COALESCE(r.kilos_reales, 0) / NULLIF(SUM(sf.cantidad_forecast), 0) * 100, 2) AS cumplimiento_pct
+FROM sales_forecasts sf
+JOIN clients c ON c.nit = sf.nit
+LEFT JOIN reales r ON r.nit = sf.nit
+WHERE sf.modelo = 'manual' AND sf.año = '2026' AND sf.mes = 'MAYO'
+GROUP BY c.client_name, c.nit, r.kilos_reales
+ORDER BY kilos_faltantes DESC;
+
+# 15. Cumplimiento por ejecutiva en un mes
+WITH reales AS (
+  SELECT c.nit, SUM(par.quantity) AS kilos_reales
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
+  GROUP BY c.nit
+)
+SELECT e.name AS ejecutiva,
+       SUM(sf.cantidad_forecast) AS kilos_pronosticados,
+       SUM(COALESCE(r.kilos_reales, 0)) AS kilos_reales,
+       ROUND(SUM(COALESCE(r.kilos_reales, 0)) / NULLIF(SUM(sf.cantidad_forecast), 0) * 100, 2) AS cumplimiento_pct
+FROM sales_forecasts sf
+JOIN clients c ON c.nit = sf.nit
+JOIN executives e ON e.email = c.executive AND e.is_active = 1
+LEFT JOIN reales r ON r.nit = sf.nit
+WHERE sf.modelo = 'manual' AND sf.año = '2026' AND sf.mes = 'MAYO'
+GROUP BY e.id, e.name
+ORDER BY cumplimiento_pct DESC;
+
+# 16. Productos faltantes por vender para una ejecutiva (con product_ranked)
+WITH product_ranked AS (
+  SELECT id, client_id, code, product_name,
+         ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
+  FROM products
+),
+reales AS (
+  SELECT c.nit, p.code AS codigo, SUM(par.quantity) AS kilos_reales
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN products p ON p.id = pop.product_id
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
+  GROUP BY c.nit, p.code
+)
+SELECT c.client_name AS cliente, sf.codigo, p.product_name AS referencia,
+       SUM(sf.cantidad_forecast) AS pronosticado,
+       COALESCE(r.kilos_reales, 0) AS real_k,
+       SUM(sf.cantidad_forecast) - COALESCE(r.kilos_reales, 0) AS faltan
+FROM sales_forecasts sf
+JOIN clients c ON c.nit = sf.nit
+JOIN product_ranked p ON p.client_id = c.id AND p.code = sf.codigo AND p.rn = 1
+LEFT JOIN reales r ON r.nit = sf.nit AND r.codigo = sf.codigo
+WHERE sf.modelo = 'manual' AND sf.año = '2026' AND sf.mes = 'MAYO'
+  AND c.executive = 'claudia.cueter@finearom.com'
+GROUP BY c.client_name, sf.codigo, p.product_name, r.kilos_reales
+HAVING SUM(sf.cantidad_forecast) > COALESCE(r.kilos_reales, 0)
+ORDER BY faltan DESC;
+
+# 17. Comparativa modelo manual vs xgboost por cliente
+WITH manual AS (
+  SELECT nit, SUM(cantidad_forecast) AS kilos_manual
+  FROM sales_forecasts
+  WHERE modelo = 'manual' AND año = '2026' AND mes = 'MAYO'
+  GROUP BY nit
+),
+estadistico AS (
+  SELECT nit, SUM(cantidad_forecast) AS kilos_xgb
+  FROM sales_forecasts
+  WHERE modelo = 'xgboost' AND año = '2026' AND mes = 'MAYO'
+  GROUP BY nit
+)
+SELECT c.client_name AS cliente, c.nit,
+       COALESCE(m.kilos_manual, 0) AS pronostico_manual,
+       COALESCE(e.kilos_xgb, 0) AS pronostico_xgboost,
+       COALESCE(m.kilos_manual, 0) - COALESCE(e.kilos_xgb, 0) AS diferencia
+FROM clients c
+LEFT JOIN manual m ON m.nit = c.nit
+LEFT JOIN estadistico e ON e.nit = c.nit
+WHERE COALESCE(m.kilos_manual, 0) + COALESCE(e.kilos_xgb, 0) > 0
+ORDER BY ABS(COALESCE(m.kilos_manual, 0) - COALESCE(e.kilos_xgb, 0)) DESC;
+
+# 18. Acumulado de cumplimiento del año por ejecutiva
+WITH reales_year AS (
+  SELECT c.nit, SUM(par.quantity) AS kilos_reales
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND YEAR(par.dispatch_date) = 2026
+  GROUP BY c.nit
+)
+SELECT e.name AS ejecutiva,
+       SUM(sf.cantidad_forecast) AS pronostico_acumulado,
+       SUM(COALESCE(r.kilos_reales, 0)) AS real_acumulado,
+       SUM(sf.cantidad_forecast) - SUM(COALESCE(r.kilos_reales, 0)) AS faltan,
+       ROUND(SUM(COALESCE(r.kilos_reales, 0)) / NULLIF(SUM(sf.cantidad_forecast), 0) * 100, 2) AS cumplimiento_pct
+FROM sales_forecasts sf
+JOIN clients c ON c.nit = sf.nit
+JOIN executives e ON e.email = c.executive AND e.is_active = 1
+LEFT JOIN reales_year r ON r.nit = sf.nit
+WHERE sf.modelo = 'manual' AND sf.año = '2026'
+GROUP BY e.id, e.name
+ORDER BY cumplimiento_pct DESC;
+
+─── D. CARTERA Y RECAUDOS ─────────────────────────────────────────────────
+
+# 19. Cartera vencida por cliente (con detalle de factura)
+# IMPORTANTE: cartera.saldo_vencido es VARCHAR — usar (col + 0) para sumas y comparaciones.
+SELECT car.nit, car.nombre_empresa, car.documento, car.fecha, car.vence,
+       car.dias, (car.saldo_vencido + 0) AS saldo_vencido_usd,
+       car.nombre_vendedor
+FROM cartera car
+WHERE (car.saldo_vencido + 0) > 0
+ORDER BY (car.saldo_vencido + 0) DESC;
+
+# 20. Cartera vencida por ejecutiva (cruza cartera con clients por nit)
+SELECT c.executive AS ejecutiva_email,
+       COUNT(DISTINCT car.nit) AS clientes_con_vencido,
+       SUM(car.saldo_vencido + 0) AS saldo_vencido_total_usd
+FROM cartera car
+JOIN clients c ON c.nit = car.nit
+WHERE (car.saldo_vencido + 0) > 0
+GROUP BY c.executive
+ORDER BY saldo_vencido_total_usd DESC;
+
+# 21. Recaudos del mes
+SELECT r.fecha_recaudo, r.numero_factura, r.numero_recibo,
+       r.cliente, r.nit, r.valor_cancelado, r.dias
+FROM recaudos r
+WHERE r.fecha_recaudo BETWEEN '2026-05-01' AND '2026-05-31 23:59:59'
+ORDER BY r.fecha_recaudo DESC;
+
+# 22. Pagos vs facturado por cliente del año
+# Nota: recaudos.nit es BIGINT — usar CAST(... AS CHAR) para cruzar con clients.nit VARCHAR.
+WITH facturado AS (
+  SELECT c.nit, SUM(par.quantity * pop.price * (par.trm + 0)) AS facturado_cop
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND YEAR(par.dispatch_date) = 2026
+  GROUP BY c.nit
+),
+recaudado AS (
+  SELECT CAST(r.nit AS CHAR) AS nit_char, SUM(r.valor_cancelado) AS recaudado_cop
+  FROM recaudos r
+  WHERE YEAR(r.fecha_recaudo) = 2026
+  GROUP BY CAST(r.nit AS CHAR)
+)
+SELECT c.client_name AS cliente, c.nit,
+       COALESCE(f.facturado_cop, 0) AS facturado_cop,
+       COALESCE(re.recaudado_cop, 0) AS recaudado_cop,
+       COALESCE(f.facturado_cop, 0) - COALESCE(re.recaudado_cop, 0) AS pendiente_cop
+FROM clients c
+LEFT JOIN facturado f ON f.nit = c.nit
+LEFT JOIN recaudado re ON re.nit_char = c.nit
+WHERE COALESCE(f.facturado_cop, 0) + COALESCE(re.recaudado_cop, 0) > 0
+ORDER BY pendiente_cop DESC;
+
+# 23. Antigüedad de cartera por tramos (al día, 1-30, 31-60, 61-90, 90+)
+SELECT
+  SUM(CASE WHEN car.dias <= 0 THEN (car.saldo_contable + 0) ELSE 0 END) AS al_dia,
+  SUM(CASE WHEN car.dias BETWEEN 1 AND 30 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_1_a_30,
+  SUM(CASE WHEN car.dias BETWEEN 31 AND 60 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_31_a_60,
+  SUM(CASE WHEN car.dias BETWEEN 61 AND 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_61_a_90,
+  SUM(CASE WHEN car.dias > 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS mayor_90
+FROM cartera car;
+
+# 24. Estado consolidado del cliente (cartera + recaudos del mes)
+WITH cart AS (
+  SELECT nit, SUM(saldo_vencido + 0) AS vencido_usd, SUM(saldo_contable + 0) AS contable_usd
+  FROM cartera GROUP BY nit
+),
+rec_mes AS (
+  SELECT CAST(nit AS CHAR) AS nit_char, SUM(valor_cancelado) AS recaudado_mes_cop
+  FROM recaudos
+  WHERE fecha_recaudo BETWEEN '2026-05-01' AND '2026-05-31 23:59:59'
+  GROUP BY CAST(nit AS CHAR)
+)
+SELECT c.client_name AS cliente, c.nit,
+       COALESCE(ca.contable_usd, 0) AS saldo_contable_usd,
+       COALESCE(ca.vencido_usd, 0) AS saldo_vencido_usd,
+       COALESCE(rm.recaudado_mes_cop, 0) AS recaudado_mes_cop
+FROM clients c
+LEFT JOIN cart ca ON ca.nit = c.nit
+LEFT JOIN rec_mes rm ON rm.nit_char = c.nit
+WHERE COALESCE(ca.contable_usd, 0) > 0 OR COALESCE(rm.recaudado_mes_cop, 0) > 0
+ORDER BY saldo_vencido_usd DESC;
+
+─── E. CLIENTES Y PRODUCTOS ───────────────────────────────────────────────
+
+# 25. Clientes nuevos del año (con OCs is_new_win=1)
+SELECT c.client_name, c.nit, c.country, c.executive,
+       MIN(po.order_creation_date) AS primera_oc,
+       COUNT(DISTINCT po.id) AS ocs_new_win
+FROM clients c
+JOIN purchase_orders po ON po.client_id = c.id AND po.is_new_win = 1
+WHERE YEAR(po.order_creation_date) = 2026
+  AND po.status != 'cancelled'
+GROUP BY c.id, c.client_name, c.nit, c.country, c.executive
+ORDER BY primera_oc DESC;
+
+# 26. Clientes dormidos: sin compras reales en últimos 3 meses
+SELECT c.client_name, c.nit, c.executive,
+       MAX(par.dispatch_date) AS ultimo_despacho
+FROM clients c
+LEFT JOIN purchase_orders po ON po.client_id = c.id AND po.status != 'cancelled'
+LEFT JOIN partials par ON par.order_id = po.id AND par.type = 'real' AND par.deleted_at IS NULL
+WHERE c.status = 'active'
+GROUP BY c.id, c.client_name, c.nit, c.executive
+HAVING MAX(par.dispatch_date) IS NULL
+    OR MAX(par.dispatch_date) < DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+ORDER BY ultimo_despacho ASC;
+
+# 27. Top 5 productos por cliente (top-N per group con ROW_NUMBER)
+WITH product_ranked AS (
+  SELECT id, client_id, code, product_name,
+         ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
+  FROM products
+),
+sales_por_producto AS (
+  SELECT c.id AS client_id, c.client_name, p.code, p.product_name,
+         SUM(par.quantity) AS kilos
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN product_ranked p ON p.id = pop.product_id AND p.rn = 1
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND YEAR(par.dispatch_date) = 2026
+  GROUP BY c.id, c.client_name, p.code, p.product_name
+),
+ranked AS (
+  SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.client_id ORDER BY s.kilos DESC) AS rn_prod
+  FROM sales_por_producto s
+)
+SELECT client_name, code, product_name, kilos
+FROM ranked
+WHERE rn_prod <= 5
+ORDER BY client_name, kilos DESC;
+
+─── F. SERIES TEMPORALES Y RANKINGS ───────────────────────────────────────
+
+# 28. Participación % de cada producto en ventas totales del año (window SUM OVER)
+WITH product_ranked AS (
+  SELECT id, client_id, code, product_name,
+         ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
+  FROM products
+),
+por_producto AS (
+  SELECT p.code, p.product_name, SUM(par.quantity) AS kilos
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN product_ranked p ON p.id = pop.product_id AND p.rn = 1
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND YEAR(par.dispatch_date) = 2026
+  GROUP BY p.code, p.product_name
+)
+SELECT code, product_name, kilos,
+       ROUND(kilos / SUM(kilos) OVER () * 100, 2) AS participacion_pct
+FROM por_producto
+ORDER BY kilos DESC
+LIMIT 30;
+
+# 29. Crecimiento mes-a-mes por cliente (LAG)
+WITH ventas_mes AS (
+  SELECT c.id AS client_id, c.client_name,
+         DATE_FORMAT(par.dispatch_date, '%Y-%m') AS mes,
+         SUM(par.quantity) AS kilos
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND YEAR(par.dispatch_date) = 2026
+  GROUP BY c.id, c.client_name, DATE_FORMAT(par.dispatch_date, '%Y-%m')
+)
+SELECT client_name, mes, kilos,
+       LAG(kilos) OVER (PARTITION BY client_id ORDER BY mes) AS kilos_mes_anterior,
+       kilos - LAG(kilos) OVER (PARTITION BY client_id ORDER BY mes) AS variacion
+FROM ventas_mes
+ORDER BY client_name, mes;
+
+# 30. Timeline de una OC específica: creación + temporal + reales (UNION ALL)
+SELECT 1 AS fase_orden, 'creación' AS fase, po.order_creation_date AS fecha,
+       NULL AS quantity, NULL AS invoice
+FROM purchase_orders po WHERE po.order_consecutive = 'OC-2026-001'
+UNION ALL
+SELECT 2 AS fase_orden, 'estimado' AS fase, par.dispatch_date AS fecha,
+       par.quantity, NULL AS invoice
+FROM partials par
+JOIN purchase_orders po ON po.id = par.order_id
+WHERE po.order_consecutive = 'OC-2026-001' AND par.type = 'temporal' AND par.deleted_at IS NULL
+UNION ALL
+SELECT 3 AS fase_orden, 'real' AS fase, par.dispatch_date AS fecha,
+       par.quantity, par.invoice_number AS invoice
+FROM partials par
+JOIN purchase_orders po ON po.id = par.order_id
+WHERE po.order_consecutive = 'OC-2026-001' AND par.type = 'real' AND par.deleted_at IS NULL
+ORDER BY fase_orden, fecha;
+
+═══════════════════════════════════════════════════════════════════════════
+FIN DE EJEMPLOS — usa estos como base para construir queries nuevas.
+═══════════════════════════════════════════════════════════════════════════
+EOT;
+    }
+
+    /**
+     * Catálogos dinámicos (executives + clients) — van en su PROPIO mensaje system
+     * para no romper el cache del prompt base cuando cambien (raro, pero pasa).
+     */
+    private function buildCatalogsBlock(): string
+    {
+        return $this->getExecutivesCatalogForPrompt() . "\n\n" . $this->getClientsCatalogForPrompt();
     }
 
     /**
