@@ -1084,15 +1084,17 @@ ORDER BY kilos_despachados DESC
 LIMIT 10;
 
 # 9. Promedio de días entre creación de OC y primer despacho real
+# Hay ~20 OCs con first_dispatch < order_creation_date (datos anómalos por cierres a posteriori).
+# GREATEST(..., 0) evita que valores negativos sesguen el promedio hacia abajo.
 WITH primer_real AS (
   SELECT par.order_id, MIN(par.dispatch_date) AS first_dispatch
   FROM partials par
   WHERE par.type = 'real' AND par.deleted_at IS NULL
   GROUP BY par.order_id
 )
-SELECT AVG(DATEDIFF(pr.first_dispatch, po.order_creation_date)) AS dias_promedio,
-       MIN(DATEDIFF(pr.first_dispatch, po.order_creation_date)) AS dias_min,
-       MAX(DATEDIFF(pr.first_dispatch, po.order_creation_date)) AS dias_max,
+SELECT AVG(GREATEST(DATEDIFF(pr.first_dispatch, po.order_creation_date), 0)) AS dias_promedio,
+       MIN(GREATEST(DATEDIFF(pr.first_dispatch, po.order_creation_date), 0)) AS dias_min,
+       MAX(GREATEST(DATEDIFF(pr.first_dispatch, po.order_creation_date), 0)) AS dias_max,
        COUNT(*) AS ocs_consideradas
 FROM purchase_orders po
 JOIN primer_real pr ON pr.order_id = po.id
