@@ -1792,6 +1792,168 @@ LEFT JOIN venta_anterior vp ON vp.exec_email = e.email
 WHERE e.is_active = 1
 ORDER BY presupuesto_2026_usd DESC;
 
+─── H. CASOS ESPECÍFICOS (sucursales, ciudades, países, segmentos, muestras, precios) ────
+
+# 40. Top sucursales por kilos despachados del año (cliente + sucursal)
+# Cada cliente puede tener múltiples branch_offices. pop.branch_office_id apunta a una específica.
+SELECT c.client_name, bo.name AS sucursal, bo.delivery_city,
+       COUNT(DISTINCT po.id) AS ocs,
+       SUM(par.quantity) AS kilos_despachados
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+JOIN branch_offices bo ON bo.id = pop.branch_office_id
+JOIN clients c ON c.id = po.client_id
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND YEAR(par.dispatch_date) = 2026
+GROUP BY c.id, c.client_name, bo.id, bo.name, bo.delivery_city
+ORDER BY kilos_despachados DESC
+LIMIT 10;
+
+# 41. Kilos despachados por CIUDAD DE ENTREGA del año
+SELECT bo.delivery_city,
+       COUNT(DISTINCT po.id) AS ocs,
+       COUNT(DISTINCT po.client_id) AS clientes,
+       SUM(par.quantity) AS kilos
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+JOIN branch_offices bo ON bo.id = pop.branch_office_id
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND YEAR(par.dispatch_date) = 2026
+  AND bo.delivery_city IS NOT NULL AND bo.delivery_city != ''
+GROUP BY bo.delivery_city
+ORDER BY kilos DESC;
+
+# 42. Ventas por país de cliente (exportación)
+# c.country tiene códigos ISO ('CO', 'EC', 'PE', 'NI') o nombres ('internacional').
+SELECT c.country,
+       COUNT(DISTINCT c.id) AS clientes,
+       COUNT(DISTINCT po.id) AS ocs,
+       SUM(par.quantity) AS kilos
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+JOIN clients c ON c.id = po.client_id
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND YEAR(par.dispatch_date) = 2026
+GROUP BY c.country
+ORDER BY kilos DESC;
+
+# 43. Despachos por transportador
+SELECT par.transporter,
+       COUNT(*) AS despachos,
+       SUM(par.quantity) AS kilos,
+       COUNT(DISTINCT po.client_id) AS clientes_distintos
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND YEAR(par.dispatch_date) = 2026
+  AND par.transporter IS NOT NULL AND par.transporter != ''
+GROUP BY par.transporter
+ORDER BY kilos DESC;
+
+# 44. Días que tarda Marlon en cargar el estimado (SLA logística)
+# DATEDIFF entre creación de OC y created_at del primer partial type='temporal'.
+WITH primer_temporal AS (
+  SELECT par.order_id, MIN(par.created_at) AS primer_estimado_at
+  FROM partials par
+  WHERE par.type = 'temporal' AND par.deleted_at IS NULL
+  GROUP BY par.order_id
+)
+SELECT
+  AVG(GREATEST(DATEDIFF(pt.primer_estimado_at, po.order_creation_date), 0)) AS dias_promedio,
+  MIN(GREATEST(DATEDIFF(pt.primer_estimado_at, po.order_creation_date), 0)) AS dias_min,
+  MAX(GREATEST(DATEDIFF(pt.primer_estimado_at, po.order_creation_date), 0)) AS dias_max,
+  COUNT(*) AS ocs_consideradas
+FROM purchase_orders po
+JOIN primer_temporal pt ON pt.order_id = po.id
+WHERE YEAR(po.order_creation_date) = 2026
+  AND po.status != 'cancelled';
+
+# 45. Muestras enviadas por cliente en el año (pop.muestra = 1)
+# IMPORTANTE: filtrar pop.muestra=1 NO pop.muestra=0. Las muestras tienen pop.price = 0.
+SELECT c.client_name, c.nit,
+       COUNT(DISTINCT po.id) AS ocs_con_muestra,
+       SUM(pop.quantity) AS kilos_muestra
+FROM purchase_orders po
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 1
+JOIN clients c ON c.id = po.client_id
+WHERE po.status != 'cancelled'
+  AND YEAR(po.order_creation_date) = 2026
+GROUP BY c.id, c.client_name, c.nit
+ORDER BY kilos_muestra DESC;
+
+# 46. Ventas por segmento de cliente (client_type: AA, A, B, C, pareto, balance, none)
+# AA > A > B > C son prioridades comerciales/lead time. pareto/balance/none son clasificación portafolio.
+SELECT c.client_type,
+       COUNT(DISTINCT c.id) AS clientes,
+       COUNT(DISTINCT po.id) AS ocs,
+       SUM(par.quantity) AS kilos,
+       SUM(par.quantity * pop.price) AS valor_usd
+FROM partials par
+JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+JOIN clients c ON c.id = po.client_id
+WHERE par.type = 'real' AND par.deleted_at IS NULL
+  AND YEAR(par.dispatch_date) = 2026
+GROUP BY c.client_type
+ORDER BY FIELD(c.client_type, 'AA', 'A', 'B', 'C', 'pareto', 'balance', 'none');
+
+# 47. Evolución de precio de un producto en el año (time series)
+# Cambia el WHERE para filtrar el producto que te interesa.
+SELECT pph.effective_date, pph.price,
+       LAG(pph.price) OVER (ORDER BY pph.effective_date) AS precio_anterior,
+       pph.price - LAG(pph.price) OVER (ORDER BY pph.effective_date) AS variacion
+FROM product_price_history pph
+JOIN products p ON p.id = pph.product_id
+WHERE p.code = '3388'  -- sustituir por código del producto
+ORDER BY pph.effective_date;
+
+# 48. Productos NEW WIN del mes a nivel línea (pop.new_win=1, no po.is_new_win)
+# Diferencia: po.is_new_win = la OC entera es para un cliente nuevo.
+# pop.new_win = ese producto específico es nuevo para ese cliente.
+SELECT c.client_name, p.code, p.product_name,
+       pop.quantity AS kilos, pop.new_win_date,
+       po.order_consecutive
+FROM purchase_order_product pop
+JOIN purchase_orders po ON po.id = pop.purchase_order_id AND po.status != 'cancelled'
+JOIN clients c ON c.id = po.client_id
+JOIN products p ON p.id = pop.product_id
+WHERE pop.new_win = 1 AND pop.muestra = 0
+  AND pop.new_win_date BETWEEN '2026-05-01' AND '2026-05-31'
+ORDER BY pop.new_win_date DESC;
+
+# 49. Cumplimiento POR CLIENTE en un mes (similar a #15 pero sin agregar por ejecutiva)
+# Patrón anti-duplicación: pron por cliente + real por cliente, luego JOIN.
+WITH pron_cli AS (
+  SELECT c.id AS client_id, c.client_name,
+         SUM(sf.cantidad_forecast) AS pron
+  FROM sales_forecasts sf
+  JOIN clients c ON c.nit = sf.nit
+  WHERE sf.modelo = 'manual' AND sf.año = '2026' AND sf.mes = 'MAYO'
+  GROUP BY c.id, c.client_name
+),
+real_cli AS (
+  SELECT c.id AS client_id, SUM(par.quantity) AS real_k
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
+  GROUP BY c.id
+)
+SELECT p.client_name AS cliente,
+       p.pron AS kilos_pronosticados,
+       COALESCE(r.real_k, 0) AS kilos_reales,
+       p.pron - COALESCE(r.real_k, 0) AS kilos_faltantes,
+       ROUND(COALESCE(r.real_k, 0) / NULLIF(p.pron, 0) * 100, 2) AS cumplimiento_pct
+FROM pron_cli p
+LEFT JOIN real_cli r ON r.client_id = p.client_id
+ORDER BY cumplimiento_pct ASC;
+
 ═══════════════════════════════════════════════════════════════════════════
 FIN DE EJEMPLOS — usa estos como base para construir queries nuevas.
 ═══════════════════════════════════════════════════════════════════════════
