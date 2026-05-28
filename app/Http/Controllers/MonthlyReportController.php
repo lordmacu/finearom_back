@@ -1183,25 +1183,35 @@ GROUP BY c.client_name, c.nit, r.kilos_reales
 ORDER BY kilos_faltantes DESC;
 
 # 15. Cumplimiento por ejecutiva en un mes
-WITH reales AS (
-  SELECT c.nit, SUM(par.quantity) AS kilos_reales
+# ⚠ ANTI-DUPLICACIÓN: agregar pronóstico y real POR CLIENTE primero (en CTEs separadas),
+# luego JOIN por client_id para sumar a nivel ejecutiva. NUNCA unir sales_forecasts con
+# un CTE de reales por nit dentro de un GROUP BY por ejecutiva — duplicaría los reales N veces
+# (N = número de forecasts del cliente).
+WITH pron_cli AS (
+  SELECT c.id AS client_id, c.executive AS exec_email,
+         SUM(sf.cantidad_forecast) AS pron
+  FROM sales_forecasts sf
+  JOIN clients c ON c.nit = sf.nit
+  WHERE sf.modelo = 'manual' AND sf.año = '2026' AND sf.mes = 'MAYO'
+  GROUP BY c.id, c.executive
+),
+real_cli AS (
+  SELECT c.id AS client_id, SUM(par.quantity) AS real_k
   FROM partials par
   JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
   JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
   JOIN clients c ON c.id = po.client_id
   WHERE par.type = 'real' AND par.deleted_at IS NULL
     AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
-  GROUP BY c.nit
+  GROUP BY c.id
 )
 SELECT e.name AS ejecutiva,
-       SUM(sf.cantidad_forecast) AS kilos_pronosticados,
-       SUM(COALESCE(r.kilos_reales, 0)) AS kilos_reales,
-       ROUND(SUM(COALESCE(r.kilos_reales, 0)) / NULLIF(SUM(sf.cantidad_forecast), 0) * 100, 2) AS cumplimiento_pct
-FROM sales_forecasts sf
-JOIN clients c ON c.nit = sf.nit
-JOIN executives e ON e.email = c.executive AND e.is_active = 1
-LEFT JOIN reales r ON r.nit = sf.nit
-WHERE sf.modelo = 'manual' AND sf.año = '2026' AND sf.mes = 'MAYO'
+       SUM(p.pron) AS kilos_pronosticados,
+       SUM(COALESCE(r.real_k, 0)) AS kilos_reales,
+       ROUND(SUM(COALESCE(r.real_k, 0)) / NULLIF(SUM(p.pron), 0) * 100, 2) AS cumplimiento_pct
+FROM pron_cli p
+JOIN executives e ON e.email = p.exec_email AND e.is_active = 1
+LEFT JOIN real_cli r ON r.client_id = p.client_id
 GROUP BY e.id, e.name
 ORDER BY cumplimiento_pct DESC;
 
@@ -1260,47 +1270,60 @@ WHERE COALESCE(m.kilos_manual, 0) + COALESCE(e.kilos_xgb, 0) > 0
 ORDER BY ABS(COALESCE(m.kilos_manual, 0) - COALESCE(e.kilos_xgb, 0)) DESC;
 
 # 18. Acumulado de cumplimiento del año por ejecutiva
-WITH reales_year AS (
-  SELECT c.nit, SUM(par.quantity) AS kilos_reales
+# ⚠ Mismo patrón anti-duplicación que #15 — agregar por cliente primero.
+WITH pron_cli_year AS (
+  SELECT c.id AS client_id, c.executive AS exec_email,
+         SUM(sf.cantidad_forecast) AS pron
+  FROM sales_forecasts sf
+  JOIN clients c ON c.nit = sf.nit
+  WHERE sf.modelo = 'manual' AND sf.año = '2026'
+  GROUP BY c.id, c.executive
+),
+real_cli_year AS (
+  SELECT c.id AS client_id, SUM(par.quantity) AS real_k
   FROM partials par
   JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
   JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
   JOIN clients c ON c.id = po.client_id
   WHERE par.type = 'real' AND par.deleted_at IS NULL
     AND YEAR(par.dispatch_date) = 2026
-  GROUP BY c.nit
+  GROUP BY c.id
 )
 SELECT e.name AS ejecutiva,
-       SUM(sf.cantidad_forecast) AS pronostico_acumulado,
-       SUM(COALESCE(r.kilos_reales, 0)) AS real_acumulado,
-       SUM(sf.cantidad_forecast) - SUM(COALESCE(r.kilos_reales, 0)) AS faltan,
-       ROUND(SUM(COALESCE(r.kilos_reales, 0)) / NULLIF(SUM(sf.cantidad_forecast), 0) * 100, 2) AS cumplimiento_pct
-FROM sales_forecasts sf
-JOIN clients c ON c.nit = sf.nit
-JOIN executives e ON e.email = c.executive AND e.is_active = 1
-LEFT JOIN reales_year r ON r.nit = sf.nit
-WHERE sf.modelo = 'manual' AND sf.año = '2026'
+       SUM(p.pron) AS pronostico_acumulado,
+       SUM(COALESCE(r.real_k, 0)) AS real_acumulado,
+       SUM(p.pron) - SUM(COALESCE(r.real_k, 0)) AS faltan,
+       ROUND(SUM(COALESCE(r.real_k, 0)) / NULLIF(SUM(p.pron), 0) * 100, 2) AS cumplimiento_pct
+FROM pron_cli_year p
+JOIN executives e ON e.email = p.exec_email AND e.is_active = 1
+LEFT JOIN real_cli_year r ON r.client_id = p.client_id
 GROUP BY e.id, e.name
 ORDER BY cumplimiento_pct DESC;
 
 ─── D. CARTERA Y RECAUDOS ─────────────────────────────────────────────────
+# ⚠ CRÍTICO — La tabla `cartera` guarda múltiples SNAPSHOTS por fecha (~77 fechas históricas).
+# SIEMPRE filtra `car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)` para usar
+# el último snapshot disponible. Sin este filtro, el SUM se infla a través de toda la historia.
+# Si el usuario pide un snapshot específico, usa `car.fecha_cartera = 'YYYY-MM-DD'`.
 
-# 19. Cartera vencida por cliente (con detalle de factura)
+# 19. Cartera vencida por cliente (con detalle de factura) — usa snapshot más reciente
 # IMPORTANTE: cartera.saldo_vencido es VARCHAR — usar (col + 0) para sumas y comparaciones.
 SELECT car.nit, car.nombre_empresa, car.documento, car.fecha, car.vence,
        car.dias, (car.saldo_vencido + 0) AS saldo_vencido_usd,
        car.nombre_vendedor
 FROM cartera car
-WHERE (car.saldo_vencido + 0) > 0
+WHERE car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+  AND (car.saldo_vencido + 0) > 0
 ORDER BY (car.saldo_vencido + 0) DESC;
 
-# 20. Cartera vencida por ejecutiva (cruza cartera con clients por nit)
+# 20. Cartera vencida por ejecutiva (cruza cartera con clients por nit) — snapshot reciente
 SELECT c.executive AS ejecutiva_email,
        COUNT(DISTINCT car.nit) AS clientes_con_vencido,
        SUM(car.saldo_vencido + 0) AS saldo_vencido_total_usd
 FROM cartera car
 JOIN clients c ON c.nit = car.nit
-WHERE (car.saldo_vencido + 0) > 0
+WHERE car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+  AND (car.saldo_vencido + 0) > 0
 GROUP BY c.executive
 ORDER BY saldo_vencido_total_usd DESC;
 
@@ -1339,19 +1362,22 @@ LEFT JOIN recaudado re ON re.nit_char = c.nit
 WHERE COALESCE(f.facturado_cop, 0) + COALESCE(re.recaudado_cop, 0) > 0
 ORDER BY pendiente_cop DESC;
 
-# 23. Antigüedad de cartera por tramos (al día, 1-30, 31-60, 61-90, 90+)
+# 23. Antigüedad de cartera por tramos (al día, 1-30, 31-60, 61-90, 90+) — snapshot reciente
 SELECT
   SUM(CASE WHEN car.dias <= 0 THEN (car.saldo_contable + 0) ELSE 0 END) AS al_dia,
   SUM(CASE WHEN car.dias BETWEEN 1 AND 30 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_1_a_30,
   SUM(CASE WHEN car.dias BETWEEN 31 AND 60 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_31_a_60,
   SUM(CASE WHEN car.dias BETWEEN 61 AND 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_61_a_90,
   SUM(CASE WHEN car.dias > 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS mayor_90
-FROM cartera car;
+FROM cartera car
+WHERE car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera);
 
-# 24. Estado consolidado del cliente (cartera + recaudos del mes)
+# 24. Estado consolidado del cliente (cartera + recaudos del mes) — snapshot reciente
 WITH cart AS (
   SELECT nit, SUM(saldo_vencido + 0) AS vencido_usd, SUM(saldo_contable + 0) AS contable_usd
-  FROM cartera GROUP BY nit
+  FROM cartera
+  WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+  GROUP BY nit
 ),
 rec_mes AS (
   SELECT CAST(nit AS CHAR) AS nit_char, SUM(valor_cancelado) AS recaudado_mes_cop
@@ -1545,12 +1571,13 @@ GROUP BY po.id, po.order_consecutive, c.client_name, p.code, p.product_name, pop
 HAVING kilos_pendientes > 0
 ORDER BY fecha_estimada_despacho ASC;
 
-# 34. Cartera que estimamos recaudar esta semana (próximos 7 días)
+# 34. Cartera que estimamos recaudar esta semana (próximos 7 días) — snapshot reciente
 SELECT car.nit, car.nombre_empresa, car.documento, car.vence,
        DATEDIFF(car.vence, CURDATE()) AS dias_hasta_vencimiento,
        (car.saldo_contable + 0) AS saldo_a_recaudar_usd
 FROM cartera car
-WHERE car.vence BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+WHERE car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+  AND car.vence BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
   AND (car.saldo_contable + 0) > 0
 ORDER BY car.vence ASC, saldo_a_recaudar_usd DESC;
 
