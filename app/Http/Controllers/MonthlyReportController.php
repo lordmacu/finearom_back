@@ -1551,25 +1551,36 @@ FROM ventas_ejec
 ORDER BY kilos DESC;
 
 # 33. OCs pendientes de un cliente: kilos pedidos, ya despachados, fecha estimada (partials temporal)
-# Para "OCs pendientes de despachar del cliente X" — combina pedido vs real + fecha estimada de Marlon.
+# ⚠ ANTI-CARTESIANO: NUNCA juntes partials type='temporal' y type='real' con LEFT JOINs en el mismo
+# query y luego un GROUP BY — produce un producto cartesiano (N temporales × M reales) que infla los SUMs.
+# Patrón correcto: agregar por separado en 2 CTEs (una por tipo) y luego JOIN al outer sin agrupación.
+WITH estimado AS (
+  SELECT product_order_id, MAX(dispatch_date) AS fecha_estimada
+  FROM partials
+  WHERE type = 'temporal' AND deleted_at IS NULL
+  GROUP BY product_order_id
+),
+despachado AS (
+  SELECT product_order_id, SUM(quantity) AS kilos_real
+  FROM partials
+  WHERE type = 'real' AND deleted_at IS NULL
+  GROUP BY product_order_id
+)
 SELECT po.order_consecutive, c.client_name, p.code, p.product_name,
        pop.quantity AS kilos_pedidos,
-       SUM(COALESCE(par_r.quantity, 0)) AS kilos_ya_despachados,
-       pop.quantity - SUM(COALESCE(par_r.quantity, 0)) AS kilos_pendientes,
-       MAX(par_t.dispatch_date) AS fecha_estimada_despacho
+       COALESCE(d.kilos_real, 0) AS kilos_ya_despachados,
+       pop.quantity - COALESCE(d.kilos_real, 0) AS kilos_pendientes,
+       e.fecha_estimada AS fecha_estimada_despacho
 FROM purchase_orders po
 JOIN clients c ON c.id = po.client_id
 JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0
 JOIN products p ON p.id = pop.product_id
-LEFT JOIN partials par_t ON par_t.product_order_id = pop.id
-                         AND par_t.type = 'temporal' AND par_t.deleted_at IS NULL
-LEFT JOIN partials par_r ON par_r.product_order_id = pop.id
-                         AND par_r.type = 'real' AND par_r.deleted_at IS NULL
+LEFT JOIN estimado e ON e.product_order_id = pop.id
+LEFT JOIN despachado d ON d.product_order_id = pop.id
 WHERE po.status IN ('pending', 'processing', 'parcial_status')
   AND c.client_name LIKE '%LABORATORIO%'
-GROUP BY po.id, po.order_consecutive, c.client_name, p.code, p.product_name, pop.quantity
-HAVING kilos_pendientes > 0
-ORDER BY fecha_estimada_despacho ASC;
+  AND pop.quantity > COALESCE(d.kilos_real, 0)
+ORDER BY e.fecha_estimada ASC;
 
 # 34. Cartera que estimamos recaudar esta semana (próximos 7 días) — snapshot reciente
 SELECT car.nit, car.nombre_empresa, car.documento, car.vence,
@@ -1662,7 +1673,8 @@ WHERE COALESCE(v26.kilos, 0) = 0
 ORDER BY v25.kilos DESC;
 
 # 38. Cambios de precio en el año (tabla product_price_history)
-# Muestra productos con >1 cambio de precio en el año, con la variación porcentual entre el min y el max.
+# Identifica productos cuyo precio realmente CAMBIÓ en el año (MIN != MAX),
+# no productos con múltiples registros duplicados de precio idéntico.
 WITH price_year AS (
   SELECT pph.product_id,
          MIN(pph.price) AS precio_min,
@@ -1671,7 +1683,7 @@ WITH price_year AS (
   FROM product_price_history pph
   WHERE YEAR(pph.effective_date) = 2026
   GROUP BY pph.product_id
-  HAVING COUNT(*) > 1
+  HAVING MIN(pph.price) != MAX(pph.price)
 )
 SELECT p.code, p.product_name,
        py.precio_min, py.precio_max,
