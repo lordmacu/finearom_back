@@ -1053,21 +1053,19 @@ WHERE par.type = 'real' AND par.deleted_at IS NULL
   AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
 ORDER BY par.dispatch_date DESC;
 
-# 8. Top 10 productos más despachados del mes (con product_ranked)
-WITH product_ranked AS (
-  SELECT id, client_id, code, product_name,
-         ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
-  FROM products
-)
-SELECT p.code, p.product_name, SUM(par.quantity) AS kilos_despachados,
+# 8. Top 10 productos más despachados del mes
+# CLAVE: en el lado de DESPACHOS NO uses product_ranked rn=1 — cada partial está atado a
+# un product_id específico via pop.product_order_id. GROUP BY p.code colapsa correctamente
+# los IDs duplicados que comparten el mismo código. Solo usa product_ranked al unir con sales_forecasts.
+SELECT p.code, MAX(p.product_name) AS product_name, SUM(par.quantity) AS kilos_despachados,
        COUNT(DISTINCT po.client_id) AS clientes_atendidos
 FROM partials par
 JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
 JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
-JOIN product_ranked p ON p.id = pop.product_id AND p.rn = 1
+JOIN products p ON p.id = pop.product_id
 WHERE par.type = 'real' AND par.deleted_at IS NULL
   AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
-GROUP BY p.code, p.product_name
+GROUP BY p.code
 ORDER BY kilos_despachados DESC
 LIMIT 10;
 
@@ -1397,22 +1395,19 @@ HAVING MAX(par.dispatch_date) IS NULL
 ORDER BY ultimo_despacho ASC;
 
 # 27. Top 5 productos por cliente (top-N per group con ROW_NUMBER)
-WITH product_ranked AS (
-  SELECT id, client_id, code, product_name,
-         ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
-  FROM products
-),
-sales_por_producto AS (
-  SELECT c.id AS client_id, c.client_name, p.code, p.product_name,
+# Sin product_ranked en despachos — GROUP BY (client_id, code) ya colapsa duplicados.
+WITH sales_por_producto AS (
+  SELECT c.id AS client_id, c.client_name, p.code,
+         MAX(p.product_name) AS product_name,
          SUM(par.quantity) AS kilos
   FROM partials par
   JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
-  JOIN product_ranked p ON p.id = pop.product_id AND p.rn = 1
+  JOIN products p ON p.id = pop.product_id
   JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
   JOIN clients c ON c.id = po.client_id
   WHERE par.type = 'real' AND par.deleted_at IS NULL
     AND YEAR(par.dispatch_date) = 2026
-  GROUP BY c.id, c.client_name, p.code, p.product_name
+  GROUP BY c.id, c.client_name, p.code
 ),
 ranked AS (
   SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.client_id ORDER BY s.kilos DESC) AS rn_prod
@@ -1426,20 +1421,16 @@ ORDER BY client_name, kilos DESC;
 ─── F. SERIES TEMPORALES Y RANKINGS ───────────────────────────────────────
 
 # 28. Participación % de cada producto en ventas totales del año (window SUM OVER)
-WITH product_ranked AS (
-  SELECT id, client_id, code, product_name,
-         ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
-  FROM products
-),
-por_producto AS (
-  SELECT p.code, p.product_name, SUM(par.quantity) AS kilos
+# Despachos sin product_ranked rn=1 — GROUP BY p.code colapsa duplicados.
+WITH por_producto AS (
+  SELECT p.code, MAX(p.product_name) AS product_name, SUM(par.quantity) AS kilos
   FROM partials par
   JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
-  JOIN product_ranked p ON p.id = pop.product_id AND p.rn = 1
+  JOIN products p ON p.id = pop.product_id
   JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
   WHERE par.type = 'real' AND par.deleted_at IS NULL
     AND YEAR(par.dispatch_date) = 2026
-  GROUP BY p.code, p.product_name
+  GROUP BY p.code
 )
 SELECT code, product_name, kilos,
        ROUND(kilos / SUM(kilos) OVER () * 100, 2) AS participacion_pct
@@ -1483,6 +1474,235 @@ FROM partials par
 JOIN purchase_orders po ON po.id = par.order_id
 WHERE po.order_consecutive = 'OC-2026-001' AND par.type = 'real' AND par.deleted_at IS NULL
 ORDER BY fase_orden, fecha;
+
+─── G. COMPARATIVAS YEAR-OVER-YEAR Y ANÁLISIS COMPLEJOS ───────────────────
+
+# 31. Pronósticos del mes que NO han tenido INGRESO de OC (no vs reales, vs purchase_order_product)
+# Diferencia clave: si el usuario pide "no han tenido ingreso de OC" usa este patrón (vs pop).
+# Si pide "no han salido / no han despachado" usa el patrón #16 (vs partials reales).
+WITH product_ranked AS (
+  SELECT id, client_id, code, product_name,
+         ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
+  FROM products
+),
+oc_creadas AS (
+  SELECT c.nit, p.code AS codigo, SUM(pop.quantity) AS kilos_oc
+  FROM purchase_order_product pop
+  JOIN purchase_orders po ON po.id = pop.purchase_order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  JOIN products p ON p.id = pop.product_id
+  WHERE pop.muestra = 0 AND po.order_creation_date BETWEEN '2026-05-01' AND '2026-05-31'
+  GROUP BY c.nit, p.code
+)
+SELECT e.name AS ejecutiva, c.client_name AS cliente, sf.codigo, p.product_name AS referencia,
+       SUM(sf.cantidad_forecast) AS kilos_pronosticados,
+       COALESCE(o.kilos_oc, 0) AS kilos_oc_creada
+FROM sales_forecasts sf
+JOIN clients c ON c.nit = sf.nit
+JOIN executives e ON e.email = c.executive AND e.is_active = 1
+JOIN product_ranked p ON p.client_id = c.id AND p.code = sf.codigo AND p.rn = 1
+LEFT JOIN oc_creadas o ON o.nit = sf.nit AND o.codigo = sf.codigo
+WHERE sf.modelo = 'manual' AND sf.año = '2026' AND sf.mes = 'MAYO'
+GROUP BY e.id, e.name, c.client_name, sf.codigo, p.product_name, o.kilos_oc
+HAVING COALESCE(o.kilos_oc, 0) = 0
+ORDER BY e.name, c.client_name, kilos_pronosticados DESC;
+
+# 32. Participación % de ventas por ejecutiva del mes
+WITH ventas_ejec AS (
+  SELECT e.id, e.name, SUM(par.quantity) AS kilos
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  JOIN executives e ON e.email = c.executive AND e.is_active = 1
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
+  GROUP BY e.id, e.name
+)
+SELECT name AS ejecutiva, kilos,
+       ROUND(kilos / SUM(kilos) OVER () * 100, 2) AS participacion_pct
+FROM ventas_ejec
+ORDER BY kilos DESC;
+
+# 33. OCs pendientes de un cliente: kilos pedidos, ya despachados, fecha estimada (partials temporal)
+# Para "OCs pendientes de despachar del cliente X" — combina pedido vs real + fecha estimada de Marlon.
+SELECT po.order_consecutive, c.client_name, p.code, p.product_name,
+       pop.quantity AS kilos_pedidos,
+       SUM(COALESCE(par_r.quantity, 0)) AS kilos_ya_despachados,
+       pop.quantity - SUM(COALESCE(par_r.quantity, 0)) AS kilos_pendientes,
+       MAX(par_t.dispatch_date) AS fecha_estimada_despacho
+FROM purchase_orders po
+JOIN clients c ON c.id = po.client_id
+JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0
+JOIN products p ON p.id = pop.product_id
+LEFT JOIN partials par_t ON par_t.product_order_id = pop.id
+                         AND par_t.type = 'temporal' AND par_t.deleted_at IS NULL
+LEFT JOIN partials par_r ON par_r.product_order_id = pop.id
+                         AND par_r.type = 'real' AND par_r.deleted_at IS NULL
+WHERE po.status IN ('pending', 'processing', 'parcial_status')
+  AND c.client_name LIKE '%LABORATORIO%'
+GROUP BY po.id, po.order_consecutive, c.client_name, p.code, p.product_name, pop.quantity
+HAVING kilos_pendientes > 0
+ORDER BY fecha_estimada_despacho ASC;
+
+# 34. Cartera que estimamos recaudar esta semana (próximos 7 días)
+SELECT car.nit, car.nombre_empresa, car.documento, car.vence,
+       DATEDIFF(car.vence, CURDATE()) AS dias_hasta_vencimiento,
+       (car.saldo_contable + 0) AS saldo_a_recaudar_usd
+FROM cartera car
+WHERE car.vence BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+  AND (car.saldo_contable + 0) > 0
+ORDER BY car.vence ASC, saldo_a_recaudar_usd DESC;
+
+# 35. Comparativa cuatrimestre (ene-abr) actual vs año anterior por cliente, en COP
+# Año = 2026 ajustar según el año actual del período. Para "primer cuatrimestre" = ene-abr.
+WITH ventas_periodo AS (
+  SELECT c.id AS client_id, c.client_name,
+         YEAR(par.dispatch_date) AS anio,
+         SUM(par.quantity * pop.price * (par.trm + 0)) AS valor_cop
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND (
+      (par.dispatch_date BETWEEN '2026-01-01' AND '2026-04-30') OR
+      (par.dispatch_date BETWEEN '2025-01-01' AND '2025-04-30')
+    )
+  GROUP BY c.id, c.client_name, YEAR(par.dispatch_date)
+)
+SELECT client_name,
+       SUM(CASE WHEN anio = 2025 THEN valor_cop ELSE 0 END) AS venta_2025_cop,
+       SUM(CASE WHEN anio = 2026 THEN valor_cop ELSE 0 END) AS venta_2026_cop,
+       SUM(CASE WHEN anio = 2026 THEN valor_cop ELSE 0 END) - SUM(CASE WHEN anio = 2025 THEN valor_cop ELSE 0 END) AS diferencia_cop
+FROM ventas_periodo
+GROUP BY client_id, client_name
+ORDER BY ABS(SUM(CASE WHEN anio = 2026 THEN valor_cop ELSE 0 END) - SUM(CASE WHEN anio = 2025 THEN valor_cop ELSE 0 END)) DESC;
+
+# 36. Top clientes con mayor CAÍDA (o crecimiento, cambiando ORDER BY) year-over-year en kilos
+# Para "clientes más caídos vs año pasado": ORDER BY variacion_kilos ASC (más negativos primero).
+# Para "clientes que crecen": ORDER BY variacion_kilos DESC o variacion_pct DESC.
+WITH ventas_year AS (
+  SELECT c.id AS client_id, c.client_name,
+         YEAR(par.dispatch_date) AS anio,
+         SUM(par.quantity) AS kilos
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL
+    AND YEAR(par.dispatch_date) IN (2025, 2026)
+  GROUP BY c.id, c.client_name, YEAR(par.dispatch_date)
+)
+SELECT client_name,
+       SUM(CASE WHEN anio = 2025 THEN kilos ELSE 0 END) AS kilos_2025,
+       SUM(CASE WHEN anio = 2026 THEN kilos ELSE 0 END) AS kilos_2026,
+       SUM(CASE WHEN anio = 2026 THEN kilos ELSE 0 END) - SUM(CASE WHEN anio = 2025 THEN kilos ELSE 0 END) AS variacion_kilos,
+       ROUND(
+         (SUM(CASE WHEN anio = 2026 THEN kilos ELSE 0 END) - SUM(CASE WHEN anio = 2025 THEN kilos ELSE 0 END))
+         / NULLIF(SUM(CASE WHEN anio = 2025 THEN kilos ELSE 0 END), 0) * 100, 2
+       ) AS variacion_pct
+FROM ventas_year
+GROUP BY client_id, client_name
+ORDER BY variacion_kilos ASC;
+
+# 37. Productos perdidos: vendieron en año anterior, CERO en año actual
+# IMPORTANTE: no usar product_ranked rn=1 en despachos. GROUP BY p.code basta.
+WITH ventas_2025 AS (
+  SELECT p.code, MAX(p.product_name) AS product_name, SUM(par.quantity) AS kilos
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN products p ON p.id = pop.product_id
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2025
+  GROUP BY p.code
+),
+ventas_2026 AS (
+  SELECT p.code, SUM(par.quantity) AS kilos
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN products p ON p.id = pop.product_id
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026
+  GROUP BY p.code
+)
+SELECT v25.code, v25.product_name,
+       v25.kilos AS kilos_2025,
+       COALESCE(v26.kilos, 0) AS kilos_2026
+FROM ventas_2025 v25
+LEFT JOIN ventas_2026 v26 ON v26.code = v25.code
+WHERE COALESCE(v26.kilos, 0) = 0
+ORDER BY v25.kilos DESC;
+
+# 38. Cambios de precio en el año (tabla product_price_history)
+# Muestra productos con >1 cambio de precio en el año, con la variación porcentual entre el min y el max.
+WITH price_year AS (
+  SELECT pph.product_id,
+         MIN(pph.price) AS precio_min,
+         MAX(pph.price) AS precio_max,
+         COUNT(*) AS cambios_registrados
+  FROM product_price_history pph
+  WHERE YEAR(pph.effective_date) = 2026
+  GROUP BY pph.product_id
+  HAVING COUNT(*) > 1
+)
+SELECT p.code, p.product_name,
+       py.precio_min, py.precio_max,
+       py.precio_max - py.precio_min AS variacion_absoluta,
+       ROUND((py.precio_max - py.precio_min) / NULLIF(py.precio_min, 0) * 100, 2) AS variacion_pct,
+       py.cambios_registrados
+FROM price_year py
+JOIN products p ON p.id = py.product_id
+ORDER BY variacion_pct DESC
+LIMIT 30;
+
+# 39. Informe consolidado por ejecutiva: presupuesto + venta real 2026 + venta 2025 + crecimiento
+# Útil para "informe para cada ejecutiva con meta de ventas y comparativa vs año anterior".
+WITH presupuesto AS (
+  SELECT c.executive AS exec_email,
+         SUM(sf.cantidad_forecast * COALESCE(NULLIF(p.price, 0), 0)) AS presupuesto_usd
+  FROM sales_forecasts sf
+  JOIN clients c ON c.nit = sf.nit
+  JOIN (
+    SELECT id, client_id, code, price,
+           ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) AS rn
+    FROM products
+  ) p ON p.client_id = c.id AND p.code = sf.codigo AND p.rn = 1
+  WHERE sf.modelo = 'manual' AND sf.año = '2026'
+  GROUP BY c.executive
+),
+venta_actual AS (
+  SELECT c.executive AS exec_email,
+         SUM(par.quantity * pop.price) AS venta_usd
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026
+  GROUP BY c.executive
+),
+venta_anterior AS (
+  SELECT c.executive AS exec_email,
+         SUM(par.quantity * pop.price) AS venta_usd
+  FROM partials par
+  JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
+  JOIN clients c ON c.id = po.client_id
+  WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2025
+  GROUP BY c.executive
+)
+SELECT e.name AS ejecutiva,
+       COALESCE(pr.presupuesto_usd, 0) AS presupuesto_2026_usd,
+       COALESCE(va.venta_usd, 0) AS venta_2026_usd,
+       COALESCE(vp.venta_usd, 0) AS venta_2025_usd,
+       COALESCE(va.venta_usd, 0) - COALESCE(vp.venta_usd, 0) AS crecimiento_usd,
+       ROUND((COALESCE(va.venta_usd, 0) - COALESCE(vp.venta_usd, 0)) / NULLIF(COALESCE(vp.venta_usd, 0), 0) * 100, 2) AS crecimiento_pct
+FROM executives e
+LEFT JOIN presupuesto pr ON pr.exec_email = e.email
+LEFT JOIN venta_actual va ON va.exec_email = e.email
+LEFT JOIN venta_anterior vp ON vp.exec_email = e.email
+WHERE e.is_active = 1
+ORDER BY presupuesto_2026_usd DESC;
 
 ═══════════════════════════════════════════════════════════════════════════
 FIN DE EJEMPLOS — usa estos como base para construir queries nuevas.
