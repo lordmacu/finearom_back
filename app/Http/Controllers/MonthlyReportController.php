@@ -1112,12 +1112,27 @@ GROUP BY c.id, c.client_name, c.nit
 ORDER BY kilos_despachados DESC
 LIMIT 10;
 
-# 11. Productos despachados del mes con valor USD y COP
+# 11. Productos despachados del mes con valor USD y COP (TRM cascada — patrón canónico)
+# ⚠ ANOMALÍA: ~668 partials reales (2025-2026) tienen `trm=0/NULL/vacío` por error de carga.
+# Si usas (par.trm + 0) directo, su valor_cop = 0 → sub-reporta.
+# Patrón correcto: COALESCE(partial.trm válida → trm_daily del día → 4000).
 SELECT par.dispatch_date, c.client_name, p.code, p.product_name,
        par.quantity AS kilos, pop.price AS precio_usd,
        (par.quantity * pop.price) AS valor_usd,
-       (par.trm + 0) AS trm,
-       (par.quantity * pop.price * (par.trm + 0)) AS valor_cop
+       COALESCE(
+         NULLIF(CASE WHEN (par.trm + 0) BETWEEN 3400 AND 10000 THEN (par.trm + 0)
+                     WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
+                     ELSE NULL END, 0),
+         (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 3400 ORDER BY td.date DESC LIMIT 1),
+         4000
+       ) AS trm_eff,
+       par.quantity * pop.price * COALESCE(
+         NULLIF(CASE WHEN (par.trm + 0) BETWEEN 3400 AND 10000 THEN (par.trm + 0)
+                     WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
+                     ELSE NULL END, 0),
+         (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 3400 ORDER BY td.date DESC LIMIT 1),
+         4000
+       ) AS valor_cop
 FROM partials par
 JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
 JOIN products p ON p.id = pop.product_id
@@ -1127,12 +1142,18 @@ WHERE par.type = 'real' AND par.deleted_at IS NULL
   AND par.dispatch_date BETWEEN '2026-05-01' AND '2026-05-31'
 ORDER BY valor_usd DESC;
 
-# 12. Total facturado mes a mes del año (kilos, USD, COP)
+# 12. Total facturado mes a mes del año (kilos, USD, COP con TRM cascada)
 SELECT MONTH(par.dispatch_date) AS mes_num,
        DATE_FORMAT(par.dispatch_date, '%Y-%m') AS mes,
        SUM(par.quantity) AS kilos,
        SUM(par.quantity * pop.price) AS valor_usd,
-       SUM(par.quantity * pop.price * (par.trm + 0)) AS valor_cop
+       SUM(par.quantity * pop.price * COALESCE(
+         NULLIF(CASE WHEN (par.trm + 0) BETWEEN 3400 AND 10000 THEN (par.trm + 0)
+                     WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
+                     ELSE NULL END, 0),
+         (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 3400 ORDER BY td.date DESC LIMIT 1),
+         4000
+       )) AS valor_cop
 FROM partials par
 JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
 JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
@@ -1351,7 +1372,13 @@ ORDER BY r.fecha_recaudo DESC;
 # 22. Pagos vs facturado por cliente del año
 # Nota: recaudos.nit es BIGINT — usar CAST(... AS CHAR) para cruzar con clients.nit VARCHAR.
 WITH facturado AS (
-  SELECT c.nit, SUM(par.quantity * pop.price * (par.trm + 0)) AS facturado_cop
+  SELECT c.nit, SUM(par.quantity * pop.price * COALESCE(
+    NULLIF(CASE WHEN (par.trm + 0) BETWEEN 3400 AND 10000 THEN (par.trm + 0)
+                WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
+                ELSE NULL END, 0),
+    (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 3400 ORDER BY td.date DESC LIMIT 1),
+    4000
+  )) AS facturado_cop
   FROM partials par
   JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
   JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
@@ -1611,7 +1638,13 @@ ORDER BY car.vence ASC, saldo_a_recaudar_usd DESC;
 WITH ventas_periodo AS (
   SELECT c.id AS client_id, c.client_name,
          YEAR(par.dispatch_date) AS anio,
-         SUM(par.quantity * pop.price * (par.trm + 0)) AS valor_cop
+         SUM(par.quantity * pop.price * COALESCE(
+           NULLIF(CASE WHEN (par.trm + 0) BETWEEN 3400 AND 10000 THEN (par.trm + 0)
+                       WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
+                       ELSE NULL END, 0),
+           (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 3400 ORDER BY td.date DESC LIMIT 1),
+           4000
+         )) AS valor_cop
   FROM partials par
   JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
   JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
