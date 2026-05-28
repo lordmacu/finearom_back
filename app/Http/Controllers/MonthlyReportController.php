@@ -810,6 +810,12 @@ class MonthlyReportController extends Controller
             "  Ejemplo confirmado: Jabones El Tigre, code 14400, tiene 2 filas en products → SUM(cantidad_forecast) reporta 1000 cuando el real son 500.\n" .
             "  Esto NO se detecta visualmente porque GROUP BY product_name colapsa filas idénticas pero el SUM ya quedó duplicado.\n" .
             "  ⇒ SIEMPRE que la query sume/agregue `sf.cantidad_forecast` y JOIN a products, USA EL CTE `product_ranked` PRIMERO y filtra `p.rn = 1` en la JOIN al outer.\n" .
+            "- ANOMALÍA DE DATOS (forecasts huérfanos): existen ~86 filas en sales_forecasts (modelo=manual, 2026) con `codigo` que NO matchea ningún products para ese cliente (≈13,834 kg, 6.8% del presupuesto anual).\n" .
+            "  → Queries con `JOIN product_ranked p ... AND p.code = sf.codigo` los EXCLUYEN silenciosamente (no se ven en el resultado). Esto es OK para análisis 'por producto' (no se puede mostrar producto que no existe).\n" .
+            "  → Queries agregadas a NIVEL CLIENTE (sin desglose por producto, ej. #14, #15 fix, #18 fix) los INCLUYEN porque no joinean products. Por eso los totales de presupuesto del año entre ambos tipos de query difieren.\n" .
+            "  → Si el usuario nota la diferencia, explícale que hay forecasts con códigos no asignados al catálogo del cliente — son un problema de carga de presupuesto, no de la query.\n" .
+            "- ANOMALÍA DE DATOS (OCs completed con pendientes): existen 711 OCs en status='completed' con pop.quantity > sum(partials.real.quantity) (≈67K kg).\n" .
+            "  → Para 'kilos pendientes' o 'qué falta despachar', NO filtres por `status='parcial_status'` solamente. Usa `status IN ('processing', 'parcial_status', 'completed')` y filtra por `pop.quantity > COALESCE(kilos_reales, 0)`. Patrón en query #6.\n" .
             "- PATRÓN RECOMENDADO (real vs pronóstico por producto y año) — USA EXACTAMENTE ESTA ESTRUCTURA:\n" .
             "  WITH product_ranked AS (\n" .
             "    SELECT id, client_id, code, product_name,\n" .
@@ -1021,14 +1027,18 @@ GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date, po.
 ORDER BY valor_usd DESC
 LIMIT 20;
 
-# 6. Kilos pendientes en OCs parcial_status (pedido - despachado > 0)
+# 6. Kilos pendientes en OCs activas (pedido - despachado > 0)
+# ANOMALÍA DE DATOS conocida: existen 711 OCs marcadas como 'completed' con kilos_pedidos > kilos_despachados
+# (~67K kg huérfanos). Por eso este query usa `status IN ('processing','parcial_status','completed')` para
+# capturar todos los pendientes reales, sin asumir que 'completed' = todo despachado.
+# Excluye 'pending' (sin partials reales aún) y 'cancelled'.
 WITH despachado AS (
   SELECT par.product_order_id, SUM(par.quantity) AS kilos_reales
   FROM partials par
   WHERE par.type = 'real' AND par.deleted_at IS NULL
   GROUP BY par.product_order_id
 )
-SELECT po.order_consecutive, c.client_name, p.code, p.product_name,
+SELECT po.order_consecutive, c.client_name, po.status, p.code, p.product_name,
        pop.quantity AS kilos_pedidos,
        COALESCE(d.kilos_reales, 0) AS kilos_despachados,
        pop.quantity - COALESCE(d.kilos_reales, 0) AS kilos_pendientes
@@ -1037,7 +1047,7 @@ JOIN clients c ON c.id = po.client_id
 JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0
 JOIN products p ON p.id = pop.product_id
 LEFT JOIN despachado d ON d.product_order_id = pop.id
-WHERE po.status = 'parcial_status'
+WHERE po.status IN ('processing', 'parcial_status', 'completed')
   AND pop.quantity > COALESCE(d.kilos_reales, 0)
 ORDER BY kilos_pendientes DESC;
 
