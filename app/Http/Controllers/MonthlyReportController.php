@@ -1914,16 +1914,19 @@ ORDER BY pph.effective_date;
 # 48. Productos NEW WIN del mes a nivel línea (pop.new_win=1, no po.is_new_win)
 # Diferencia: po.is_new_win = la OC entera es para un cliente nuevo.
 # pop.new_win = ese producto específico es nuevo para ese cliente.
+# ⚠ ANOMALÍA DE DATOS: hay ~299 pops con new_win=1 pero new_win_date IS NULL (carga histórica).
+# Usa COALESCE(pop.new_win_date, po.order_creation_date) para no excluirlos del filtro de fecha.
 SELECT c.client_name, p.code, p.product_name,
-       pop.quantity AS kilos, pop.new_win_date,
+       pop.quantity AS kilos,
+       COALESCE(pop.new_win_date, po.order_creation_date) AS fecha_new_win,
        po.order_consecutive
 FROM purchase_order_product pop
 JOIN purchase_orders po ON po.id = pop.purchase_order_id AND po.status != 'cancelled'
 JOIN clients c ON c.id = po.client_id
 JOIN products p ON p.id = pop.product_id
 WHERE pop.new_win = 1 AND pop.muestra = 0
-  AND pop.new_win_date BETWEEN '2026-05-01' AND '2026-05-31'
-ORDER BY pop.new_win_date DESC;
+  AND COALESCE(pop.new_win_date, po.order_creation_date) BETWEEN '2026-05-01' AND '2026-05-31'
+ORDER BY COALESCE(pop.new_win_date, po.order_creation_date) DESC;
 
 # 49. Cumplimiento POR CLIENTE en un mes (similar a #15 pero sin agregar por ejecutiva)
 # Patrón anti-duplicación: pron por cliente + real por cliente, luego JOIN.
