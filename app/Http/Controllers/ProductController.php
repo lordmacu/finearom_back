@@ -358,6 +358,13 @@ class ProductController extends Controller
             $query->where('categories', 'like', '%' . $category . '%');
         }
 
+        // executive (email) → productos cuyo cliente está asignado a esa ejecutiva
+        if ($executive = $request->query('executive')) {
+            $query->whereHas('client', function ($q) use ($executive) {
+                $q->where('executive', $executive);
+            });
+        }
+
         $allowedSorts = ['id', 'code', 'product_name', 'price', 'client_id'];
         $sortBy = $request->query('sort_by', 'id');
         $sortDir = $request->query('sort_direction', 'desc');
