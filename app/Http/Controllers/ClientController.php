@@ -620,6 +620,26 @@ class ClientController extends Controller
             });
         }
 
+        // Filtros adicionales del modal de exportación
+        if ($executive = $request->query('executive')) {
+            $query->where('executive', $executive);
+        }
+        if ($status = $request->query('status')) {
+            $query->where('status', $status);
+        }
+        if ($country = $request->query('country')) {
+            $query->where('country', $country);
+        }
+        if ($clientType = $request->query('client_type')) {
+            $query->where('client_type', $clientType);
+        }
+        if ($city = $request->query('city')) {
+            $query->where(function ($q) use ($city) {
+                $q->where('city', 'like', "%{$city}%")
+                    ->orWhere('ciudad', 'like', "%{$city}%");
+            });
+        }
+
         $allowedSorts = ['id', 'client_name', 'nit', 'email', 'executive_email'];
         $sortBy = $request->query('sort_by', 'id');
         $sortDir = strtolower($request->query('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
@@ -672,6 +692,16 @@ class ClientController extends Controller
 
         if ($clientId = $request->query('client_id')) {
             $query->where('client_id', (int) $clientId);
+        }
+        if ($search = $request->query('search')) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('nit', 'like', "%{$search}%")
+                    ->orWhere('delivery_address', 'like', "%{$search}%");
+            });
+        }
+        if ($city = $request->query('delivery_city')) {
+            $query->where('delivery_city', 'like', "%{$city}%");
         }
 
         $callback = function () use ($query) {

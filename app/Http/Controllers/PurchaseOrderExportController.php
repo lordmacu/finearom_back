@@ -21,18 +21,6 @@ class PurchaseOrderExportController extends Controller
         $startDate = $request->query('start_date');
         $endDate = $request->query('end_date');
 
-        if (! $startDate || ! $endDate) {
-            return response()->json(['success' => false, 'message' => 'Debe proporcionar un rango de fechas válido'], 422);
-        }
-
-        $start = Carbon::parse($startDate)->startOfDay();
-        $end = Carbon::parse($endDate)->endOfDay();
-
-        // Limitar rango a 3 meses (legacy)
-        if ($start->diffInMonths($end) > 3) {
-            return response()->json(['success' => false, 'message' => 'El rango de fechas no puede exceder los 3 meses'], 422);
-        }
-
         $clientId = $request->query('client_id');
         $status = $request->query('status');
         $orderConsecutive = $request->query('order_consecutive');
@@ -40,8 +28,18 @@ class PurchaseOrderExportController extends Controller
         $executive = $request->query('executive');  // email de la ejecutiva
 
         $query = PurchaseOrder::query()
-            ->with(['client:id,client_name,nit,executive', 'products'])
-            ->whereBetween('order_creation_date', [$start->toDateString(), $end->toDateString()]);
+            ->with(['client:id,client_name,nit,executive', 'products']);
+
+        // Rango de fechas opcional (sin límite máximo)
+        if ($startDate && $endDate) {
+            $start = Carbon::parse($startDate)->startOfDay();
+            $end = Carbon::parse($endDate)->endOfDay();
+            $query->whereBetween('order_creation_date', [$start->toDateString(), $end->toDateString()]);
+        } elseif ($startDate) {
+            $query->where('order_creation_date', '>=', Carbon::parse($startDate)->toDateString());
+        } elseif ($endDate) {
+            $query->where('order_creation_date', '<=', Carbon::parse($endDate)->toDateString());
+        }
 
         if ($clientId) {
             $query->where('client_id', $clientId);

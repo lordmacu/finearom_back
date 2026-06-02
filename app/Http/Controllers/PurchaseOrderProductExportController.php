@@ -23,13 +23,10 @@ class PurchaseOrderProductExportController extends Controller
         $executive = $request->query('executive');
         $muestra = $request->query('muestra'); // '1' = solo muestras, '0' = sin muestras, null = ambos
 
-        // Validar rango si viene
+        // Rango de fechas opcional (sin límite máximo)
         if ($dateFrom && $dateTo) {
             $start = Carbon::parse($dateFrom)->startOfDay();
             $end = Carbon::parse($dateTo)->endOfDay();
-            if ($start->diffInMonths($end) > 3) {
-                return response()->json(['success' => false, 'message' => 'El rango de fechas no puede exceder los 3 meses'], 422);
-            }
         } else {
             $start = $end = null;
         }
