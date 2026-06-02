@@ -19,6 +19,9 @@ class PurchaseOrderProductExportController extends Controller
         $newWin = $request->query('new_win');
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
+        $status = $request->query('status');
+        $executive = $request->query('executive');
+        $muestra = $request->query('muestra'); // '1' = solo muestras, '0' = sin muestras, null = ambos
 
         // Validar rango si viene
         if ($dateFrom && $dateTo) {
@@ -74,6 +77,18 @@ class PurchaseOrderProductExportController extends Controller
 
         if ($request->has('new_win') && ($newWin === '1' || $newWin === '0')) {
             $query->where('purchase_order_product.new_win', $newWin);
+        }
+
+        if ($status) {
+            $query->where('purchase_orders.status', $status);
+        }
+
+        if ($executive) {
+            $query->where('clients.executive', $executive);
+        }
+
+        if ($muestra === '1' || $muestra === '0') {
+            $query->where('purchase_order_product.muestra', (int) $muestra);
         }
 
         $products = $query->get()->map(function ($item) {

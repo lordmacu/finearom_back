@@ -342,6 +342,22 @@ class ProductController extends Controller
             $query->where('code', $code);
         }
 
+        // Filtros adicionales del modal de exportación
+        // with_new_wins='1' → solo productos que han sido NEW WIN al menos una vez
+        if ($request->query('with_new_wins') === '1') {
+            $query->whereExists(function ($sub) {
+                $sub->select(\DB::raw(1))
+                    ->from('purchase_order_product')
+                    ->whereColumn('purchase_order_product.product_id', 'products.id')
+                    ->where('purchase_order_product.new_win', 1);
+            });
+        }
+
+        // category (LIKE sobre JSON serializado)
+        if ($category = $request->query('category')) {
+            $query->where('categories', 'like', '%' . $category . '%');
+        }
+
         $allowedSorts = ['id', 'code', 'product_name', 'price', 'client_id'];
         $sortBy = $request->query('sort_by', 'id');
         $sortDir = $request->query('sort_direction', 'desc');

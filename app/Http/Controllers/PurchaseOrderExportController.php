@@ -36,9 +36,11 @@ class PurchaseOrderExportController extends Controller
         $clientId = $request->query('client_id');
         $status = $request->query('status');
         $orderConsecutive = $request->query('order_consecutive');
+        $isNewWin = $request->query('is_new_win'); // '1' = solo new wins, '0' = solo no, null/'' = ambos
+        $executive = $request->query('executive');  // email de la ejecutiva
 
         $query = PurchaseOrder::query()
-            ->with(['client:id,client_name,nit', 'products'])
+            ->with(['client:id,client_name,nit,executive', 'products'])
             ->whereBetween('order_creation_date', [$start->toDateString(), $end->toDateString()]);
 
         if ($clientId) {
@@ -49,6 +51,14 @@ class PurchaseOrderExportController extends Controller
         }
         if ($orderConsecutive) {
             $query->where('order_consecutive', 'like', '%' . $orderConsecutive . '%');
+        }
+        if ($isNewWin === '1' || $isNewWin === '0') {
+            $query->where('is_new_win', (int) $isNewWin);
+        }
+        if ($executive) {
+            $query->whereHas('client', function ($q) use ($executive) {
+                $q->where('executive', $executive);
+            });
         }
 
         $orders = $query->get()->map(function (PurchaseOrder $order) {
@@ -65,8 +75,11 @@ class PurchaseOrderExportController extends Controller
                 'consecutive' => $order->order_consecutive,
                 'client' => optional($order->client)->client_name,
                 'nit' => optional($order->client)->nit,
+                'executive' => optional($order->client)->executive,
                 'total' => $total,
                 'status' => $order->status,
+                'is_new_win' => $order->is_new_win,
+                'is_muestra' => $order->is_muestra,
             ];
         });
 
@@ -78,8 +91,11 @@ class PurchaseOrderExportController extends Controller
             'B1' => 'Consecutivo',
             'C1' => 'Cliente',
             'D1' => 'NIT',
-            'E1' => 'Total',
-            'F1' => 'Estado',
+            'E1' => 'Ejecutiva (email)',
+            'F1' => 'Total',
+            'G1' => 'Estado',
+            'H1' => 'New Win',
+            'I1' => 'Muestra',
         ];
 
         foreach ($headers as $cell => $label) {
@@ -92,8 +108,11 @@ class PurchaseOrderExportController extends Controller
             $sheet->setCellValue('B' . $row, $order['consecutive']);
             $sheet->setCellValue('C' . $row, $order['client']);
             $sheet->setCellValue('D' . $row, $order['nit']);
-            $sheet->setCellValue('E' . $row, $order['total']);
-            $sheet->setCellValue('F' . $row, $order['status']);
+            $sheet->setCellValue('E' . $row, $order['executive']);
+            $sheet->setCellValue('F' . $row, $order['total']);
+            $sheet->setCellValue('G' . $row, $order['status']);
+            $sheet->setCellValue('H' . $row, $order['is_new_win'] ? 'Sí' : 'No');
+            $sheet->setCellValue('I' . $row, $order['is_muestra'] ? 'Sí' : 'No');
             $row++;
         }
 
