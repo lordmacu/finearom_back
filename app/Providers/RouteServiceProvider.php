@@ -25,11 +25,10 @@ class RouteServiceProvider extends ServiceProvider
     public function boot(): void
     {
         RateLimiter::for('api', function (Request $request) {
-            // Sin limite para rutas de sincronización Siigo
-            if (str_starts_with($request->path(), 'api/siigo')) {
-                return Limit::none();
-            }
-            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+            // Rate limit deshabilitado: herramienta interna detrás de auth.
+            // Evita el "Too Many Attempts" en el uso normal (envío de pruebas
+            // de correo, sincronizaciones masivas, etc.).
+            return Limit::none();
         });
 
         $this->routes(function () {
