@@ -624,7 +624,7 @@ class MonthlyReportController extends Controller
             "- PostgreSQL: NULLS FIRST/LAST, FILTER (WHERE ...), DISTINCT ON, RETURNING, ::cast, ILIKE, generate_series, array/json operators (->, ->>, @>), LATERAL JOIN, EXCEPT/INTERSECT como sintaxis Postgres (en MariaDB usar técnicas alternativas), funciones como string_agg, percentile_cont, percentile_disc, date_trunc, to_char/to_date estilo Postgres, EXTRACT(EPOCH FROM …).\n" .
             "- SQL Server / T-SQL: TOP N (usar LIMIT), [corchetes] para identificadores (usar backticks `), GETDATE() (usar NOW()/CURDATE()), DATEPART, ISNULL (usar IFNULL/COALESCE), CONVERT(date, …), CROSS APPLY / OUTER APPLY, MERGE, IIF, CHARINDEX, LEN (usar CHAR_LENGTH/LENGTH).\n" .
             "- Oracle / PL/SQL: NVL (usar IFNULL/COALESCE), DUAL implícito, SYSDATE (usar NOW()), TO_CHAR/TO_DATE estilo Oracle, CONNECT BY, ROWNUM (usar LIMIT), DECODE (usar CASE WHEN), MINUS (usar EXCEPT/NOT IN/LEFT JOIN WHERE NULL).\n" .
-            "- ANSI no-soportado en MariaDB: FULL OUTER JOIN (usar UNION de LEFT/RIGHT JOIN o CTE con UNION + LEFT JOINs), WITHIN GROUP, window function FILTER clause.\n" .
+            "- ANSI no-soportado en MariaDB: FULL JOIN / FULL OUTER JOIN (¡PROHIBIDO — ver regla dedicada abajo!), WITHIN GROUP, window function FILTER clause.\n" .
             "USA SIEMPRE la sintaxis MariaDB equivalente:\n" .
             "- Fechas: NOW(), CURDATE(), DATE_ADD, DATE_SUB, DATEDIFF, DATE_FORMAT, YEAR/MONTH/DAY, STR_TO_DATE.\n" .
             "- Strings: CONCAT, CONCAT_WS, GROUP_CONCAT, SUBSTRING, LOCATE, REPLACE, LIKE (sensible-según-collation).\n" .
@@ -632,7 +632,15 @@ class MonthlyReportController extends Controller
             "- Paginación: LIMIT n OFFSET m (NO TOP, NO ROWNUM).\n" .
             "- Cast: CAST(x AS CHAR/SIGNED/UNSIGNED/DECIMAL(p,s)/DATE/DATETIME) — NUNCA x::tipo.\n" .
             "- Window functions: ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, SUM/AVG OVER — soportadas desde MariaDB 10.2+.\n" .
-            "- Si dudas si una función existe en MariaDB, usa una alternativa estándar (CASE WHEN, subqueries, JOINs).\n\n" .
+            "- Si dudas si una función existe en MariaDB, usa una alternativa estándar (CASE WHEN, subqueries, JOINs).\n" .
+            "⚠⚠ FULL JOIN ESTÁ PROHIBIDO (MariaDB no lo soporta — falla con error 1064). NUNCA escribas la palabra FULL en un JOIN. Aplica sobre todo al comparar pronóstico vs real por referencia, donde quieres TODAS las referencias (tengan pronóstico, real o ambos). Emúlalo armando el conjunto de llaves con UNION y luego LEFT JOIN a cada lado:\n" .
+            "    SELECT k.nit, k.codigo,\n" .
+            "           COALESCE(p.kilos_pronosticados, 0) AS kilos_pronosticados,\n" .
+            "           COALESCE(r.kilos_reales, 0)        AS kilos_reales\n" .
+            "    FROM (SELECT nit, codigo FROM pronosticos UNION SELECT nit, codigo FROM reales) k\n" .
+            "    LEFT JOIN pronosticos p ON p.nit = k.nit AND p.codigo = k.codigo\n" .
+            "    LEFT JOIN reales      r ON r.nit = k.nit AND r.codigo = k.codigo\n" .
+            "  (UNION sin ALL para deduplicar las llaves de ambos lados; el LEFT JOIN trae las métricas de cada CTE.)\n\n" .
             "ROLES Y FLUJO DE ÓRDENES:\n" .
             "EJECUTIVAS: negocian pedidos. Campo clients.executive guarda su email. (El catálogo de ejecutivas activas se inyecta en un mensaje system aparte.)\n" .
             "⚠⚠ REGLA ABSOLUTA PARA FILTRAR POR EJECUTIVA EN SQL:\n" .
@@ -2559,6 +2567,15 @@ EOT;
             if (stripos($sql, $pattern) !== false) {
                 return response()->json(['success' => false, 'message' => 'Query no permitida'], 422);
             }
+        }
+
+        // MariaDB no soporta FULL [OUTER] JOIN → mensaje claro y accionable
+        // en vez del críptico "error 1064 near 'FULL JOIN'".
+        if (preg_match('/\bFULL\s+(OUTER\s+)?JOIN\b/i', $sql)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La consulta usa FULL JOIN, que MariaDB no soporta. Pídele a la IA que la reescriba sin FULL JOIN: arma el conjunto de llaves con UNION y luego haz LEFT JOIN a cada lado.',
+            ], 422);
         }
 
         $sql = $this->sanitizeSqlForMariaDb($sql);
