@@ -722,6 +722,25 @@ class MonthlyReportController extends Controller
             "          WHEN NULLIF(par.trm+0,0) > 10000 THEN NULLIF(par.trm+0,0)/100\n" .
             "          ELSE NULL END\n" .
             "     Aplicar el mismo patrón a po.trm. Fallback final: trm_daily → 4000\n" .
+            "  → ⚠⚠ CRÍTICO ONLY_FULL_GROUP_BY + TRM diaria: la subconsulta correlacionada a trm_daily (…WHERE td.date <= par.dispatch_date…) referencia par.dispatch_date. Si la dejas DENTRO de un SUM()/agregado en una query que tiene GROUP BY, MariaDB lanza error 1055 'dispatch_date isn't in GROUP BY' (es un FALSO POSITIVO del analizador: la cascada es correcta, pero MariaDB no la acepta a través del borde de la subconsulta).\n" .
+            "     SOLUCIÓN OBLIGATORIA cuando la query AGRUPA (GROUP BY por cliente / ejecutiva / producto / mes): calcula valor_usd y valor_cop POR FILA en una subconsulta derivada SIN GROUP BY, y haz el SUM + GROUP BY en la consulta EXTERNA. NUNCA pongas la subconsulta a trm_daily con par.dispatch_date dentro de un SUM agrupado.\n" .
+            "     PATRÓN CORRECTO (ventas en COP por cliente):\n" .
+            "       SELECT cliente, nit, SUM(kilos) AS kilos, ROUND(SUM(valor_usd),2) AS valor_usd, ROUND(SUM(valor_cop),2) AS valor_cop\n" .
+            "       FROM (\n" .
+            "         SELECT c.client_name AS cliente, c.nit AS nit, par.quantity AS kilos,\n" .
+            "           par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) AS valor_usd,\n" .
+            "           par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(\n" .
+            "             NULLIF(CASE WHEN (par.trm + 0) BETWEEN 3400 AND 10000 THEN (par.trm + 0) WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100 ELSE NULL END, 0),\n" .
+            "             NULLIF(CASE WHEN (po.trm + 0) BETWEEN 3400 AND 10000 THEN (po.trm + 0) WHEN (po.trm + 0) > 10000 THEN (po.trm + 0) / 100 ELSE NULL END, 0),\n" .
+            "             (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 3400 ORDER BY td.date DESC LIMIT 1), 4000) AS valor_cop\n" .
+            "         FROM partials par\n" .
+            "         JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0\n" .
+            "         JOIN products p ON p.id = pop.product_id\n" .
+            "         JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'\n" .
+            "         JOIN clients c ON c.id = po.client_id\n" .
+            "         WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '<ini>' AND '<fin>'\n" .
+            "       ) t GROUP BY cliente, nit ORDER BY valor_cop DESC\n" .
+            "     Si la query NO agrupa (detalle fila por fila, sin GROUP BY) sí puedes usar la cascada TRM inline sin subconsulta derivada. La subconsulta derivada SOLO es obligatoria cuando hay GROUP BY.\n" .
             "- \"Kilos despachados\" = SUM(par.quantity) de partials reales del período (sin muestras)\n" .
             "- \"Pipeline / Pendiente por facturar\" = SUM de partials type='temporal' activos (deleted_at IS NULL). Valor aún no despachado pero programado.\n" .
             "- \"New Win (nivel OC)\" = COUNT(DISTINCT CASE WHEN po.is_new_win=1 THEN po.id END) — NUNCA SUM(is_new_win) sin DISTINCT, contaría líneas no órdenes\n" .
