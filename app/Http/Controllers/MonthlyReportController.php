@@ -2605,22 +2605,69 @@ EOT;
 
         try {
             $results = DB::select($sql);
-
-            if (empty($results)) {
-                return response()->json(['success' => true, 'columns' => [], 'rows' => [], 'count' => 0]);
-            }
-
-            $columns = array_keys((array) $results[0]);
-            $rows    = array_map(fn($row) => array_values((array) $row), $results);
-
-            return response()->json([
-                'success' => true,
-                'columns' => $columns,
-                'rows'    => $rows,
-                'count'   => count($rows),
-            ]);
         } catch (\Throwable $e) {
-            return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()], 422);
+            // Falso positivo conocido de ONLY_FULL_GROUP_BY: la cascada de TRM usa una
+            // subconsulta correlacionada a trm_daily filtrada por par.dispatch_date DENTRO
+            // de un SUM() bajo GROUP BY. MariaDB lanza 1055 'dispatch_date isn't in GROUP BY'
+            // aunque la query es correcta (la subconsulta se evalúa por fila dentro del
+            // agregado — verificado: el resultado es idéntico con el modo apagado). Solo en
+            // ese caso puntual reintentamos con ONLY_FULL_GROUP_BY desactivado; cualquier otro
+            // 1055 sigue siendo error real para que la IA lo corrija.
+            if ($this->isTrmDispatchDateGroupByFalsePositive($e, $sql)) {
+                try {
+                    $results = $this->selectWithoutOnlyFullGroupBy($sql);
+                } catch (\Throwable $e2) {
+                    return response()->json(['success' => false, 'message' => 'Error: ' . $e2->getMessage()], 422);
+                }
+            } else {
+                return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()], 422);
+            }
+        }
+
+        if (empty($results)) {
+            return response()->json(['success' => true, 'columns' => [], 'rows' => [], 'count' => 0]);
+        }
+
+        $columns = array_keys((array) $results[0]);
+        $rows    = array_map(fn($row) => array_values((array) $row), $results);
+
+        return response()->json([
+            'success' => true,
+            'columns' => $columns,
+            'rows'    => $rows,
+            'count'   => count($rows),
+        ]);
+    }
+
+    /**
+     * ¿El error 1055 es el falso positivo de la cascada de TRM?
+     * Exige AMBAS señales para no relajar el modo ante errores de agrupación legítimos:
+     *   1) el 1055 acusa específicamente a una columna dispatch_date, y
+     *   2) el SQL contiene la firma de la subconsulta correlacionada a trm_daily
+     *      (un trm_daily seguido de cerca por dispatch_date).
+     */
+    private function isTrmDispatchDateGroupByFalsePositive(\Throwable $e, string $sql): bool
+    {
+        $msg = $e->getMessage();
+        if (!str_contains($msg, "isn't in GROUP BY") || !str_contains($msg, 'dispatch_date')) {
+            return false;
+        }
+        return (bool) preg_match('/trm_daily\b[\s\S]{0,300}?dispatch_date/i', $sql);
+    }
+
+    /**
+     * Ejecuta un SELECT desactivando ONLY_FULL_GROUP_BY solo para esta ejecución y
+     * restaura el sql_mode original al terminar (incluso si la query lanza excepción).
+     */
+    private function selectWithoutOnlyFullGroupBy(string $sql): array
+    {
+        $original = DB::selectOne('SELECT @@SESSION.sql_mode AS m')->m;
+        $relaxed  = trim(preg_replace('/,{2,}/', ',', str_ireplace('ONLY_FULL_GROUP_BY', '', $original)), ',');
+        try {
+            DB::statement('SET SESSION sql_mode = ' . DB::getPdo()->quote($relaxed));
+            return DB::select($sql);
+        } finally {
+            DB::statement('SET SESSION sql_mode = ' . DB::getPdo()->quote($original));
         }
     }
 
