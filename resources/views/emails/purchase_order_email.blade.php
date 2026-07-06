@@ -38,7 +38,7 @@
                     <th>PRECIO TOTAL</th>
                     <th>NEW WIN</th>
                     <th>LUGAR DE ENTREGA</th>
-                    <th>FECHA DE DESPACHO</th>
+                    <th>FECHA REQUERIDA POR EL CLIENTE</th>
                 </tr>
             </thead>
             <tbody>
