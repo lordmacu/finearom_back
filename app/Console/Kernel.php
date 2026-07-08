@@ -12,15 +12,18 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // ⭐ Fetch TRM diaria desde API externa - 9:00 AM (Colombia)
-        $schedule->command('trm:fetch-daily')
-            ->dailyAt('09:00')
+        // ⭐ Sincroniza la serie TRM completa del Banco de la República cada hora
+        //    y reconstruye trm_daily (borrar + reinsertar con guardas). Fuente
+        //    única de TRM del sistema; ya no se consulta el SOAP de Superfinanciera.
+        $schedule->command('trm:sync-banrep')
+            ->hourly()
+            ->withoutOverlapping(10)
             ->timezone('America/Bogota')
             ->onSuccess(function () {
-                \Log::info('TRM diaria obtenida exitosamente');
+                \Log::info('TRM Banrep sincronizada exitosamente');
             })
             ->onFailure(function () {
-                \Log::error('Error al obtener TRM diaria');
+                \Log::error('Error al sincronizar TRM Banrep');
             });
 
         // ⭐ Generar estadísticas de órdenes - 10:00 AM (después del TRM que llega a las 9AM)

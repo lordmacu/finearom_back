@@ -159,7 +159,7 @@ class AnalyzeQuery
                         END) *
                         purchase_order_product.quantity *
                         (CASE
-                            WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3400 THEN purchase_orders.trm
+                            WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3200 THEN purchase_orders.trm
                             WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                             ELSE 4000
                         END)
@@ -187,7 +187,7 @@ class AnalyzeQuery
                     END) *
                     partials.quantity *
                     (CASE
-                        WHEN partials.trm IS NOT NULL AND partials.trm >= 3400 THEN partials.trm
+                        WHEN partials.trm IS NOT NULL AND partials.trm >= 3200 THEN partials.trm
                         WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                         ELSE 4000
                     END)
@@ -243,7 +243,7 @@ class AnalyzeQuery
                         END) *
                         purchase_order_product.quantity *
                         (CASE
-                            WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3400 THEN purchase_orders.trm
+                            WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3200 THEN purchase_orders.trm
                             WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                             ELSE 4000
                         END)
@@ -278,7 +278,7 @@ class AnalyzeQuery
                     END) *
                     partials.quantity *
                     (CASE
-                        WHEN partials.trm IS NOT NULL AND partials.trm >= 3400 THEN partials.trm
+                        WHEN partials.trm IS NOT NULL AND partials.trm >= 3200 THEN partials.trm
                         WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                         ELSE 4000
                     END)
@@ -329,7 +329,7 @@ class AnalyzeQuery
                         END) *
                         purchase_order_product.quantity *
                         (CASE
-                            WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3400 THEN purchase_orders.trm
+                            WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3200 THEN purchase_orders.trm
                             WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                             ELSE 4000
                         END)
@@ -365,7 +365,7 @@ class AnalyzeQuery
                     END) *
                     partials.quantity *
                     (CASE
-                        WHEN partials.trm IS NOT NULL AND partials.trm >= 3400 THEN partials.trm
+                        WHEN partials.trm IS NOT NULL AND partials.trm >= 3200 THEN partials.trm
                         WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                         ELSE 4000
                     END)
@@ -407,7 +407,7 @@ class AnalyzeQuery
                 END) as price_usd')
                 ->selectRaw('
                     (CASE
-                        WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3400 THEN purchase_orders.trm
+                        WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3200 THEN purchase_orders.trm
                         WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                         ELSE 4000
                     END) as trm
@@ -415,7 +415,7 @@ class AnalyzeQuery
                 ->selectRaw('COALESCE(trm_daily.value, 4000) as trm_real')
                 ->selectRaw('
                     (CASE
-                        WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3400 THEN "no"
+                        WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3200 THEN "no"
                         ELSE "si"
                     END) as defaultTrm
                 ')
@@ -429,7 +429,7 @@ class AnalyzeQuery
                         END) *
                         purchase_order_product.quantity *
                         (CASE
-                            WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3400 THEN purchase_orders.trm
+                            WHEN purchase_orders.trm IS NOT NULL AND purchase_orders.trm >= 3200 THEN purchase_orders.trm
                             WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                             ELSE 4000
                         END)
@@ -455,7 +455,7 @@ class AnalyzeQuery
             END) as price_usd')
             ->selectRaw('
                 (CASE
-                    WHEN partials.trm IS NOT NULL AND partials.trm >= 3400 THEN partials.trm
+                    WHEN partials.trm IS NOT NULL AND partials.trm >= 3200 THEN partials.trm
                     WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                     ELSE 4000
                 END) as trm
@@ -463,7 +463,7 @@ class AnalyzeQuery
             ->selectRaw('COALESCE(trm_daily.value, 4000) as trm_real')
             ->selectRaw('
                 (CASE
-                    WHEN partials.trm IS NOT NULL AND partials.trm >= 3400 THEN "no"
+                    WHEN partials.trm IS NOT NULL AND partials.trm >= 3200 THEN "no"
                     ELSE "si"
                 END) as defaultTrm
             ')
@@ -477,7 +477,7 @@ class AnalyzeQuery
                     END) *
                     partials.quantity *
                     (CASE
-                        WHEN partials.trm IS NOT NULL AND partials.trm >= 3400 THEN partials.trm
+                        WHEN partials.trm IS NOT NULL AND partials.trm >= 3200 THEN partials.trm
                         WHEN trm_daily.value IS NOT NULL THEN trm_daily.value
                         ELSE 4000
                     END)

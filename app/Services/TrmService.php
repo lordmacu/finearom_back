@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
@@ -38,15 +39,16 @@ class TrmService
         $this->normalizer = $normalizer;
     }
     /**
-     * Obtiene la TRM para una fecha dada con sistema de caché multinivel.
+     * Obtiene la TRM para una fecha dada, leyendo de la tabla `trm_daily`
+     * (fuente única: la serie oficial de Banrep sincronizada cada hora por
+     * el comando `trm:sync-banrep`).
      *
-     * Sistema de caché en cascada:
+     * Cascada:
      * 1. Caché en memoria (runtime) - Si ya se consultó en este request
-     * 2. Caché de Laravel - Valores persistentes con TTL inteligente
-     * 3. Servicio SOAP principal
-     * 4. API alternativa (Exchange Rates)
-     * 5. Último valor exitoso en caché de emergencia
-     * 6. Valor por defecto (4000)
+     * 2. trm_daily: valor de la fecha exacta o el más reciente <= fecha
+     *    (carry-forward para fines de semana/festivos), con value >= umbral
+     * 3. trm_daily: TRM válida más reciente disponible (fecha fuera de rango)
+     * 4. Valor por defecto (4000)
      *
      * @param string|null $custom_date La fecha en formato 'Y-m-d'. Si es nulo, usa la fecha actual.
      * @return float La TRM para la fecha especificada
@@ -55,121 +57,39 @@ class TrmService
     {
         $date = $custom_date ?? date('Y-m-d');
 
-        Log::info('TRM lookup start', [
-            'requested_date' => $custom_date,
-            'effective_date' => $date,
-        ]);
-
         // Nivel 1: Caché en memoria (runtime)
         if (isset($this->runtimeCache[$date])) {
-            Log::debug("TRM obtenido de caché en memoria para {$date}: {$this->runtimeCache[$date]}");
             return $this->runtimeCache[$date];
         }
 
-        // Nivel 2: Caché de Laravel
-        Log::debug('TRM runtime cache miss', [
-            'date' => $date,
-        ]);
+        // Nivel 2: trm_daily con carry-forward (mismo patrón que el SQL de
+        // reportes: el valor válido más reciente con fecha <= la solicitada).
+        $value = (float) (DB::table('trm_daily')
+            ->where('date', '<=', $date)
+            ->where('value', '>=', TrmNormalizer::MIN_VALID_TRM)
+            ->orderByDesc('date')
+            ->value('value') ?? 0);
 
-        $cacheKey = "trm_{$date}";
-        $cachedValue = Cache::get($cacheKey);
-
-        if ($cachedValue !== null && $cachedValue > TrmNormalizer::MIN_VALID_TRM) {
-            Log::debug("TRM obtenido de caché de Laravel para {$date}: {$cachedValue}");
-            $this->runtimeCache[$date] = $cachedValue;
-            return $cachedValue;
+        if ($value >= TrmNormalizer::MIN_VALID_TRM) {
+            $this->runtimeCache[$date] = $value;
+            return $value;
         }
 
-        if ($cachedValue === null) {
-            Log::debug('TRM laravel cache miss', [
-                'date' => $date,
-                'cache_key' => $cacheKey,
-            ]);
-        } elseif ($cachedValue <= TrmNormalizer::MIN_VALID_TRM) {
-            Log::warning('TRM laravel cache value below minimum', [
-                'date' => $date,
-                'cache_key' => $cacheKey,
-                'cached_value' => $cachedValue,
-                'min_valid' => TrmNormalizer::MIN_VALID_TRM,
-            ]);
+        // Nivel 3: TRM válida más reciente en la tabla (fechas anteriores al
+        // primer registro válido, p.ej. históricos < umbral).
+        $latest = (float) (DB::table('trm_daily')
+            ->where('value', '>=', TrmNormalizer::MIN_VALID_TRM)
+            ->orderByDesc('date')
+            ->value('value') ?? 0);
+
+        if ($latest >= TrmNormalizer::MIN_VALID_TRM) {
+            Log::warning("TRM no encontrada en trm_daily para {$date}; usando última disponible: {$latest}");
+            $this->runtimeCache[$date] = $latest;
+            return $latest;
         }
 
-        // Nivel 3: Intentar obtener de SOAP
-        Log::info('TRM SOAP lookup start', [
-            'date' => $date,
-        ]);
-
-        try {
-            $trm_from_service = $this->fetchTrmFromSoapService($date);
-            $trmValue = (float) ($trm_from_service["value"] ?? 0);
-
-            Log::info('TRM SOAP response', [
-                'date' => $date,
-                'value' => $trmValue,
-                'min_valid' => TrmNormalizer::MIN_VALID_TRM,
-                'valid_from' => $trm_from_service['valid_from'] ?? null,
-                'valid_to' => $trm_from_service['valid_to'] ?? null,
-                'success' => $trm_from_service['success'] ?? null,
-            ]);
-
-            if ($trmValue > TrmNormalizer::MIN_VALID_TRM) {
-                $this->cacheTrmValue($date, $trmValue, 'soap');
-                return $trmValue;
-            }
-
-            Log::warning('TRM SOAP value below minimum', [
-                'date' => $date,
-                'value' => $trmValue,
-                'min_valid' => TrmNormalizer::MIN_VALID_TRM,
-            ]);
-        } catch (Exception $e) {
-            Log::warning("Error obteniendo TRM del servicio SOAP para fecha {$date}: " . $e->getMessage());
-        }
-
-        // Nivel 4: Fallback a API alternativa
-        Log::info('TRM exchange API lookup start', [
-            'date' => $date,
-        ]);
-
-        try {
-            $exchangeRate = $this->getExchangeRates($date);
-
-            Log::info('TRM exchange API response', [
-                'date' => $date,
-                'value' => $exchangeRate,
-                'min_valid' => TrmNormalizer::MIN_VALID_TRM,
-            ]);
-
-            if (!$exchangeRate) {
-                Log::warning('TRM exchange API returned empty value', [
-                    'date' => $date,
-                ]);
-            } elseif ($exchangeRate <= TrmNormalizer::MIN_VALID_TRM) {
-                Log::warning('TRM exchange API value below minimum', [
-                    'date' => $date,
-                    'value' => $exchangeRate,
-                    'min_valid' => TrmNormalizer::MIN_VALID_TRM,
-                ]);
-            }
-            if ($exchangeRate && $exchangeRate > TrmNormalizer::MIN_VALID_TRM) {
-                $this->cacheTrmValue($date, $exchangeRate, 'exchange_api');
-                return (float) $exchangeRate;
-            }
-        } catch (Exception $e) {
-            Log::warning("Error obteniendo TRM de Exchange API para fecha {$date}: " . $e->getMessage());
-        }
-
-        // Nivel 5: Último valor exitoso en caché de emergencia
-        $lastSuccessful = $this->getLastSuccessfulTrm();
-        if ($lastSuccessful) {
-            Log::info("Usando último valor TRM exitoso del caché de emergencia: {$lastSuccessful['value']} (fecha: {$lastSuccessful['date']}, fuente: {$lastSuccessful['source']})");
-            $trmValue = (float) $lastSuccessful['value'];
-            $this->runtimeCache[$date] = $trmValue;
-            return $trmValue;
-        }
-
-        // Nivel 6: Valor por defecto
-        Log::error("No se pudo obtener TRM de ninguna fuente para fecha {$date}. Usando valor por defecto: 4000");
+        // Nivel 4: Valor por defecto
+        Log::error("TRM no disponible en trm_daily para {$date}. Usando valor por defecto: 4000");
         $this->runtimeCache[$date] = 4000.0;
         return 4000.0;
     }
@@ -272,7 +192,7 @@ public function getEffectiveTrm($partialTrm, ?string $dispatchDate = null): arra
     }
 
     // ✅ AGREGAR ESTA VALIDACIÓN CRÍTICA (igual que en analyzeClientsByStatus):
-    if ($trm < TrmNormalizer::MIN_VALID_TRM) {  // 3400
+    if ($trm < TrmNormalizer::MIN_VALID_TRM) {  // 3200
         $isDefault = true;
         $trm = $this->getTrm($dispatchDate);  // ← ⚠️ RECALCULAR TRM POR DEFECTO
     }

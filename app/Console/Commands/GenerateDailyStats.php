@@ -191,7 +191,7 @@ class GenerateDailyStats extends Command
 
     // ── 2. Despachos reales del día ───────────────────────────────────────────
     // Partials tipo REAL con dispatch_date = hoy.
-    // TRM: partials.trm >= 3400 → trm_daily → 4000  (igual que AnalyzeQuery)
+    // TRM: partials.trm >= 3200 → trm_daily → 4000  (igual que AnalyzeQuery)
 
     private function dispatchStats(string $date): array
     {
@@ -212,7 +212,7 @@ class GenerateDailyStats extends Command
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
                     (CASE
-                        WHEN pt.trm IS NOT NULL AND pt.trm >= 3400 THEN pt.trm
+                        WHEN pt.trm IS NOT NULL AND pt.trm >= 3200 THEN pt.trm
                         WHEN td.value IS NOT NULL                  THEN td.value
                         ELSE 4000
                     END)

@@ -1249,7 +1249,7 @@ class DashboardController extends Controller
     private function getTrmForDateWithPartial($date, $partialTrm, $orderTrm, $trmData, $sourceType, &$trmUsageStats)
     {
         // 1. PRIORIDAD MÁXIMA: Si viene de partial real y tiene TRM válida, usar esa
-        if ($sourceType === 'partial_real' && !empty($partialTrm) && $partialTrm >= 3400) {
+        if ($sourceType === 'partial_real' && !empty($partialTrm) && $partialTrm >= 3200) {
             $trmUsageStats['from_partial_real']++;
             return (float) $partialTrm;
         }
@@ -1261,7 +1261,7 @@ class DashboardController extends Controller
         }
 
         // 3. Fallback: TRM de la orden si existe y es válida
-        if (!empty($orderTrm) && $orderTrm >= 3400) {
+        if (!empty($orderTrm) && $orderTrm >= 3200) {
             $trmUsageStats['from_order']++;
             return (float) $orderTrm;
         }
@@ -1493,11 +1493,11 @@ class DashboardController extends Controller
      *
      * OC / Pendientes (valor planeado y pendiente):
      *   Filtra por fecha de despacho temporal (COALESCE de partials, delivery_date, dispatch_date).
-     *   TRM: po.trm ≥ 3400 → trm_daily en fecha creación → 4000
+     *   TRM: po.trm ≥ 3200 → trm_daily en fecha creación → 4000
      *
      * Despachos (valor real):
      *   Partials tipo 'real' con dispatch_date en el período.
-     *   TRM: partials.trm ≥ 3400 → trm_daily en fecha despacho → 4000
+     *   TRM: partials.trm ≥ 3200 → trm_daily en fecha despacho → 4000
      *   (mismo criterio que AnalyzeQuery)
      *
      * Ambas queries excluyen muestras (muestra = 0).
@@ -1551,7 +1551,7 @@ class DashboardController extends Controller
                 COALESCE(SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
                     (CASE
-                        WHEN po.trm >= 3400 THEN po.trm
+                        WHEN po.trm >= 3200 THEN po.trm
                         WHEN td.value IS NOT NULL THEN td.value
                         ELSE 4000
                     END)
@@ -1578,14 +1578,14 @@ class DashboardController extends Controller
                     WHEN po.status IN ('pending', 'processing')
                         THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
                             (CASE
-                                WHEN po.trm >= 3400 THEN po.trm
+                                WHEN po.trm >= 3200 THEN po.trm
                                 WHEN td.value IS NOT NULL THEN td.value
                                 ELSE 4000
                             END)
                     WHEN po.status = 'parcial_status' AND pf.has_temporal = 1 AND pf.has_real = 0
                         THEN (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
                             (CASE
-                                WHEN po.trm >= 3400 THEN po.trm
+                                WHEN po.trm >= 3200 THEN po.trm
                                 WHEN td.value IS NOT NULL THEN td.value
                                 ELSE 4000
                             END)
@@ -1681,9 +1681,9 @@ class DashboardController extends Controller
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
                     (CASE
-                        WHEN CAST(REPLACE(REPLACE(COALESCE(pt.trm,'0'), '$', ''), ',', '') AS DECIMAL(15,2)) >= 3400
+                        WHEN CAST(REPLACE(REPLACE(COALESCE(pt.trm,'0'), '$', ''), ',', '') AS DECIMAL(15,2)) >= 3200
                             THEN CAST(REPLACE(REPLACE(COALESCE(pt.trm,'0'), '$', ''), ',', '') AS DECIMAL(15,2))
-                        WHEN po.trm >= 3400 THEN po.trm
+                        WHEN po.trm >= 3200 THEN po.trm
                         WHEN td.value IS NOT NULL THEN td.value
                         ELSE 4000
                     END)
@@ -1855,8 +1855,8 @@ class DashboardController extends Controller
                 SUM(
                     ss.valor /
                     (CASE
-                        WHEN lpt.real_trm IS NOT NULL AND lpt.real_trm >= 3400 THEN lpt.real_trm
-                        WHEN po.trm IS NOT NULL AND po.trm >= 3400 THEN po.trm
+                        WHEN lpt.real_trm IS NOT NULL AND lpt.real_trm >= 3200 THEN lpt.real_trm
+                        WHEN po.trm IS NOT NULL AND po.trm >= 3200 THEN po.trm
                         ELSE 4000
                     END)
                 ) as value_usd
