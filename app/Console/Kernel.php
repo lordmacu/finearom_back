@@ -12,9 +12,10 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // ⭐ Sincroniza la serie TRM completa del Banco de la República cada hora
-        //    y reconstruye trm_daily (borrar + reinsertar con guardas). Fuente
-        //    única de TRM del sistema; ya no se consulta el SOAP de Superfinanciera.
+        // ⭐ Sincroniza la TRM del Banco de la República cada hora: solo upsert del
+        //    día actual (las TRMs pasadas no cambian). Fuente única de TRM del
+        //    sistema; ya no se consulta el SOAP de Superfinanciera. Para poblar/
+        //    rellenar toda la serie desde 2023 usar `trm:sync-banrep --rebuild`.
         $schedule->command('trm:sync-banrep')
             ->hourly()
             ->withoutOverlapping(10)
