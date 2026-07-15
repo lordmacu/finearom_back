@@ -407,12 +407,15 @@ class MonthlyReportController extends Controller
                 $dhlSystemNote = '';
             }
 
-            // 3 mensajes system separados → maximiza el cache prefix de DeepSeek:
-            //   1) Stable (rules + 30 ejemplos): NUNCA cambia → siempre cache HIT
-            //   2) Catálogos (executives + clients): cambia raramente
-            //   3) Período (fechas + TRM): cambia cada request → no se cachea
+            // 4 mensajes system separados → maximiza el cache prefix de DeepSeek:
+            //   1) Reglas (estático): NUNCA cambia → siempre cache HIT
+            //   2) Ejemplos: retrieval dinámico del sidecar Vanna, o fallback estático (30 ejemplos)
+            //   3) Catálogos (executives + clients): cambia raramente
+            //   4) Período (fechas + TRM): cambia cada request → no se cachea
+            $examplesBlock  = $this->resolveExamplesBlock($userMessage);
             $systemMessages = [
-                ['role' => 'system', 'content' => $this->buildSystemPrompt()],
+                ['role' => 'system', 'content' => $this->buildRulesBlock()],
+                ['role' => 'system', 'content' => $examplesBlock],
                 ['role' => 'system', 'content' => $this->buildCatalogsBlock()],
                 ['role' => 'system', 'content' => $this->buildPeriodContext($periodStart, $periodEnd, now('America/Bogota')->toDateString(), $trmNowStr)],
             ];
@@ -1999,6 +2002,21 @@ ORDER BY cumplimiento_pct ASC;
 FIN DE EJEMPLOS — usa estos como base para construir queries nuevas.
 ═══════════════════════════════════════════════════════════════════════════
 EOT;
+    }
+
+    /**
+     * Resuelve el bloque de ejemplos para el prompt: intenta el retrieval dinámico
+     * del sidecar Vanna y, si no hay resultado (deshabilitado, falla o sin ejemplos),
+     * cae al bloque estático buildExamplesBlock(). Nunca lanza excepción.
+     */
+    private function resolveExamplesBlock(string $userMessage): string
+    {
+        $retrieved = app(\App\Services\VannaService::class)->retrieve($userMessage);
+        if ($retrieved !== null && !empty($retrieved['examples'])) {
+            return $this->formatRetrievedExamples($retrieved);
+        }
+
+        return $this->buildExamplesBlock();
     }
 
     /**
