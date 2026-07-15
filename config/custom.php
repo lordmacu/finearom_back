@@ -24,4 +24,9 @@ return [
     'siigo_proxy_url'      => env('SIIGO_PROXY_URL', ''),
     'siigo_proxy_username' => env('SIIGO_PROXY_USERNAME', ''),
     'siigo_proxy_password' => env('SIIGO_PROXY_PASSWORD', ''),
+
+    'vanna_url'        => env('VANNA_URL', 'http://127.0.0.1:8000'),
+    'vanna_enabled'    => env('VANNA_ENABLED', false),
+    'vanna_timeout_ms' => (int) env('VANNA_TIMEOUT_MS', 600),
+    'vanna_k'          => (int) env('VANNA_K', 8),
 ];
