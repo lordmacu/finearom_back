@@ -412,7 +412,7 @@ class MonthlyReportController extends Controller
             //   2) Ejemplos: retrieval dinámico del sidecar Vanna, o fallback estático (30 ejemplos)
             //   3) Catálogos (executives + clients): cambia raramente
             //   4) Período (fechas + TRM): cambia cada request → no se cachea
-            $examplesBlock  = $this->resolveExamplesBlock($userMessage);
+            $examplesBlock = $this->resolveExamplesBlock($userMessage);
             $systemMessages = [
                 ['role' => 'system', 'content' => $this->buildRulesBlock()],
                 ['role' => 'system', 'content' => $examplesBlock],
@@ -2011,12 +2011,16 @@ EOT;
      */
     private function resolveExamplesBlock(string $userMessage): string
     {
-        $retrieved = app(\App\Services\VannaService::class)->retrieve($userMessage);
-        if ($retrieved !== null && !empty($retrieved['examples'])) {
-            return $this->formatRetrievedExamples($retrieved);
-        }
+        try {
+            $retrieved = app(\App\Services\VannaService::class)->retrieve($userMessage);
+            if ($retrieved !== null && !empty($retrieved['examples'])) {
+                return $this->formatRetrievedExamples($retrieved);
+            }
 
-        return $this->buildExamplesBlock();
+            return $this->buildExamplesBlock();
+        } catch (\Throwable $e) {
+            return $this->buildExamplesBlock();
+        }
     }
 
     /**
