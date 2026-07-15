@@ -616,6 +616,14 @@ class MonthlyReportController extends Controller
      */
     private function buildSystemPrompt(): string
     {
+        return $this->buildRulesBlock() . $this->buildExamplesBlock();
+    }
+
+    /**
+     * Reglas estáticas SIN ejemplos. Estático → DeepSeek lo cachea (prefix caching).
+     */
+    private function buildRulesBlock(): string
+    {
         return
             "Eres un asistente de análisis comercial para Finearom, empresa colombiana que comercializa fragancias y materias primas para la industria cosmética.\n\n" .
             "MOTOR DE BASE DE DATOS (REGLA INVIOLABLE):\n" .
@@ -972,8 +980,7 @@ class MonthlyReportController extends Controller
             "UNION ALL SELECT 'estimado (Marlon)',2,par_t.dispatch_date,po.order_consecutive,'processing',c.client_name,c.nit,REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),NULL,NULL,NULL,par_t.quantity FROM partials par_t JOIN purchase_orders po ON po.id=par_t.order_id JOIN clients c ON c.id=po.client_id WHERE par_t.order_id=(SELECT order_id FROM partials WHERE tracking_number='{N}' AND type='real' AND deleted_at IS NULL LIMIT 1) AND par_t.type='temporal' AND par_t.deleted_at IS NULL\n" .
             "UNION ALL SELECT 'despacho real (Alexa)',3,par_r.dispatch_date,po.order_consecutive,po.status,c.client_name,c.nit,REPLACE(SUBSTRING_INDEX(c.executive,'@',1),'.',' '),par_r.invoice_number,par_r.tracking_number,par_r.transporter,par_r.quantity FROM partials par_r JOIN purchase_orders po ON po.id=par_r.order_id JOIN clients c ON c.id=po.client_id WHERE par_r.tracking_number='{N}' AND par_r.type='real' AND par_r.deleted_at IS NULL\n" .
             "ORDER BY fase_orden DESC, fecha DESC\n" .
-            "showing: fase, fecha, OC, cliente, estado, factura, guía, kilos. available: transportador, NIT, ejecutiva.\n\n" .
-            $this->buildExamplesBlock();
+            "showing: fase, fecha, OC, cliente, estado, factura, guía, kilos. available: transportador, NIT, ejecutiva.\n\n";
     }
 
     /**
@@ -1992,6 +1999,35 @@ ORDER BY cumplimiento_pct ASC;
 FIN DE EJEMPLOS — usa estos como base para construir queries nuevas.
 ═══════════════════════════════════════════════════════════════════════════
 EOT;
+    }
+
+    /**
+     * Da formato al retrieval del sidecar Vanna con el mismo estilo que buildExamplesBlock().
+     */
+    private function formatRetrievedExamples(array $retrieved): string
+    {
+        $out = "REFERENCIAS RELEVANTES A LA PREGUNTA:\n\n";
+
+        $ddl = $retrieved['ddl'] ?? [];
+        if (!empty($ddl)) {
+            $out .= "Esquema relevante:\n" . implode("\n", $ddl) . "\n\n";
+        }
+
+        $docs = $retrieved['documentation'] ?? [];
+        if (!empty($docs)) {
+            $out .= "Reglas relevantes:\n- " . implode("\n- ", $docs) . "\n\n";
+        }
+
+        $examples = $retrieved['examples'] ?? [];
+        if (!empty($examples)) {
+            $out .= "Ejemplos pregunta→SQL:\n";
+            foreach ($examples as $ex) {
+                $out .= "Pregunta: " . ($ex['question'] ?? '') . "\n"
+                      . "SQL: " . ($ex['sql'] ?? '') . "\n\n";
+            }
+        }
+
+        return $out;
     }
 
     /**
