@@ -4442,6 +4442,24 @@ quantity(kg), type(temporal=estimado|real=despachado), dispatch_date(date)
 trm, invoice_number, pdf_invoice, tracking_number, transporter, deleted_at(soft delete)
 ⚠ Alexa borra+recrea todos los partials al actualizar → SIEMPRE deleted_at IS NULL
 
+### v_lineas_oc (VISTA — úsala para TODO lo que sea "falta / pendiente / pipeline / potencial")
+Una fila por LÍNEA de OC, con los kilos YA RESUELTOS. Evita el error más frecuente del sistema.
+pop_id, order_id, client_id, product_id, order_status, order_creation_date, muestra
+kg_pedido(lo que pidió el cliente), kg_programado(lo que agendó Marlon), kg_despachado(lo que sacó Alexa)
+kg_falta_oc = kg_pedido - kg_despachado      → "cuánto falta por despachar de la OC"
+kg_pipeline = kg_programado - kg_despachado  → "lo programado que aún no sale"
+precio_usd(cascada pop.price→products.price ya aplicada), fecha_estimada, primer_despacho, ultimo_despacho
+⚠⚠ USA ESTA VISTA en vez de sumar partials 'temporal' a mano. El temporal NO se borra cuando
+   Alexa despacha (1.784 de 1.814 líneas tienen temporal == real), así que SUM(temporal) cuenta
+   kilos ya despachados. Ese error apareció ya con TRES nombres distintos —"pendiente",
+   "pipeline", "valor potencial"— inflando hasta +58% (el pipeline de Ortega figuraba en 198.376
+   USD cuando 100.349 ya habían salido). La vista ya hace la resta: no la repitas, no la olvides.
+⚠ Ejemplo: pedido 1000, programado 600, despachado 400 → kg_falta_oc=600, kg_pipeline=200. Son
+   DISTINTOS: "falta de la OC" (600) NO es lo mismo que "pipeline" (200). Elige según la pregunta.
+⚠ NO trae filtros: aplica tú muestra=0 y order_status según necesites (p.ej. pipeline →
+   order_status IN ('pending','processing','parcial_status')).
+Valor en USD = kg_<lo que sea> * precio_usd. Para COP multiplica por la TRM (ver regla de TRM).
+
 ### cartera (snapshot SIIGO)
 id, nit, nombre_empresa, fecha_cartera(date snapshot—filtrar MAX)
 documento(VARCHAR nro.factura—join recaudos.numero_factura), fecha(emisión), vence(vencimiento)
