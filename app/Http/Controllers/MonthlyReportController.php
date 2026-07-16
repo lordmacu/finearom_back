@@ -1379,33 +1379,39 @@ GROUP BY e.id, e.name
 ORDER BY cumplimiento_pct DESC;
 
 ─── D. CARTERA Y RECAUDOS ─────────────────────────────────────────────────
-# ⚠ CRÍTICO — La tabla `cartera` guarda múltiples SNAPSHOTS por fecha. Los cortes se ingieren
-# en fechas distintas y ALTERNAN entre completos (~34-35 nits) y parciales (1-6 nits), por lo
-# que NINGÚN corte global tiene a todos los clientes: el MAX(fecha_cartera) GLOBAL suele cubrir
-# solo 1-2 nits. Por eso el snapshot correcto es el MÁS RECIENTE POR NIT (correlacionado):
-#   SIEMPRE filtra `car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)`
-# Ese es el ÚNICO patrón que ve a los ~104 clientes. NUNCA uses el MAX global para "cartera más
-# reciente por cliente" — devuelve resultados casi vacíos. Si el usuario pide un snapshot específico,
-# usa `car.fecha_cartera = 'YYYY-MM-DD'`.
+# ⚠ CRÍTICO — La tabla `cartera` guarda múltiples SNAPSHOTS por fecha. Cada lunes entra un sync
+# COMPLETO desde Siigo (~33-35 nits = todos los clientes que hoy tienen cartera) y además hay
+# imports ad-hoc de 1-6 clientes en otros días. La cartera "actual" (vista actual de Siigo) es el
+# ÚLTIMO SNAPSHOT COMPLETO, detectado por umbral RELATIVO de # de clientes distintos:
+#   SIEMPRE filtra:
+#     car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera
+#       HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z)
+#       ORDER BY fecha_cartera DESC LIMIT 1)
+# NUNCA uses el MAX(fecha_cartera) GLOBAL — a veces es un ad-hoc de 1 cliente y da resultados casi
+# vacíos. NUNCA correlaciones por-nit (MAX por cada nit) — resucita saldos viejos de clientes que ya
+# pagaron y salieron de Siigo → SOBRECUENTA. Un cliente ausente del último snapshot completo = pagó
+# = NO cuenta. Si el usuario pide un snapshot específico, usa `car.fecha_cartera = 'YYYY-MM-DD'`.
 
-# 19. Cartera vencida por cliente (con detalle de factura) — usa snapshot más reciente
+# 19. Cartera vencida por cliente (con detalle de factura) — último snapshot completo
 # IMPORTANTE: cartera.saldo_vencido es VARCHAR — usar (col + 0) para sumas y comparaciones.
+# Vencida = dias < 0. NUNCA filtrar por (saldo_vencido + 0) > 0: saldo_vencido es un ACUMULADO
+# corrido por nit, así que >0 incluye facturas aún NO vencidas (arrastran el acumulado del cliente).
 SELECT car.nit, car.nombre_empresa, car.documento, car.fecha, car.vence,
        car.dias, (car.saldo_vencido + 0) AS saldo_vencido_usd,
        car.nombre_vendedor
 FROM cartera car
-WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)
-  AND (car.saldo_vencido + 0) > 0
+WHERE car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z) ORDER BY fecha_cartera DESC LIMIT 1)
+  AND car.dias < 0
 ORDER BY (car.saldo_vencido + 0) DESC;
 
-# 20. Cartera vencida por ejecutiva (cruza cartera con clients por nit) — snapshot reciente
+# 20. Cartera vencida por ejecutiva (cruza cartera con clients por nit) — último snapshot completo
 SELECT c.executive AS ejecutiva_email,
        COUNT(DISTINCT car.nit) AS clientes_con_vencido,
        SUM(car.saldo_vencido + 0) AS saldo_vencido_total_usd
 FROM cartera car
 JOIN clients c ON c.nit = car.nit
-WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)
-  AND (car.saldo_vencido + 0) > 0
+WHERE car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z) ORDER BY fecha_cartera DESC LIMIT 1)
+  AND car.dias < 0
 GROUP BY c.executive
 ORDER BY saldo_vencido_total_usd DESC;
 
@@ -1458,13 +1464,13 @@ SELECT
   SUM(CASE WHEN car.dias BETWEEN 61 AND 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_61_a_90,
   SUM(CASE WHEN car.dias > 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS mayor_90
 FROM cartera car
-WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit);
+WHERE car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z) ORDER BY fecha_cartera DESC LIMIT 1);
 
 # 24. Estado consolidado del cliente (cartera + recaudos del mes) — snapshot reciente
 WITH cart AS (
   SELECT car.nit, SUM(car.saldo_vencido + 0) AS vencido_usd, SUM(car.saldo_contable + 0) AS contable_usd
   FROM cartera car
-  WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)
+  WHERE car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z) ORDER BY fecha_cartera DESC LIMIT 1)
   GROUP BY car.nit
 ),
 rec_mes AS (
@@ -1675,7 +1681,7 @@ SELECT car.nit, car.nombre_empresa, car.documento, car.vence,
        DATEDIFF(car.vence, CURDATE()) AS dias_hasta_vencimiento,
        CAST(car.saldo_contable AS DECIMAL(15,2)) AS saldo_a_recaudar_cop
 FROM cartera car
-WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)
+WHERE car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z) ORDER BY fecha_cartera DESC LIMIT 1)
   AND car.vence BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
   AND CAST(car.saldo_contable AS DECIMAL(15,2)) > 0
 ORDER BY car.vence ASC, saldo_a_recaudar_cop DESC;
