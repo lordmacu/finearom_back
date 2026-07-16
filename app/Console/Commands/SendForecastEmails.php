@@ -238,22 +238,47 @@ class SendForecastEmails extends Command
             ->get()
             ->keyBy(fn ($r) => $r->nit . '|' . $r->codigo);
 
-        // Partials TEMPORAL = pendiente por despacho (OC programadas pero sin facturar)
-        $pendientes = DB::table('partials as pt')
-            ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
-            ->join('clients as c', 'po.client_id', '=', 'c.id')
-            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
-            ->join('products as p', 'pop.product_id', '=', 'p.id')
-            ->where('pt.type', 'temporal')
-            ->whereNull('pt.deleted_at')
-            ->whereBetween('pt.dispatch_date', [$mesStart, $mesEnd])
-            ->where('pop.muestra', 0)
-            ->where('c.executive_email', $exec->executive_email)
-            ->selectRaw('c.nit, p.code as codigo,
-                SUM(pt.quantity) as cantidad_pendiente,
-                SUM((CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity) as value_usd')
-            ->groupBy('c.nit', 'p.code')
-            ->get()
+        // Partials TEMPORAL = pendiente por despachar (lo que Marlon programó y Alexa aún NO despachó).
+        //
+        // ⚠ Se RESTA lo ya despachado de la misma línea. Antes se sumaba el temporal completo, y como
+        // el temporal NO se borra cuando Alexa despacha, los mismos kilos se contaban dos veces:
+        // 1.784 de 1.814 líneas de 2026 (98%) tienen temporal == real exacto. En julio 2026 eso metía
+        // 7.166 kg ya despachados dentro de "pendiente" e inflaba el cumplimiento del correo
+        // (Ortega figuraba en 91,8% cuando su cumplimiento real era ~50%; Pardo daba 154%).
+        //
+        // pendiente_por_linea = GREATEST(temporal_del_mes - real_ya_despachado, 0)
+        //   · línea programada y despachada igual  -> 0 (era el duplicado)
+        //   · línea despachada a medias            -> solo lo que falta
+        //   · línea programada sin despachar       -> el temporal completo
+        // El real NO se acota al mes a propósito: si la línea ya salió (aunque fuera antes), no está pendiente.
+        //
+        // Se agrupa por columnas base (pop.price, p.price) y NO por la expresión CASE: con
+        // ONLY_FULL_GROUP_BY, MariaDB no reconoce expresiones complejas repetidas en el GROUP BY.
+        $pendientes = collect(DB::select("
+            SELECT nit, codigo,
+                   SUM(pendiente) AS cantidad_pendiente,
+                   SUM(pendiente * precio) AS value_usd
+            FROM (
+                SELECT c.nit AS nit,
+                       p.code AS codigo,
+                       (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) AS precio,
+                       GREATEST(
+                           SUM(CASE WHEN pt.type = 'temporal' AND pt.dispatch_date BETWEEN ? AND ?
+                                    THEN pt.quantity ELSE 0 END)
+                         - SUM(CASE WHEN pt.type = 'real' THEN pt.quantity ELSE 0 END),
+                       0) AS pendiente
+                FROM partials pt
+                JOIN purchase_orders po ON po.id = pt.order_id
+                JOIN clients c ON c.id = po.client_id
+                JOIN purchase_order_product pop ON pop.id = pt.product_order_id
+                JOIN products p ON p.id = pop.product_id
+                WHERE pt.deleted_at IS NULL
+                  AND pop.muestra = 0
+                  AND c.executive_email = ?
+                GROUP BY pop.id, c.nit, p.code, pop.price, p.price
+            ) t
+            GROUP BY nit, codigo
+        ", [$mesStart, $mesEnd, $exec->executive_email]))
             ->keyBy(fn ($r) => $r->nit . '|' . $r->codigo);
 
         $clientesMap       = [];
