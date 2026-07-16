@@ -1669,19 +1669,19 @@ ORDER BY e.fecha_estimada ASC;
 # 34. Cartera que estimamos recaudar esta semana (próximos 7 días) — snapshot reciente
 SELECT car.nit, car.nombre_empresa, car.documento, car.vence,
        DATEDIFF(car.vence, CURDATE()) AS dias_hasta_vencimiento,
-       (car.saldo_contable + 0) AS saldo_a_recaudar_usd
+       CAST(car.saldo_contable AS DECIMAL(15,2)) AS saldo_a_recaudar_cop
 FROM cartera car
 WHERE car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
   AND car.vence BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
-  AND (car.saldo_contable + 0) > 0
-ORDER BY car.vence ASC, saldo_a_recaudar_usd DESC;
+  AND CAST(car.saldo_contable AS DECIMAL(15,2)) > 0
+ORDER BY car.vence ASC, saldo_a_recaudar_cop DESC;
 
 # 35. Comparativa cuatrimestre (ene-abr) actual vs año anterior por cliente, en COP
 # Año = 2026 ajustar según el año actual del período. Para "primer cuatrimestre" = ene-abr.
 WITH ventas_periodo AS (
   SELECT c.id AS client_id, c.client_name,
          YEAR(par.dispatch_date) AS anio,
-         SUM(par.quantity * pop.price * COALESCE(
+         SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(
            NULLIF(CASE WHEN (par.trm + 0) BETWEEN 3200 AND 10000 THEN (par.trm + 0)
                        WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
                        ELSE NULL END, 0),
@@ -1690,6 +1690,7 @@ WITH ventas_periodo AS (
          )) AS valor_cop
   FROM partials par
   JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN products p ON p.id = pop.product_id
   JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
   JOIN clients c ON c.id = po.client_id
   WHERE par.type = 'real' AND par.deleted_at IS NULL
@@ -1802,9 +1803,10 @@ WITH presupuesto AS (
 ),
 venta_actual AS (
   SELECT c.executive AS exec_email,
-         SUM(par.quantity * pop.price) AS venta_usd
+         SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) AS venta_usd
   FROM partials par
   JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN products p ON p.id = pop.product_id
   JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
   JOIN clients c ON c.id = po.client_id
   WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026
@@ -1812,9 +1814,10 @@ venta_actual AS (
 ),
 venta_anterior AS (
   SELECT c.executive AS exec_email,
-         SUM(par.quantity * pop.price) AS venta_usd
+         SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) AS venta_usd
   FROM partials par
   JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0
+  JOIN products p ON p.id = pop.product_id
   JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled'
   JOIN clients c ON c.id = po.client_id
   WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2025
