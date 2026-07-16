@@ -7,6 +7,7 @@ use App\Models\PurchaseOrder;
 use App\Services\DashboardChatDeterministicResponseService;
 use App\Services\DhlService;
 use App\Services\CoordinadoraService;
+use App\Services\Vanna\SqlCandidateValidator;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -636,6 +637,12 @@ class MonthlyReportController extends Controller
             "- SQL Server / T-SQL: TOP N (usar LIMIT), [corchetes] para identificadores (usar backticks `), GETDATE() (usar NOW()/CURDATE()), DATEPART, ISNULL (usar IFNULL/COALESCE), CONVERT(date, …), CROSS APPLY / OUTER APPLY, MERGE, IIF, CHARINDEX, LEN (usar CHAR_LENGTH/LENGTH).\n" .
             "- Oracle / PL/SQL: NVL (usar IFNULL/COALESCE), DUAL implícito, SYSDATE (usar NOW()), TO_CHAR/TO_DATE estilo Oracle, CONNECT BY, ROWNUM (usar LIMIT), DECODE (usar CASE WHEN), MINUS (usar EXCEPT/NOT IN/LEFT JOIN WHERE NULL).\n" .
             "- ANSI no-soportado en MariaDB: FULL JOIN / FULL OUTER JOIN (¡PROHIBIDO — ver regla dedicada abajo!), WITHIN GROUP, window function FILTER clause.\n" .
+            "⚠⚠ GROUP BY SOBRE EXPRESIONES (error 1055 — VERIFICADO EN ESTE SISTEMA): la sesión corre con ONLY_FULL_GROUP_BY. MariaDB NO reconoce la dependencia funcional cuando la expresión del SELECT es compleja (COALESCE/NULLIF/ELT/CASE), NI SIQUIERA si repites la MISMA expresión idéntica en el GROUP BY — falla igual con 1055.\n" .
+            "  ✗ SELECT COALESCE(NULLIF(c.city,''),'(sin)') AS ciudad ... GROUP BY COALESCE(NULLIF(c.city,''),'(sin)')   → 1055, aunque sea idéntica\n" .
+            "  ✗ GROUP BY <alias> cuando el alias coincide con el nombre de una COLUMNA real de alguna tabla del FROM (ej. alias `ciudad` y existe clients.ciudad): la COLUMNA gana sobre el alias → 1055\n" .
+            "  ✓ SOLUCIÓN: calcula la expresión en una subconsulta derivada y agrupa AFUERA por el alias:\n" .
+            "      SELECT ciudad, COUNT(*) FROM (SELECT COALESCE(NULLIF(c.city,''),'(sin)') AS ciudad FROM clients c WHERE ...) t GROUP BY ciudad\n" .
+            "  Es el MISMO patrón de la regla del TRM más abajo: expresión por fila adentro, agregación afuera.\n" .
             "USA SIEMPRE la sintaxis MariaDB equivalente:\n" .
             "- Fechas: NOW(), CURDATE(), DATE_ADD, DATE_SUB, DATEDIFF, DATE_FORMAT, YEAR/MONTH/DAY, STR_TO_DATE.\n" .
             "- Strings: CONCAT, CONCAT_WS, GROUP_CONCAT, SUBSTRING, LOCATE, REPLACE, LIKE (sensible-según-collation).\n" .
@@ -907,6 +914,8 @@ class MonthlyReportController extends Controller
             "- Si el usuario pide por mes: agrega sf.mes en SELECT/GROUP BY y en el LEFT JOIN cruza con FIELD(sf.mes,...).\n" .
             "- ⚠⚠ ALINEAR EL PERÍODO (pronóstico vs real) — ERROR FRECUENTE Y GRAVE: el pronóstico y el real DEBEN cubrir EXACTAMENTE los mismos meses. Si el usuario pide un rango parcial ('los N meses cerrados', 'enero a mayo', 'lo que va del año', 'primer trimestre'), filtra LOS DOS lados a ese rango: reales con par.dispatch_date BETWEEN '<ini>' AND '<fin>', y pronóstico con sf.año='<año>' AND sf.mes IN ('ENERO',...) con EXACTAMENTE esos mismos meses (sf.mes es texto español MAYÚSCULAS).\n" .
             "  NUNCA dividas el despacho de N meses entre el pronóstico de los 12 meses → el % de cumplimiento sale falsamente bajo. CASO REAL: Quimisense ENE–MAY daba 32% (5 meses de real ÷ 12 de pronóstico); alineando ambos lados a ENE–MAY da 82%.\n" .
+            "  ⚠⚠ 'ACUMULADO' CUENTA COMO RANGO PARCIAL: 'cumplimiento acumulado 2026', 'acumulado del año', 'a la fecha', 'en lo que va de 2026' → SON meses transcurridos, NO el año completo. Filtra el pronóstico con sf.mes IN (solo los meses transcurridos según el CONTEXTO DEL PERÍODO que recibes arriba) y el real al MISMO rango. Esta es la definición de cumplimiento del propio sistema: el comando forecast:send-emails (SendForecastEmails.php) compara sf.mes = <mes> contra los despachos de ESE MISMO mes, nunca contra el año entero.\n" .
+            "  ÚNICA EXCEPCIÓN — 'AL CIERRE' / 'ANUAL' / 'meta del año': si el usuario pregunta explícitamente por la proyección o meta AL CIERRE del año ('venta estimada al cierre 2026', 'cuánto falta para la meta anual', '% del presupuesto anual ya logrado'), ahí SÍ va el pronóstico del año completo (sf.año='<año>' sin filtro de mes) contra el real a la fecha. La diferencia está en la pregunta: 'acumulado/a la fecha' → alinea meses; 'al cierre/anual' → pronóstico de 12 meses.\n" .
             "  Chequeo antes de entregar la query: ¿el filtro de sf.mes y el rango de par.dispatch_date representan el MISMO conjunto de meses? Si no, corrígelo.\n" .
             "- ⚠ NO PERDER FORECASTS HUÉRFANOS en reportes por referencia: usa LEFT JOIN product_ranked (NO INNER JOIN). Con INNER, los códigos pronosticados sin fila de producto en el catálogo del cliente desaparecen y el total pronosticado queda corto; con LEFT JOIN la referencia aparece (usa COALESCE(p.product_name, sf.codigo) para el nombre) y su pronóstico sí cuenta.\n" .
             "- ALCANCE del reporte — maneja ambos casos:\n" .
@@ -2721,7 +2730,19 @@ EOT;
                     return response()->json(['success' => false, 'message' => 'Error: ' . $e2->getMessage()], 422);
                 }
             } else {
-                return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()], 422);
+                // Un ÚNICO intento de auto-reparación (ver repairSqlOnce).
+                $repaired = $this->repairSqlOnce($sql, $e->getMessage());
+                if ($repaired === null) {
+                    return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()], 422);
+                }
+                try {
+                    $results = DB::select($repaired);
+                    Log::info('runQuery: SQL auto-reparado con éxito', ['error_original' => substr($e->getMessage(), 0, 200)]);
+                } catch (\Throwable $e3) {
+                    // El reintento tampoco ejecutó: devolvemos el error ORIGINAL, no el del
+                    // reintento — el usuario preguntó por su consulta, no por nuestra reparación.
+                    return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()], 422);
+                }
             }
         }
 
@@ -2738,6 +2759,68 @@ EOT;
             'rows'    => $rows,
             'count'   => count($rows),
         ]);
+    }
+
+    /**
+     * Un ÚNICO intento de auto-reparación cuando el SQL generado no ejecuta.
+     *
+     * Por qué existe: el modelo produce SQL sintácticamente roto de forma intermitente.
+     * Medido sobre la pregunta de productos en COP de mayo 2026: 2 de 3 intentos fallaron
+     * con 1064, siempre la misma clase de desliz (una comilla de cadena sin cerrar). Sin
+     * esta red el usuario recibe el SQLSTATE crudo y tiene que volver a preguntar.
+     *
+     * Con el SQL y el mensaje del motor alcanza para corregirlo — no hace falta la pregunta
+     * original, que este endpoint tampoco tiene (el frontend solo manda el SQL).
+     *
+     * El SQL reparado NO es de confianza: vuelve a pasar por isSafeSelect(), por el veto a
+     * FULL JOIN y por el sanitizador de MariaDB, igual que el original. Si algo no cuadra,
+     * devuelve null y el llamador reporta el error ORIGINAL.
+     *
+     * Un solo reintento a propósito: si el modelo no lo arregla con el error en la mano,
+     * insistir solo quema tokens y latencia.
+     */
+    private function repairSqlOnce(string $sql, string $error): ?string
+    {
+        try {
+            $resp = $this->callDeepSeekApi([
+                ['role' => 'system', 'content' =>
+                    "Eres un corrector de SQL para MariaDB. Recibes una consulta que falló y el error exacto del motor.\n" .
+                    "Devuelve ÚNICAMENTE la consulta corregida: sin explicaciones, sin markdown, sin ```.\n" .
+                    "NO cambies la intención, ni las tablas, ni los filtros, ni las columnas del SELECT: corrige SOLO lo que causa el error.\n" .
+                    "Debe seguir siendo un SELECT/WITH. MariaDB no soporta FULL JOIN. La sesión corre con ONLY_FULL_GROUP_BY: " .
+                    "si el error es 1055/1140, mueve la expresión a una subconsulta derivada (por fila adentro, agregación afuera).",
+                ],
+                ['role' => 'user', 'content' => "SQL:\n{$sql}\n\nERROR:\n{$error}"],
+            ]);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        $fixed = trim($resp['content'] ?? '');
+        if ($fixed === '') {
+            return null;
+        }
+
+        // El modelo ignora "sin markdown" y envuelve la respuesta igual — VERIFICADO: devuelve
+        // <pre><code class="language-sql">…</code></pre> (el formato del chat), no fences. Se
+        // desenvuelve en el mismo orden que el resto del sistema: JSON → HTML → markdown → crudo.
+        if (($json = json_decode($fixed, true)) && isset($json['sql'])) {
+            $fixed = trim($json['sql']);
+        } elseif (preg_match('/<code[^>]*language-sql[^>]*>(.+?)<\/code>/is', $fixed, $m)) {
+            $fixed = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5));
+        } elseif (preg_match('/```(?:sql)?\s*(.+?)```/s', $fixed, $m)) {
+            $fixed = trim($m[1]);
+        }
+
+        if (!app(SqlCandidateValidator::class)->isSafeSelect($fixed)) {
+            return null;
+        }
+
+        if (preg_match('/\bFULL\s+(OUTER\s+)?JOIN\b/i', $fixed)) {
+            return null;
+        }
+
+        return $this->sanitizeSqlForMariaDb($fixed);
     }
 
     /**
