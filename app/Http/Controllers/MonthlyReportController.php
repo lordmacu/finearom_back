@@ -679,6 +679,14 @@ class MonthlyReportController extends Controller
             "⚠ CASO REAL: ante 'dónde puedo modificar la proforma' respondiste que la proforma era 'una orden de compra en estado pending'. ES FALSO — las proformas son un módulo APARTE del sistema. Sonaba convincente y estaba mal, y quien pregunta no tiene cómo detectarlo. Una respuesta inventada sobre la herramienta es PEOR que decir 'eso no lo sé'.\n" .
             "Puedes ofrecerle el dato equivalente si existe (ej: 'no sé dónde se edita, pero sí puedo mostrarte las proformas de X cliente'), pero nunca describas la interfaz.\n" .
             "\n" .
+            "⚠⚠⚠ 'PENDIENTE' — HAY DOS, NO LOS CONFUNDAS, Y NINGUNO ES 'EL TOTAL DE LA OC':\n" .
+            "  (A) PENDIENTE DE LA ORDEN (lo que falta por despachar de una OC): NO es SUM(pop.quantity). Una OC en 'parcial_status' está —por definición— despachada a medias, así que hay que RESTAR lo ya despachado, línea por línea:\n" .
+            "        GREATEST(pop.quantity - COALESCE(despachado_real_de_esa_linea, 0), 0)\n" .
+            "      donde despachado_real = (SELECT SUM(quantity) FROM partials WHERE product_order_id = pop.id AND type='real' AND deleted_at IS NULL)\n" .
+            "      ⚠ CASO REAL VERIFICADO: para Scalpi Cosmética se reportó 'valor_pendiente_usd = 105.043,76 USD' sumando pop.quantity completo, cuando ya se habían despachado 65.867,56 y lo pendiente de verdad eran 39.176,20 → 2,7x inflado. Si la columna se llama 'pendiente', TIENE que restar lo despachado.\n" .
+            "  (B) PENDIENTE POR FACTURAR / PROGRAMADO (lo que Marlon ya agendó y Alexa no ha despachado): usa los partials 'temporal' con GREATEST(temporal - real, 0) por línea — ver la regla de cumplimiento.\n" .
+            "  → Si el usuario dice 'cuánto falta por despachar de esta OC' → (A). Si dice 'qué hay pendiente por facturar / programado' → (B). Si solo pide 'el valor de las OCs activas' sin la palabra pendiente, SUM(pop.quantity * precio) está bien, pero NO lo etiquetes como 'pendiente': llámalo 'valor_total_oc'.\n" .
+            "\n" .
             "⚠⚠⚠ CATEGORÍAS DE PRODUCTO — CASI NO HAY DATOS (VERIFICADO EN PRODUCCIÓN, 2026-07):\n" .
             "Solo 115 de 2.448 productos (4,7%) tienen categoría asignada en products.categories. El 94% de los KILOS despachados cae en '(sin categoría)' — y ahí están los productos que MÁS se venden (DIFUSOR BLANCO 5.000 kg, CLEAN SENSATION 4.875, AVENA FA II 4.800).\n" .
             "Las ÚNICAS categorías que existen son: fine_fragrance (63 productos), personal_care (20), home_care (18), air_care (14). NO existe body_care ni ninguna otra.\n" .
