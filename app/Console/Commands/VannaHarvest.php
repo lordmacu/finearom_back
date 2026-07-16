@@ -3,15 +3,19 @@
 namespace App\Console\Commands;
 
 use App\Models\ChatSession;
+use App\Services\Vanna\SqlCandidateValidator;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
 
 class VannaHarvest extends Command
 {
     protected $signature = 'vanna:harvest {--merge : Mezclar candidatos aceptados a qsql.json}';
     protected $description = 'Cosecha pares pregunta→SQL del historial de chat; conserva solo SQL que ejecuta';
 
-    private array $forbidden = ['DROP ', 'DELETE ', 'UPDATE ', 'INSERT ', 'ALTER ', 'CREATE ', 'TRUNCATE '];
+    public function __construct(
+        private readonly SqlCandidateValidator $validator
+    ) {
+        parent::__construct();
+    }
 
     public function handle(): int
     {
@@ -19,7 +23,7 @@ class VannaHarvest extends Command
         $qsqlPath = base_path('training/qsql.json');
         if (is_file($qsqlPath)) {
             foreach (json_decode(file_get_contents($qsqlPath), true) ?? [] as $p) {
-                $existing[$this->norm($p['sql'])] = true;
+                $existing[$this->validator->normalize($p['sql'])] = true;
             }
         }
 
@@ -36,10 +40,10 @@ class VannaHarvest extends Command
                 $sql = $this->extractSql($messages[$i + 1]['content'] ?? '');
                 if (!$question || !$sql) continue;
 
-                $key = $this->norm($sql);
+                $key = $this->validator->normalize($sql);
                 if (isset($seen[$key])) continue;
-                if (!$this->isSafeSelect($sql)) continue;
-                if (!$this->executes($sql)) continue;
+                if (!$this->validator->isSafeSelect($sql)) continue;
+                if (!$this->validator->executesReadOnly($sql)) continue;
 
                 $seen[$key] = true;
                 $accepted[] = ['question' => $question, 'sql' => $sql];
@@ -74,29 +78,5 @@ class VannaHarvest extends Command
         }
 
         return trim(html_entity_decode($sql, ENT_QUOTES | ENT_HTML5));
-    }
-
-    private function isSafeSelect(string $sql): bool
-    {
-        if (!preg_match('/^\s*(WITH|SELECT)\s/is', $sql)) return false;
-        foreach ($this->forbidden as $f) {
-            if (stripos($sql, $f) !== false) return false;
-        }
-        return true;
-    }
-
-    private function executes(string $sql): bool
-    {
-        try {
-            DB::select('SELECT * FROM (' . rtrim($sql, "; \n\t") . ') AS _harvest_probe LIMIT 1');
-            return true;
-        } catch (\Throwable $e) {
-            return false;
-        }
-    }
-
-    private function norm(string $sql): string
-    {
-        return preg_replace('/\s+/', ' ', strtolower(trim($sql)));
     }
 }
