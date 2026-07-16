@@ -263,13 +263,11 @@ class CarteraQuery
             ->where('car.fecha_cartera', '=', $snapshotDate);
 
         if ($overdueOnly) {
-            $today = Carbon::now('America/Bogota')->toDateString();
-            $query->where(function ($q) use ($today) {
-                $q->where('car.vence', '<', $today)
-                    ->orWhere(function ($nested) {
-                        $nested->whereNotNull('car.dias')->where('car.dias', '<', 0);
-                    });
-            });
+            // Vencida = car.dias < 0 (dias = DATEDIFF(vence, fecha_cartera), lo calcula Siigo
+            // en el corte). NO usar `vence < hoy`: la cartera es la FOTO del snapshot, y esa
+            // condición marcaría como vencidas facturas con dias >= 0 que snapshotProjectedCollectable()
+            // ya cuenta como "por vencer" → el mismo saldo quedaría en ambos lados.
+            $query->whereNotNull('car.dias')->where('car.dias', '<', 0);
         }
 
         if (! empty($filters['client_id'])) {
@@ -311,13 +309,11 @@ class CarteraQuery
             ->where('car.fecha_cartera', '=', $snapshotDate);
 
         if ($overdueOnly) {
-            $today = Carbon::now('America/Bogota')->toDateString();
-            $query->where(function ($q) use ($today) {
-                $q->where('car.vence', '<', $today)
-                    ->orWhere(function ($nested) {
-                        $nested->whereNotNull('car.dias')->where('car.dias', '<', 0);
-                    });
-            });
+            // Vencida = car.dias < 0 (dias = DATEDIFF(vence, fecha_cartera), lo calcula Siigo
+            // en el corte). NO usar `vence < hoy`: la cartera es la FOTO del snapshot, y esa
+            // condición marcaría como vencidas facturas con dias >= 0 que snapshotProjectedCollectable()
+            // ya cuenta como "por vencer" → el mismo saldo quedaría en ambos lados.
+            $query->whereNotNull('car.dias')->where('car.dias', '<', 0);
         }
 
         if (! empty($filters['client_id'])) {

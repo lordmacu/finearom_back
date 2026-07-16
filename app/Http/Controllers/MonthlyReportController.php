@@ -783,7 +783,22 @@ class MonthlyReportController extends Controller
             "- Para ordenar: ORDER BY CAST(saldo_contable AS DECIMAL(15,2)) DESC\n" .
             "- dias: POSITIVO = factura por vencer, NEGATIVO = factura VENCIDA hace |dias| días\n" .
             "- Facturas vencidas: WHERE dias < 0 — para días de mora usar ABS(ca.dias). NUNCA DATEDIFF(CURDATE(), fecha_cartera).\n" .
-            "- ⚠ SIEMPRE filtrar: fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera) — sin esto traes todos los snapshots históricos y repites miles de filas.\n" .
+            "- ⚠⚠ MÉTRICA DE CARTERA — la fuente de verdad es SIEMPRE saldo_contable:\n" .
+            "  → CARTERA VENCIDA = SUM(CAST(saldo_contable AS DECIMAL(20,2))) WHERE dias < 0\n" .
+            "  → CARTERA TOTAL (vencido + por vencer) = el mismo SUM SIN filtro de dias\n" .
+            "  → SALDO A FAVOR del cliente = saldo_contable NEGATIVO\n" .
+            "  → ⚠ `saldo_vencido` es un ACUMULADO CORRIDO por cliente (cada fila arrastra la anterior):\n" .
+            "     SUM(saldo_vencido) DOBLE-CUENTA y da cifras infladas. NUNCA lo sumes.\n" .
+            "     Si lo necesitas es MAX(saldo_vencido) por nit — equivale exacto a SUM(saldo_contable) WHERE dias < 0.\n" .
+            "- ⚠⚠ SNAPSHOT — SIEMPRE el ÚLTIMO SNAPSHOT COMPLETO, nunca el MAX global:\n" .
+            "  La tabla cartera recibe un sync semanal COMPLETO de Siigo (~33 clientes) y además imports\n" .
+            "  ad-hoc de 1-6 clientes en otros días. SIEMPRE filtra:\n" .
+            "    fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera\n" .
+            "      HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z)\n" .
+            "      ORDER BY fecha_cartera DESC LIMIT 1)\n" .
+            "  → NUNCA (SELECT MAX(fecha_cartera) FROM cartera) — a veces el MAX es un ad-hoc de 1 cliente y da casi vacío.\n" .
+            "  → NUNCA correlaciones por-nit (MAX por cada nit) — resucita saldos de clientes que ya pagaron → SOBRECUENTA.\n" .
+            "  → Un cliente ausente del último snapshot completo YA PAGÓ y NO cuenta.\n" .
             "- cartera.documento = número de factura → se cruza con recaudos.numero_factura para ver pagos\n" .
             "- Deuda neta real = saldo_contable MENOS lo pagado: MAX(saldo - SUM(recaudos.valor_cancelado), 0)\n" .
             "- catera_type: 'nacional' | 'internacional' (para filtrar cartera de exportación vs local)\n" .
@@ -801,13 +816,15 @@ class MonthlyReportController extends Controller
             "  → Cuando la base del query es clients (c): AND cc.executive = c.executive\n" .
             "  → Cuando la base es executives (e): AND cc.executive COLLATE utf8mb4_unicode_ci = e.email\n" .
             "     (\n" .
-            "         SELECT COALESCE(SUM(CAST(ca.saldo_vencido AS DECIMAL(15,2))), 0)\n" .
+            "         SELECT COALESCE(SUM(CAST(ca.saldo_contable AS DECIMAL(20,2))), 0)\n" .
             "         FROM cartera ca JOIN clients cc ON cc.nit = ca.nit\n" .
-            "         WHERE ca.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)\n" .
+            "         WHERE ca.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera\n" .
+            "               HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z)\n" .
+            "               ORDER BY fecha_cartera DESC LIMIT 1)\n" .
             "           AND ca.dias < 0\n" .
             "           AND cc.executive COLLATE utf8mb4_unicode_ci = e.email\n" .
             "     ) AS cartera_vencida_cop\n" .
-            "  → NUNCA uses SUM(DISTINCT ca.saldo_vencido) ni LEFT JOIN de cartera al flujo principal de despachos para calcular cartera por ejecutiva.\n\n" .
+            "  → NUNCA uses SUM(ca.saldo_vencido) (es acumulado → doble-cuenta) ni SUM(DISTINCT ...) ni LEFT JOIN de cartera al flujo principal de despachos para calcular cartera por ejecutiva.\n\n" .
             "REGLA CRÍTICA DE CANTIDADES:\n" .
             "Cuando JOIN partials → purchase_order_product, SIEMPRE usa par.quantity para calcular valor despachado.\n" .
             "pop.quantity es la cantidad PEDIDA, par.quantity es la cantidad REAL DESPACHADA.\n\n" .
@@ -1392,28 +1409,35 @@ ORDER BY cumplimiento_pct DESC;
 # pagaron y salieron de Siigo → SOBRECUENTA. Un cliente ausente del último snapshot completo = pagó
 # = NO cuenta. Si el usuario pide un snapshot específico, usa `car.fecha_cartera = 'YYYY-MM-DD'`.
 
+# ⚠ MÉTRICA DE CARTERA — usa SIEMPRE saldo_contable, NUNCA saldo_vencido:
+#   • CARTERA VENCIDA = SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) WHERE car.dias < 0
+#   • CARTERA TOTAL (vencido + por vencer) = el mismo SUM SIN el filtro de dias
+#   • `dias` = DATEDIFF(vence, fecha_cartera): dias < 0 = VENCIDA (venció hace |dias| días),
+#     dias >= 0 = POR VENCER. Los días de mora son -car.dias.
+#   • `saldo_vencido` es un ACUMULADO CORRIDO por cliente (cada fila suma la anterior):
+#     SUM(saldo_vencido) DOBLE-CUENTA. NUNCA lo sumes. Si de verdad lo necesitas es
+#     MAX(saldo_vencido) por nit, que equivale exacto a SUM(saldo_contable) WHERE dias < 0.
+
 # 19. Cartera vencida por cliente (con detalle de factura) — último snapshot completo
-# IMPORTANTE: cartera.saldo_vencido es VARCHAR — usar (col + 0) para sumas y comparaciones.
-# Vencida = dias < 0. NUNCA filtrar por (saldo_vencido + 0) > 0: saldo_vencido es un ACUMULADO
-# corrido por nit, así que >0 incluye facturas aún NO vencidas (arrastran el acumulado del cliente).
 SELECT car.nit, car.nombre_empresa, car.documento, car.fecha, car.vence,
-       car.dias, (car.saldo_vencido + 0) AS saldo_vencido_usd,
+       car.dias, (-car.dias) AS dias_mora,
+       CAST(car.saldo_contable AS DECIMAL(20,2)) AS saldo_vencido_cop,
        car.nombre_vendedor
 FROM cartera car
 WHERE car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z) ORDER BY fecha_cartera DESC LIMIT 1)
   AND car.dias < 0
-ORDER BY (car.saldo_vencido + 0) DESC;
+ORDER BY saldo_vencido_cop DESC;
 
 # 20. Cartera vencida por ejecutiva (cruza cartera con clients por nit) — último snapshot completo
 SELECT c.executive AS ejecutiva_email,
        COUNT(DISTINCT car.nit) AS clientes_con_vencido,
-       SUM(car.saldo_vencido + 0) AS saldo_vencido_total_usd
+       SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS saldo_vencido_total_cop
 FROM cartera car
 JOIN clients c ON c.nit = car.nit
 WHERE car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z) ORDER BY fecha_cartera DESC LIMIT 1)
   AND car.dias < 0
 GROUP BY c.executive
-ORDER BY saldo_vencido_total_usd DESC;
+ORDER BY saldo_vencido_total_cop DESC;
 
 # 21. Recaudos del mes
 SELECT r.fecha_recaudo, r.numero_factura, r.numero_recibo,
@@ -1456,19 +1480,25 @@ LEFT JOIN recaudado re ON re.nit_char = c.nit
 WHERE COALESCE(f.facturado_cop, 0) + COALESCE(re.recaudado_cop, 0) > 0
 ORDER BY pendiente_cop DESC;
 
-# 23. Antigüedad de cartera por tramos (al día, 1-30, 31-60, 61-90, 90+) — snapshot reciente
+# 23. Antigüedad de cartera por tramos (por vencer, 1-30, 31-60, 61-90, 90+) — último snapshot completo
+# Los tramos de MORA usan dias NEGATIVOS: dias = -15 significa vencida hace 15 días.
+# Los tramos suman exacto la cartera vencida; + por_vencer da la cartera total.
 SELECT
-  SUM(CASE WHEN car.dias <= 0 THEN (car.saldo_contable + 0) ELSE 0 END) AS al_dia,
-  SUM(CASE WHEN car.dias BETWEEN 1 AND 30 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_1_a_30,
-  SUM(CASE WHEN car.dias BETWEEN 31 AND 60 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_31_a_60,
-  SUM(CASE WHEN car.dias BETWEEN 61 AND 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_61_a_90,
-  SUM(CASE WHEN car.dias > 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS mayor_90
+  SUM(CASE WHEN car.dias >= 0 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) AS por_vencer,
+  SUM(CASE WHEN car.dias BETWEEN -30 AND -1 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) AS de_1_a_30,
+  SUM(CASE WHEN car.dias BETWEEN -60 AND -31 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) AS de_31_a_60,
+  SUM(CASE WHEN car.dias BETWEEN -90 AND -61 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) AS de_61_a_90,
+  SUM(CASE WHEN car.dias < -90 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) AS mayor_90,
+  SUM(CASE WHEN car.dias < 0 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) AS total_vencida,
+  SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS cartera_total
 FROM cartera car
 WHERE car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z) ORDER BY fecha_cartera DESC LIMIT 1);
 
-# 24. Estado consolidado del cliente (cartera + recaudos del mes) — snapshot reciente
+# 24. Estado consolidado del cliente (cartera + recaudos del mes) — último snapshot completo
 WITH cart AS (
-  SELECT car.nit, SUM(car.saldo_vencido + 0) AS vencido_usd, SUM(car.saldo_contable + 0) AS contable_usd
+  SELECT car.nit,
+         SUM(CASE WHEN car.dias < 0 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) AS vencido_cop,
+         SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS contable_cop
   FROM cartera car
   WHERE car.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z) ORDER BY fecha_cartera DESC LIMIT 1)
   GROUP BY car.nit
@@ -1480,14 +1510,14 @@ rec_mes AS (
   GROUP BY CAST(nit AS CHAR)
 )
 SELECT c.client_name AS cliente, c.nit,
-       COALESCE(ca.contable_usd, 0) AS saldo_contable_usd,
-       COALESCE(ca.vencido_usd, 0) AS saldo_vencido_usd,
+       COALESCE(ca.contable_cop, 0) AS saldo_contable_cop,
+       COALESCE(ca.vencido_cop, 0) AS saldo_vencido_cop,
        COALESCE(rm.recaudado_mes_cop, 0) AS recaudado_mes_cop
 FROM clients c
 LEFT JOIN cart ca ON ca.nit = c.nit
 LEFT JOIN rec_mes rm ON rm.nit_char = c.nit
-WHERE COALESCE(ca.contable_usd, 0) > 0 OR COALESCE(rm.recaudado_mes_cop, 0) > 0
-ORDER BY saldo_vencido_usd DESC;
+WHERE COALESCE(ca.contable_cop, 0) > 0 OR COALESCE(rm.recaudado_mes_cop, 0) > 0
+ORDER BY saldo_vencido_cop DESC;
 
 ─── E. CLIENTES Y PRODUCTOS ───────────────────────────────────────────────
 
@@ -4393,18 +4423,31 @@ SCHEMA;
 - vence (DATE) — fecha de vencimiento de la factura
 - dias (INT) — días de cartera: POSITIVO = factura AÚN no vencida (días restantes), NEGATIVO = factura VENCIDA hace N días
   → Para días de mora usar: ABS(ca.dias) WHERE ca.dias < 0. NUNCA usar DATEDIFF(CURDATE(), fecha_cartera) — eso es la antigüedad del snapshot, no los días de mora.
-- saldo_contable (STRING COP) — saldo total de la factura
-- saldo_vencido (STRING COP) — porción ya vencida del saldo
+- saldo_contable (STRING COP) — saldo de la factura. ⚠ ES LA ÚNICA MÉTRICA DE CARTERA.
+- saldo_vencido (STRING COP) — ⚠ ACUMULADO CORRIDO por cliente (cada fila arrastra la anterior).
+  → NUNCA hagas SUM(saldo_vencido): DOBLE-CUENTA y da cifras infladas.
+  → Si de verdad lo necesitas es MAX(saldo_vencido) por nit — equivale exacto a SUM(saldo_contable) WHERE dias < 0.
 - vendedor, nombre_vendedor — vendedor en SIIGO (≠ clients.executive, NO usar para filtrar por ejecutiva)
 - catera_type (VARCHAR) — 'nacional' | 'internacional' | NULL
 - CRÍTICO: saldo_contable y saldo_vencido son strings con PUNTO como separador decimal (ej: '26857379.12', '-256309.65'). Ya son decimales normales.
-  → Para operar: CAST(saldo_contable AS DECIMAL(15,2)) — sin REPLACE, el punto ya es el decimal
+  → Para operar: CAST(saldo_contable AS DECIMAL(20,2)) — sin REPLACE, el punto ya es el decimal
   → NUNCA uses REPLACE para quitar puntos — destruyes el separador decimal y multiplicas el valor por 10
-- CRÍTICO: NUNCA filtrar con fecha hardcodeada. SIEMPRE: fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+- ⚠⚠ CRÍTICO SNAPSHOT: NUNCA fecha hardcodeada y NUNCA (SELECT MAX(fecha_cartera) FROM cartera).
+  El sync semanal de Siigo es COMPLETO (~33 clientes) pero hay imports ad-hoc de 1-6 clientes otros días,
+  así que el MAX global puede ser un ad-hoc y devolver casi nada. SIEMPRE el ÚLTIMO SNAPSHOT COMPLETO:
+    fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera
+      HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z)
+      ORDER BY fecha_cartera DESC LIMIT 1)
+  → Tampoco correlaciones por-nit (MAX por cada nit): resucita clientes que ya pagaron → SOBRECUENTA.
+  → Un cliente ausente del último snapshot completo YA PAGÓ y NO cuenta.
+- ⚠⚠ CRÍTICO MÉTRICA:
+  → CARTERA VENCIDA = SUM(CAST(saldo_contable AS DECIMAL(20,2))) WHERE dias < 0
+  → CARTERA TOTAL (vencido + por vencer) = el mismo SUM SIN filtro de dias
+  → SALDO A FAVOR del cliente = saldo_contable NEGATIVO
 - CRÍTICO: para deuda NETA real = saldo_contable MENOS lo pagado en recaudos: MAX(saldo - SUM(recaudos), 0)
-- Para ordenar: ORDER BY CAST(saldo_contable AS DECIMAL(15,2)) DESC
-- Facturas VENCIDAS: WHERE dias < 0 OR vence < CURDATE()
-- Facturas POR VENCER: WHERE dias >= 0 AND vence >= CURDATE()
+- Para ordenar: ORDER BY CAST(saldo_contable AS DECIMAL(20,2)) DESC
+- Facturas VENCIDAS: WHERE dias < 0 (dias = DATEDIFF(vence, fecha_cartera); mora = -dias)
+- Facturas POR VENCER: WHERE dias >= 0
 
 ### recaudos — Pagos recibidos (COP)
 - nit (BIGINT), cliente, fecha_recaudo (DATETIME), numero_factura (VARCHAR — join con cartera.documento), valor_cancelado (DECIMAL COP)
@@ -4495,21 +4538,27 @@ WHERE EXISTS (
 );
 
 Cartera AGRUPADA por cliente (usar SUM porque hay múltiples facturas por NIT):
+-- El vencido sale de saldo_contable con dias < 0. NUNCA SUM(saldo_vencido): es acumulado → doble-cuenta.
 SELECT ca.nit, ca.nombre_empresa,
-  SUM(CAST(ca.saldo_contable AS DECIMAL(15,2))) saldo_cop,
-  SUM(CAST(ca.saldo_vencido AS DECIMAL(15,2))) vencido_cop
-FROM cartera ca WHERE ca.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+  SUM(CAST(ca.saldo_contable AS DECIMAL(20,2))) saldo_total_cop,
+  SUM(CASE WHEN ca.dias < 0 THEN CAST(ca.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) vencido_cop
+FROM cartera ca
+WHERE ca.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera
+  HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z)
+  ORDER BY fecha_cartera DESC LIMIT 1)
 GROUP BY ca.nit, ca.nombre_empresa
-ORDER BY saldo_cop DESC;
+ORDER BY saldo_total_cop DESC;
 
 Deuda neta por cliente (saldo contable menos lo ya pagado en recaudos):
 SELECT ca.nit, ca.nombre_empresa,
-  SUM(CAST(ca.saldo_contable AS DECIMAL(15,2))) saldo_bruto,
+  SUM(CAST(ca.saldo_contable AS DECIMAL(20,2))) saldo_bruto,
   COALESCE(SUM(r.valor_cancelado),0) total_pagado,
-  GREATEST(SUM(CAST(ca.saldo_contable AS DECIMAL(15,2))) - COALESCE(SUM(r.valor_cancelado),0), 0) deuda_neta
+  GREATEST(SUM(CAST(ca.saldo_contable AS DECIMAL(20,2))) - COALESCE(SUM(r.valor_cancelado),0), 0) deuda_neta
 FROM cartera ca
 LEFT JOIN recaudos r ON r.numero_factura = ca.documento AND r.nit = ca.nit
-WHERE ca.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+WHERE ca.fecha_cartera = (SELECT fecha_cartera FROM cartera GROUP BY fecha_cartera
+  HAVING COUNT(DISTINCT nit) >= 0.5 * (SELECT MAX(cnt) FROM (SELECT COUNT(DISTINCT nit) cnt FROM cartera GROUP BY fecha_cartera) z)
+  ORDER BY fecha_cartera DESC LIMIT 1)
 GROUP BY ca.nit, ca.nombre_empresa
 ORDER BY deuda_neta DESC;
 
