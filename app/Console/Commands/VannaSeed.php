@@ -24,6 +24,14 @@ class VannaSeed extends Command
             return self::SUCCESS;
         }
 
+        if ($this->option('fresh')) {
+            $reset = Http::timeout(30)->post("$base/reset");
+            if (!$reset->successful()) {
+                $this->error("No se pudo limpiar el store antes de re-sembrar ($base/reset falló). Abortando sin sembrar sobre datos sin limpiar.");
+                return self::FAILURE;
+            }
+        }
+
         $dir = base_path('training');
 
         $total = 0;
