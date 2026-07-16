@@ -470,5 +470,469 @@
   {
     "question": "dame los nuevos clientes codificados desde mayo de 2025 hasta hoy, de la ejecutiva Maria Juliana Ortega",
     "sql": "SELECT c.client_name AS cliente, c.nit, c.created_at AS fecha_codificacion\nFROM clients c\nWHERE c.executive = 'maria.ortega@finearom.com'\n  AND c.created_at >= '2025-05-01'\n  AND c.status = 'active'\nORDER BY c.created_at DESC;"
+  },
+  {
+    "question": "cuántas órdenes de compra se crearon este mes y cuál es su valor en USD?",
+    "sql": "SELECT po.order_consecutive, c.client_name, po.order_creation_date, po.status, SUM(pop.quantity) AS kilos, SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) AS valor_usd FROM purchase_orders po JOIN clients c ON c.id = po.client_id JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id WHERE MONTH(po.order_creation_date) = MONTH(CURDATE()) AND YEAR(po.order_creation_date) = YEAR(CURDATE()) AND po.status <> 'cancelled' GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date, po.status ORDER BY po.order_creation_date DESC;"
+  },
+  {
+    "question": "cual es el valor total en dolares de todas las ordenes que ha ingresado Francy este año?",
+    "sql": "SELECT COUNT(DISTINCT po.id) AS ocs, SUM(pop.quantity) AS kilos, SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) AS valor_usd FROM purchase_orders po JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id WHERE YEAR(po.order_creation_date) = 2026 AND po.status <> 'cancelled';"
+  },
+  {
+    "question": "dame el conteo de órdenes de compra por estado",
+    "sql": "SELECT po.status, COUNT(*) AS total FROM purchase_orders po GROUP BY po.status ORDER BY total DESC;"
+  },
+  {
+    "question": "qué órdenes están activas esperando que Marlon les cargue la fecha estimada de despacho?",
+    "sql": "SELECT po.order_consecutive, c.client_name, po.order_creation_date, DATEDIFF(CURDATE(), po.order_creation_date) AS dias_esperando FROM purchase_orders po JOIN clients c ON c.id = po.client_id WHERE po.status IN ('processing','parcial_status') AND NOT EXISTS (SELECT 1 FROM partials t WHERE t.order_id = po.id AND t.type = 'temporal' AND t.deleted_at IS NULL) AND NOT EXISTS (SELECT 1 FROM partials r WHERE r.order_id = po.id AND r.type = 'real' AND r.deleted_at IS NULL) ORDER BY dias_esperando DESC;"
+  },
+  {
+    "question": "cuáles OCs tienen la fecha estimada de Marlon ya vencida y Alexa aún no ha despachado nada (atraso logístico)",
+    "sql": "SELECT po.order_consecutive, c.client_name, MAX(t.dispatch_date) AS fecha_estimada, DATEDIFF(CURDATE(), MAX(t.dispatch_date)) AS dias_vencida FROM purchase_orders po JOIN clients c ON c.id = po.client_id JOIN partials t ON t.order_id = po.id AND t.type = 'temporal' AND t.deleted_at IS NULL WHERE po.status IN ('processing','parcial_status') AND NOT EXISTS (SELECT 1 FROM partials r WHERE r.order_id = po.id AND r.type = 'real' AND r.deleted_at IS NULL) GROUP BY po.id, po.order_consecutive, c.client_name HAVING fecha_estimada < CURDATE() ORDER BY dias_vencida DESC;"
+  },
+  {
+    "question": "cuantos dias pasan entre la fecha estimada que pone Marlon y el primer despacho real de Alexa, por orden, en 2026?",
+    "sql": "WITH est AS (SELECT order_id, MIN(dispatch_date) AS fecha_estimada FROM partials WHERE type = 'temporal' AND deleted_at IS NULL GROUP BY order_id), real1 AS (SELECT order_id, MIN(dispatch_date) AS primer_real FROM partials WHERE type = 'real' AND deleted_at IS NULL GROUP BY order_id) SELECT po.order_consecutive, c.client_name, e.fecha_estimada, r.primer_real, DATEDIFF(r.primer_real, e.fecha_estimada) AS dias_desfase FROM purchase_orders po JOIN clients c ON c.id = po.client_id JOIN est e ON e.order_id = po.id JOIN real1 r ON r.order_id = po.id WHERE po.status <> 'cancelled' AND YEAR(r.primer_real) = 2026 ORDER BY dias_desfase DESC;"
+  },
+  {
+    "question": "cuál es el promedio de días entre que se crea la OC y el primer despacho real, por ejecutiva, en 2026?",
+    "sql": "WITH real1 AS (SELECT order_id, MIN(dispatch_date) AS primer_real FROM partials WHERE type = 'real' AND deleted_at IS NULL GROUP BY order_id) SELECT e.name AS ejecutiva, COUNT(*) AS ocs, ROUND(AVG(GREATEST(DATEDIFF(r.primer_real, po.order_creation_date), 0)), 1) AS dias_promedio FROM purchase_orders po JOIN clients c ON c.id = po.client_id JOIN executives e ON e.email = c.executive AND e.is_active = 1 JOIN real1 r ON r.order_id = po.id WHERE po.status <> 'cancelled' AND YEAR(r.primer_real) = 2026 GROUP BY e.id, e.name ORDER BY dias_promedio DESC;"
+  },
+  {
+    "question": "muéstrame las órdenes parciales con su porcentaje de avance (kilos reales despachados sobre kilos pedidos)",
+    "sql": "WITH pedido AS (SELECT pop.purchase_order_id AS oid, SUM(pop.quantity) AS kilos_pedidos FROM purchase_order_product pop WHERE pop.muestra = 0 GROUP BY pop.purchase_order_id), desp AS (SELECT po.id AS oid, SUM(par.quantity) AS kilos_desp FROM purchase_orders po JOIN partials par ON par.order_id = po.id AND par.type = 'real' AND par.deleted_at IS NULL JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 GROUP BY po.id) SELECT po.order_consecutive, c.client_name, pe.kilos_pedidos, COALESCE(d.kilos_desp, 0) AS kilos_despachados, ROUND(COALESCE(d.kilos_desp, 0) / NULLIF(pe.kilos_pedidos, 0) * 100, 1) AS avance_pct FROM purchase_orders po JOIN clients c ON c.id = po.client_id JOIN pedido pe ON pe.oid = po.id LEFT JOIN desp d ON d.oid = po.id WHERE po.status = 'parcial_status' AND COALESCE(d.kilos_desp, 0) > 0 ORDER BY avance_pct DESC;"
+  },
+  {
+    "question": "qué despachos reales de 2026 quedaron sin número de guía cargado?",
+    "sql": "SELECT par.dispatch_date, po.order_consecutive, c.client_name, p.code, p.product_name, par.quantity AS kilos, par.invoice_number FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' JOIN clients c ON c.id = po.client_id WHERE par.type = 'real' AND par.deleted_at IS NULL AND (par.tracking_number IS NULL OR par.tracking_number = '') AND YEAR(par.dispatch_date) = 2026 ORDER BY par.dispatch_date DESC;"
+  },
+  {
+    "question": "qué despachó Alexa este mes con su factura, guía y transportadora?",
+    "sql": "SELECT par.dispatch_date, po.order_consecutive, c.client_name, p.code, p.product_name, par.quantity AS kilos, par.invoice_number, par.tracking_number, par.transporter FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' JOIN clients c ON c.id = po.client_id WHERE par.type = 'real' AND par.deleted_at IS NULL AND MONTH(par.dispatch_date) = MONTH(CURDATE()) AND YEAR(par.dispatch_date) = YEAR(CURDATE()) ORDER BY par.dispatch_date DESC;"
+  },
+  {
+    "question": "que se ha despachado en los ultimos 7 dias?",
+    "sql": "SELECT par.dispatch_date, po.order_consecutive, c.client_name, p.code, par.quantity AS kilos, par.transporter FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' JOIN clients c ON c.id = po.client_id WHERE par.type = 'real' AND par.deleted_at IS NULL AND par.dispatch_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) ORDER BY par.dispatch_date DESC;"
+  },
+  {
+    "question": "cuáles son las órdenes de compra canceladas, con su valor en USD?",
+    "sql": "SELECT po.order_consecutive, c.client_name, po.order_creation_date, SUM(pop.quantity) AS kilos, SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) AS valor_usd FROM purchase_orders po JOIN clients c ON c.id = po.client_id LEFT JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0 LEFT JOIN products p ON p.id = pop.product_id WHERE po.status = 'cancelled' GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date ORDER BY po.order_creation_date DESC;"
+  },
+  {
+    "question": "dame el seguimiento completo de la orden 2340-112699: cuándo se creó, qué estimó Marlon y qué despachó Alexa",
+    "sql": "SELECT 'creacion' AS etapa, po.order_creation_date AS fecha, NULL AS kilos, NULL AS factura, NULL AS transportadora FROM purchase_orders po WHERE po.order_consecutive = '2340-112699' UNION ALL SELECT 'estimado_marlon', t.dispatch_date, t.quantity, NULL, NULL FROM partials t JOIN purchase_orders po ON po.id = t.order_id WHERE po.order_consecutive = '2340-112699' AND t.type = 'temporal' AND t.deleted_at IS NULL UNION ALL SELECT 'despacho_alexa', r.dispatch_date, r.quantity, r.invoice_number, r.transporter FROM partials r JOIN purchase_orders po ON po.id = r.order_id WHERE po.order_consecutive = '2340-112699' AND r.type = 'real' AND r.deleted_at IS NULL ORDER BY fecha;"
+  },
+  {
+    "question": "qué órdenes ya tienen fecha estimada de Marlon pero siguen sin despacho real de Alexa?",
+    "sql": "SELECT po.order_consecutive, c.client_name, MAX(t.dispatch_date) AS fecha_estimada, DATEDIFF(MAX(t.dispatch_date), CURDATE()) AS dias_para_estimada FROM purchase_orders po JOIN clients c ON c.id = po.client_id JOIN partials t ON t.order_id = po.id AND t.type = 'temporal' AND t.deleted_at IS NULL WHERE po.status IN ('processing','parcial_status') AND NOT EXISTS (SELECT 1 FROM partials r WHERE r.order_id = po.id AND r.type = 'real' AND r.deleted_at IS NULL) GROUP BY po.id, po.order_consecutive, c.client_name ORDER BY fecha_estimada;"
+  },
+  {
+    "question": "cuántos días tarda Marlon en cargar la fecha estimada desde que Francy crea la OC, promedio por ejecutiva en 2026?",
+    "sql": "WITH est AS (SELECT order_id, MIN(created_at) AS primer_temporal FROM partials WHERE type = 'temporal' AND deleted_at IS NULL GROUP BY order_id) SELECT e.name AS ejecutiva, COUNT(*) AS ocs, ROUND(AVG(GREATEST(DATEDIFF(DATE(es.primer_temporal), po.order_creation_date), 0)), 1) AS dias_promedio FROM purchase_orders po JOIN clients c ON c.id = po.client_id JOIN executives e ON e.email = c.executive AND e.is_active = 1 JOIN est es ON es.order_id = po.id WHERE po.status <> 'cancelled' AND YEAR(po.order_creation_date) = 2026 GROUP BY e.id, e.name ORDER BY dias_promedio DESC;"
+  },
+  {
+    "question": "cuántos despachos reales hizo Alexa cada mes en 2026, con cuántas OCs y kilos?",
+    "sql": "SELECT DATE_FORMAT(par.dispatch_date, '%Y-%m') AS mes, COUNT(*) AS despachos, COUNT(DISTINCT par.order_id) AS ocs, SUM(par.quantity) AS kilos FROM partials par JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026 GROUP BY DATE_FORMAT(par.dispatch_date, '%Y-%m') ORDER BY mes;"
+  },
+  {
+    "question": "en promedio cuántos días se demora un despacho real respecto a la fecha estimada de Marlon en 2026?",
+    "sql": "WITH est AS (SELECT order_id, MIN(dispatch_date) AS est FROM partials WHERE type = 'temporal' AND deleted_at IS NULL GROUP BY order_id), r AS (SELECT order_id, MIN(dispatch_date) AS pr FROM partials WHERE type = 'real' AND deleted_at IS NULL GROUP BY order_id) SELECT COUNT(*) AS ocs, ROUND(AVG(DATEDIFF(r.pr, e.est)), 1) AS dias_promedio, MIN(DATEDIFF(r.pr, e.est)) AS dias_min, MAX(DATEDIFF(r.pr, e.est)) AS dias_max FROM purchase_orders po JOIN est e ON e.order_id = po.id JOIN r ON r.order_id = po.id WHERE po.status <> 'cancelled' AND YEAR(r.pr) = 2026;"
+  },
+  {
+    "question": "cuánto despachó Alexa este mes en kilos, USD y COP (con la cascada de TRM)?",
+    "sql": "SELECT SUM(par.quantity) AS kilos, SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) AS valor_usd, SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(CASE WHEN (par.trm + 0) BETWEEN 3200 AND 10000 THEN (par.trm + 0) WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100 ELSE NULL END, 0), (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 3200 ORDER BY td.date DESC LIMIT 1), 4000)) AS valor_cop FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND MONTH(par.dispatch_date) = MONTH(CURDATE()) AND YEAR(par.dispatch_date) = YEAR(CURDATE());"
+  },
+  {
+    "question": "cual fue la orden de compra mas grande en valor del 2026?",
+    "sql": "SELECT po.order_consecutive, c.client_name, po.order_creation_date, po.status, SUM(pop.quantity) AS kilos, SUM(pop.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) AS valor_usd FROM purchase_orders po JOIN clients c ON c.id = po.client_id JOIN purchase_order_product pop ON pop.purchase_order_id = po.id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id WHERE YEAR(po.order_creation_date) = 2026 AND po.status <> 'cancelled' GROUP BY po.id, po.order_consecutive, c.client_name, po.order_creation_date, po.status ORDER BY valor_usd DESC LIMIT 1;"
+  },
+  {
+    "question": "dame los kilos despachados por día en junio de 2026, con el número de despachos y de facturas de cada día",
+    "sql": "SELECT par.dispatch_date, SUM(par.quantity) AS kilos, COUNT(*) AS despachos, COUNT(DISTINCT par.invoice_number) AS facturas FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-06-01' AND '2026-06-30' GROUP BY par.dispatch_date ORDER BY par.dispatch_date"
+  },
+  {
+    "question": "muéstrame los kilos y el valor en USD despachados por semana durante 2026",
+    "sql": "SELECT YEARWEEK(par.dispatch_date, 3) AS semana_iso, MIN(par.dispatch_date) AS desde, MAX(par.dispatch_date) AS hasta, SUM(par.quantity) AS kilos, SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) AS valor_usd FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date)=2026 GROUP BY YEARWEEK(par.dispatch_date, 3) ORDER BY semana_iso"
+  },
+  {
+    "question": "cuánto se despachó por trimestre en 2026: kilos, valor en USD y valor en COP con la cascada de TRM",
+    "sql": "SELECT QUARTER(x.dispatch_date) AS trimestre, SUM(x.kilos) AS kilos, ROUND(SUM(x.valor_usd),2) AS valor_usd, ROUND(SUM(x.valor_cop),0) AS valor_cop FROM (SELECT par.dispatch_date, par.quantity AS kilos, par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) AS valor_usd, par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(CASE WHEN (par.trm+0) BETWEEN 3200 AND 10000 THEN (par.trm+0) WHEN (par.trm+0)>10000 THEN (par.trm+0)/100 ELSE NULL END,0),(SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 3200 ORDER BY td.date DESC LIMIT 1),4000) AS valor_cop FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date)=2026) x GROUP BY QUARTER(x.dispatch_date) ORDER BY trimestre"
+  },
+  {
+    "question": "compara los kilos y el valor despachado en USD del año 2025 contra 2026",
+    "sql": "SELECT YEAR(par.dispatch_date) AS anio, SUM(par.quantity) AS kilos, ROUND(SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)),2) AS valor_usd, COUNT(*) AS despachos FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL GROUP BY YEAR(par.dispatch_date) ORDER BY anio"
+  },
+  {
+    "question": "qué despachos de 2026 salieron sin número de guía (datos incompletos por completar)",
+    "sql": "SELECT par.dispatch_date, po.order_consecutive, c.client_name, par.invoice_number, par.transporter, par.quantity AS kilos FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND (par.tracking_number IS NULL OR par.tracking_number='') AND YEAR(par.dispatch_date)=2026 ORDER BY par.dispatch_date DESC"
+  },
+  {
+    "question": "cuántos kilos se despacharon por cada transportadora en 2026 y qué porcentaje representa cada una",
+    "sql": "SELECT par.transporter, SUM(par.quantity) AS kilos, COUNT(*) AS despachos, ROUND(100*SUM(par.quantity)/SUM(SUM(par.quantity)) OVER (),2) AS pct_kilos FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date)=2026 GROUP BY par.transporter ORDER BY kilos DESC"
+  },
+  {
+    "question": "cuántos kilos ha movido Aldia mes a mes en 2026, con despachos y facturas",
+    "sql": "SELECT DATE_FORMAT(par.dispatch_date,'%Y-%m') AS mes, SUM(par.quantity) AS kilos, COUNT(*) AS despachos, COUNT(DISTINCT par.invoice_number) AS facturas FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND par.transporter='aldia' AND YEAR(par.dispatch_date)=2026 GROUP BY DATE_FORMAT(par.dispatch_date,'%Y-%m') ORDER BY mes"
+  },
+  {
+    "question": "cuántas facturas se emitieron en junio de 2026 y cuántos kilos representan",
+    "sql": "SELECT COUNT(DISTINCT par.invoice_number) AS num_facturas, COUNT(*) AS lineas_despacho, SUM(par.quantity) AS kilos FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-06-01' AND '2026-06-30'"
+  },
+  {
+    "question": "dame las facturas de junio 2026 ordenadas por valor facturado en USD, con el cliente y los kilos de cada una",
+    "sql": "SELECT par.invoice_number, MIN(par.dispatch_date) AS fecha, MAX(c.client_name) AS cliente, SUM(par.quantity) AS kilos, ROUND(SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)),2) AS valor_usd FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-06-01' AND '2026-06-30' GROUP BY par.invoice_number ORDER BY valor_usd DESC LIMIT 20"
+  },
+  {
+    "question": "hazme el seguimiento de la guía 30380000496: qué cliente, orden y productos lleva",
+    "sql": "SELECT par.dispatch_date, po.order_consecutive, c.client_name, p.code, p.product_name, par.quantity AS kilos, par.invoice_number, par.transporter FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.tracking_number='30380000496' ORDER BY par.dispatch_date"
+  },
+  {
+    "question": "qué contiene la factura 17898: cliente, orden, referencias, kilos y valor en USD de cada línea",
+    "sql": "SELECT par.dispatch_date, po.order_consecutive, c.client_name, p.code, p.product_name, par.quantity AS kilos, par.tracking_number, par.transporter, ROUND(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0),2) AS valor_usd FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.invoice_number='17898' ORDER BY par.dispatch_date"
+  },
+  {
+    "question": "cuántos kilos se han despachado en los últimos 30 días, con número de despachos, facturas y clientes atendidos",
+    "sql": "SELECT SUM(par.quantity) AS kilos, COUNT(*) AS despachos, COUNT(DISTINCT par.invoice_number) AS facturas, COUNT(DISTINCT po.client_id) AS clientes FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"
+  },
+  {
+    "question": "qué se ha despachado esta semana, desglosado por cliente",
+    "sql": "SELECT c.client_name, SUM(par.quantity) AS kilos, COUNT(*) AS despachos FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND YEARWEEK(par.dispatch_date,3)=YEARWEEK(CURDATE(),3) GROUP BY c.id, c.client_name ORDER BY kilos DESC"
+  },
+  {
+    "question": "cuál es el ticket promedio por factura despachada en 2026 (valor USD total dividido entre número de facturas)",
+    "sql": "SELECT COUNT(DISTINCT par.invoice_number) AS facturas, ROUND(SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)),2) AS valor_usd_total, ROUND(SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) / COUNT(DISTINCT par.invoice_number),2) AS ticket_promedio_usd FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date)=2026"
+  },
+  {
+    "question": "compara los kilos despachados del mes actual contra el mes anterior",
+    "sql": "SELECT DATE_FORMAT(par.dispatch_date,'%Y-%m') AS mes, SUM(par.quantity) AS kilos, COUNT(*) AS despachos FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH),'%Y-%m-01') AND par.dispatch_date < DATE_FORMAT(CURDATE(),'%Y-%m-01') + INTERVAL 1 MONTH GROUP BY DATE_FORMAT(par.dispatch_date,'%Y-%m') ORDER BY mes"
+  },
+  {
+    "question": "compara Aldia, Coordinadora y Reymor en 2026: despachos, kilos y valor en USD movidos por cada una",
+    "sql": "SELECT par.transporter, COUNT(*) AS despachos, SUM(par.quantity) AS kilos, ROUND(SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)),2) AS valor_usd FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND par.transporter IN ('aldia','coordinadora','reymor') AND YEAR(par.dispatch_date)=2026 GROUP BY par.transporter ORDER BY kilos DESC"
+  },
+  {
+    "question": "cuánto suma toda la cartera vencida en pesos ahora mismo",
+    "sql": "SELECT SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS cartera_vencida_cop, COUNT(*) AS facturas, COUNT(DISTINCT car.nit) AS clientes FROM cartera car WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) AND car.dias < 0"
+  },
+  {
+    "question": "cuántos clientes tienen cartera vencida",
+    "sql": "SELECT COUNT(DISTINCT car.nit) AS clientes_con_mora FROM cartera car WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) AND car.dias < 0"
+  },
+  {
+    "question": "dame la cartera vencida por cliente, ordenada de mayor a menor, con el número de facturas vencidas",
+    "sql": "SELECT c.client_name, car.nit, COUNT(*) AS facturas_vencidas, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS saldo_vencido_cop FROM cartera car JOIN clients c ON c.nit = car.nit WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) AND car.dias < 0 GROUP BY c.client_name, car.nit ORDER BY saldo_vencido_cop DESC"
+  },
+  {
+    "question": "cuáles son los 5 clientes con mayor saldo de cartera vencida",
+    "sql": "SELECT c.client_name, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS vencido_cop FROM cartera car JOIN clients c ON c.nit = car.nit WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) AND car.dias < 0 GROUP BY c.client_name ORDER BY vencido_cop DESC LIMIT 5"
+  },
+  {
+    "question": "cuál es el valor total de la cartera vencida por ejecutiva según el snapshot más reciente de cada cliente",
+    "sql": "SELECT REPLACE(SUBSTRING_INDEX(c.executive, '@', 1), '.', ' ') AS ejecutiva, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS vencida_cop, COUNT(DISTINCT car.nit) AS clientes FROM cartera car JOIN clients c ON c.nit = car.nit WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) AND car.dias < 0 GROUP BY c.executive ORDER BY vencida_cop DESC"
+  },
+  {
+    "question": "cuánta cartera vencida tiene maria ortega en total",
+    "sql": "SELECT SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS vencida_cop, COUNT(*) AS facturas FROM cartera car JOIN clients c ON c.nit = car.nit WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) AND car.dias < 0 AND LOWER(c.executive) LIKE '%maria.ortega@finearom.com%'"
+  },
+  {
+    "question": "cuál es el saldo de cartera actual de cada cliente (por vencer más vencido) según su último corte",
+    "sql": "SELECT c.client_name, car.nit, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS saldo_actual_cop FROM cartera car JOIN clients c ON c.nit = car.nit WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) GROUP BY c.client_name, car.nit ORDER BY saldo_actual_cop DESC"
+  },
+  {
+    "question": "qué clientes tienen saldo a favor (saldo negativo) en su último corte de cartera",
+    "sql": "SELECT c.client_name, car.nit, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS saldo_neto_cop FROM cartera car LEFT JOIN clients c ON c.nit = car.nit WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) GROUP BY car.nit, c.client_name HAVING saldo_neto_cop < 0 ORDER BY saldo_neto_cop ASC"
+  },
+  {
+    "question": "me puedes decir si Amsa tiene un saldo a favor o cuánto debe",
+    "sql": "SELECT c.client_name, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS saldo_neto_cop FROM cartera car JOIN clients c ON c.nit = car.nit WHERE c.client_name LIKE '%Amsa%' AND car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) GROUP BY c.client_name"
+  },
+  {
+    "question": "muéstrame la cartera del cliente Amsa Quimicos factura por factura, con vencimiento, días y saldo",
+    "sql": "SELECT car.documento AS factura, car.vence, car.dias, CAST(car.saldo_contable AS DECIMAL(20,2)) AS saldo_cop, CASE WHEN car.dias < 0 THEN 'VENCIDA' ELSE 'POR VENCER' END AS estado FROM cartera car JOIN clients c ON c.nit = car.nit WHERE c.client_name LIKE '%Amsa%' AND car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) ORDER BY car.dias ASC"
+  },
+  {
+    "question": "cuál es la antigüedad de la cartera por tramos: al día, 1 a 30, 31 a 60, 61 a 90 y más de 90 días",
+    "sql": "SELECT CASE WHEN car.dias >= 0 THEN 'Al dia' WHEN ABS(car.dias) BETWEEN 1 AND 30 THEN '1-30 dias' WHEN ABS(car.dias) BETWEEN 31 AND 60 THEN '31-60 dias' WHEN ABS(car.dias) BETWEEN 61 AND 90 THEN '61-90 dias' ELSE '+90 dias' END AS tramo, COUNT(*) AS facturas, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS saldo_cop FROM cartera car WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) GROUP BY tramo ORDER BY saldo_cop DESC"
+  },
+  {
+    "question": "qué porcentaje de la cartera total está vencida",
+    "sql": "SELECT SUM(CASE WHEN car.dias < 0 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) AS vencida_cop, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS total_cop, ROUND(SUM(CASE WHEN car.dias < 0 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) / NULLIF(SUM(CAST(car.saldo_contable AS DECIMAL(20,2))), 0) * 100, 1) AS pct_vencida FROM cartera car WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)"
+  },
+  {
+    "question": "qué clientes tienen el mayor porcentaje de su cartera vencida",
+    "sql": "SELECT c.client_name, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS total_cop, ROUND(SUM(CASE WHEN car.dias < 0 THEN CAST(car.saldo_contable AS DECIMAL(20,2)) ELSE 0 END) / NULLIF(SUM(CAST(car.saldo_contable AS DECIMAL(20,2))), 0) * 100, 1) AS pct_vencido FROM cartera car JOIN clients c ON c.nit = car.nit WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) GROUP BY c.client_name HAVING total_cop > 0 ORDER BY pct_vencido DESC, total_cop DESC LIMIT 15"
+  },
+  {
+    "question": "qué clientes están más morosos: dame los mayores días de mora con su saldo vencido",
+    "sql": "SELECT c.client_name, MAX(ABS(car.dias)) AS max_dias_mora, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS vencido_cop FROM cartera car JOIN clients c ON c.nit = car.nit WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) AND car.dias < 0 GROUP BY c.client_name ORDER BY max_dias_mora DESC LIMIT 15"
+  },
+  {
+    "question": "cuánto recaudamos en julio de 2026",
+    "sql": "SELECT COUNT(*) AS recibos, COUNT(DISTINCT r.numero_factura) AS facturas, SUM(r.valor_cancelado) AS recaudado_cop FROM recaudos r WHERE r.fecha_recaudo BETWEEN '2026-07-01' AND '2026-07-31'"
+  },
+  {
+    "question": "cuánto ha pagado cada cliente en julio de 2026 y con cuántos recibos",
+    "sql": "SELECT c.client_name, COUNT(*) AS recibos, SUM(r.valor_cancelado) AS recaudado_cop FROM recaudos r LEFT JOIN clients c ON c.nit = r.nit WHERE r.fecha_recaudo BETWEEN '2026-07-01' AND '2026-07-31' GROUP BY c.client_name ORDER BY recaudado_cop DESC"
+  },
+  {
+    "question": "cuánto recaudó cada ejecutiva en julio de 2026",
+    "sql": "SELECT REPLACE(SUBSTRING_INDEX(c.executive, '@', 1), '.', ' ') AS ejecutiva, SUM(r.valor_cancelado) AS recaudado_cop FROM recaudos r JOIN clients c ON c.nit = r.nit WHERE r.fecha_recaudo BETWEEN '2026-07-01' AND '2026-07-31' GROUP BY c.executive ORDER BY recaudado_cop DESC"
+  },
+  {
+    "question": "qué cartera se estima recaudar en los próximos 7 días (facturas cuyo pago esperado, vencimiento más 15 días, cae en esa ventana)",
+    "sql": "SELECT c.client_name, car.documento AS factura, car.vence, DATE_ADD(car.vence, INTERVAL 15 DAY) AS pago_esperado, CAST(car.saldo_contable AS DECIMAL(20,2)) AS saldo_cop FROM cartera car LEFT JOIN clients c ON c.nit = car.nit WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit) AND CAST(car.saldo_contable AS DECIMAL(20,2)) > 0 AND DATE_ADD(car.vence, INTERVAL 15 DAY) BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY) ORDER BY pago_esperado ASC, saldo_cop DESC"
+  },
+  {
+    "question": "cómo ha evolucionado el saldo de cartera del cliente Industrias Inca a lo largo de los cortes",
+    "sql": "SELECT car.fecha_cartera, COUNT(*) AS facturas, SUM(CAST(car.saldo_contable AS DECIMAL(20,2))) AS saldo_cop FROM cartera car JOIN clients c ON c.nit = car.nit WHERE c.client_name LIKE '%Industrias Inca%' GROUP BY car.fecha_cartera ORDER BY car.fecha_cartera DESC LIMIT 12"
+  },
+  {
+    "question": "dame el estado consolidado por cliente: cartera actual y lo recaudado en julio de 2026",
+    "sql": "SELECT c.client_name, c.nit, COALESCE((SELECT SUM(CAST(ca.saldo_contable AS DECIMAL(20,2))) FROM cartera ca WHERE ca.nit = c.nit AND ca.fecha_cartera = (SELECT MAX(c3.fecha_cartera) FROM cartera c3 WHERE c3.nit = ca.nit)), 0) AS cartera_actual_cop, COALESCE((SELECT SUM(r.valor_cancelado) FROM recaudos r WHERE r.nit = c.nit AND r.fecha_recaudo BETWEEN '2026-07-01' AND '2026-07-31'), 0) AS recaudado_jul_cop FROM clients c WHERE c.nit IN (SELECT DISTINCT nit FROM cartera) ORDER BY cartera_actual_cop DESC"
+  },
+  {
+    "question": "cómo va el cumplimiento del pronóstico por referencia acumulado en lo que va del año 2026 (enero a julio), incluyendo referencias que se vendieron sin estar presupuestadas",
+    "sql": "WITH product_ranked AS (SELECT id, client_id, code, product_name, ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) rn FROM products), pron AS (SELECT sf.nit, sf.codigo, SUM(sf.cantidad_forecast) kilos_pron FROM sales_forecasts sf WHERE sf.modelo='manual' AND sf.año='2026' AND sf.mes IN ('ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO') GROUP BY sf.nit, sf.codigo), reales AS (SELECT c.nit, p.code COLLATE utf8mb4_unicode_ci AS codigo, SUM(par.quantity) kilos_real FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-01-01' AND '2026-07-31' GROUP BY c.nit, p.code), claves AS (SELECT nit, codigo FROM pron UNION SELECT nit, codigo FROM reales) SELECT c.client_name cliente, k.nit, k.codigo, COALESCE(pr.product_name, k.codigo) referencia, COALESCE(p.kilos_pron,0) kilos_pronosticados, COALESCE(r.kilos_real,0) kilos_reales, COALESCE(r.kilos_real,0)-COALESCE(p.kilos_pron,0) brecha_kilos, ROUND(COALESCE(r.kilos_real,0)/NULLIF(p.kilos_pron,0)*100,2) cumplimiento_pct FROM claves k JOIN clients c ON c.nit=k.nit LEFT JOIN pron p ON p.nit=k.nit AND p.codigo=k.codigo LEFT JOIN reales r ON r.nit=k.nit AND r.codigo=k.codigo LEFT JOIN product_ranked pr ON pr.client_id=c.id AND pr.code COLLATE utf8mb4_unicode_ci=k.codigo AND pr.rn=1 ORDER BY brecha_kilos DESC"
+  },
+  {
+    "question": "qué productos tienen pronóstico manual para julio 2026 pero todavía no se les ha despachado nada",
+    "sql": "WITH reales AS (SELECT c.nit, p.code COLLATE utf8mb4_unicode_ci AS codigo, SUM(par.quantity) kilos_real FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-07-01' AND '2026-07-31' GROUP BY c.nit, p.code), product_ranked AS (SELECT id, client_id, code, product_name, ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) rn FROM products) SELECT c.client_name cliente, sf.nit, sf.codigo, COALESCE(pr.product_name, sf.codigo) referencia, SUM(sf.cantidad_forecast) kilos_pronosticados FROM sales_forecasts sf JOIN clients c ON c.nit=sf.nit LEFT JOIN product_ranked pr ON pr.client_id=c.id AND pr.code COLLATE utf8mb4_unicode_ci=sf.codigo AND pr.rn=1 LEFT JOIN reales r ON r.nit=sf.nit AND r.codigo=sf.codigo WHERE sf.modelo='manual' AND sf.año='2026' AND sf.mes='JULIO' GROUP BY c.client_name, sf.nit, sf.codigo, pr.product_name HAVING COALESCE(MAX(r.kilos_real),0)=0 ORDER BY kilos_pronosticados DESC"
+  },
+  {
+    "question": "qué referencias se han vendido este año sin estar en el pronóstico manual, o sea venta no planeada, entre enero y julio de 2026",
+    "sql": "WITH pron AS (SELECT nit, codigo FROM sales_forecasts WHERE modelo='manual' AND año='2026' AND mes IN ('ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO') GROUP BY nit, codigo), reales AS (SELECT c.nit, p.code AS codigo, MAX(p.product_name) referencia, SUM(par.quantity) kilos_real FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-01-01' AND '2026-07-31' GROUP BY c.nit, p.code) SELECT c.client_name cliente, r.nit, r.codigo, r.referencia, r.kilos_real kilos_reales FROM reales r JOIN clients c ON c.nit=r.nit LEFT JOIN pron p ON p.nit=r.nit AND p.codigo COLLATE utf8mb4_general_ci=r.codigo WHERE p.nit IS NULL ORDER BY r.kilos_real DESC"
+  },
+  {
+    "question": "qué clientes tienen ventas reales en 2026 pero no tienen ningún pronóstico manual cargado",
+    "sql": "WITH pron AS (SELECT nit FROM sales_forecasts WHERE modelo='manual' AND año='2026' GROUP BY nit), reales AS (SELECT c.nit, SUM(par.quantity) kilos_real, COUNT(DISTINCT po.id) ocs FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-01-01' AND '2026-07-31' GROUP BY c.nit) SELECT c.client_name cliente, r.nit, c.executive ejecutiva, r.ocs, r.kilos_real kilos_reales FROM reales r JOIN clients c ON c.nit=r.nit LEFT JOIN pron p ON p.nit=r.nit WHERE p.nit IS NULL ORDER BY r.kilos_real DESC"
+  },
+  {
+    "question": "dame la brecha en kilos y en dólares por cliente para julio 2026, comparando lo pronosticado contra lo despachado",
+    "sql": "WITH product_ranked AS (SELECT id, client_id, code, price, ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) rn FROM products), pron_k AS (SELECT c.id client_id, SUM(sf.cantidad_forecast) kilos_pron FROM sales_forecasts sf JOIN clients c ON c.nit=sf.nit WHERE sf.modelo='manual' AND sf.año='2026' AND sf.mes='JULIO' GROUP BY c.id), pron_usd AS (SELECT c.id client_id, SUM(sf.cantidad_forecast*COALESCE(NULLIF(pr.price,0),0)) usd_pron FROM sales_forecasts sf JOIN clients c ON c.nit=sf.nit JOIN product_ranked pr ON pr.client_id=c.id AND pr.code COLLATE utf8mb4_unicode_ci=sf.codigo AND pr.rn=1 WHERE sf.modelo='manual' AND sf.año='2026' AND sf.mes='JULIO' GROUP BY c.id), reales AS (SELECT c.id client_id, SUM(par.quantity) kilos_real, SUM(par.quantity*COALESCE(NULLIF(pop.price,0),p.price,0)) usd_real FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-07-01' AND '2026-07-31' GROUP BY c.id), claves AS (SELECT client_id FROM pron_k UNION SELECT client_id FROM reales) SELECT c.client_name cliente, c.nit, COALESCE(pk.kilos_pron,0) kilos_pron, COALESCE(r.kilos_real,0) kilos_real, COALESCE(r.kilos_real,0)-COALESCE(pk.kilos_pron,0) brecha_kilos, ROUND(COALESCE(pu.usd_pron,0),2) usd_pron, ROUND(COALESCE(r.usd_real,0),2) usd_real, ROUND(COALESCE(r.usd_real,0)-COALESCE(pu.usd_pron,0),2) brecha_usd FROM claves k JOIN clients c ON c.id=k.client_id LEFT JOIN pron_k pk ON pk.client_id=k.client_id LEFT JOIN pron_usd pu ON pu.client_id=k.client_id LEFT JOIN reales r ON r.client_id=k.client_id ORDER BY brecha_kilos ASC"
+  },
+  {
+    "question": "rankea las ejecutivas por porcentaje de cumplimiento acumulado del año, enero a julio 2026, con la brecha en kilos",
+    "sql": "WITH pron_cli AS (SELECT c.id client_id, c.executive exec_email, SUM(sf.cantidad_forecast) pron FROM sales_forecasts sf JOIN clients c ON c.nit=sf.nit WHERE sf.modelo='manual' AND sf.año='2026' AND sf.mes IN ('ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO') GROUP BY c.id, c.executive), real_cli AS (SELECT c.id client_id, SUM(par.quantity) real_k FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-01-01' AND '2026-07-31' GROUP BY c.id) SELECT e.name ejecutiva, SUM(p.pron) kilos_pronosticados, SUM(COALESCE(r.real_k,0)) kilos_reales, SUM(COALESCE(r.real_k,0))-SUM(p.pron) brecha_kilos, ROUND(SUM(COALESCE(r.real_k,0))/NULLIF(SUM(p.pron),0)*100,2) cumplimiento_pct FROM pron_cli p JOIN executives e ON e.email=p.exec_email COLLATE utf8mb4_unicode_ci AND e.is_active=1 LEFT JOIN real_cli r ON r.client_id=p.client_id GROUP BY e.id, e.name ORDER BY cumplimiento_pct DESC"
+  },
+  {
+    "question": "compara el pronóstico manual contra el modelo xgboost por referencia para julio 2026",
+    "sql": "WITH product_ranked AS (SELECT id, client_id, code, product_name, ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) rn FROM products), manual AS (SELECT nit, codigo, SUM(cantidad_forecast) k_manual FROM sales_forecasts WHERE modelo='manual' AND año='2026' AND mes='JULIO' GROUP BY nit, codigo), xgb AS (SELECT nit, codigo, SUM(cantidad_forecast) k_xgb FROM sales_forecasts WHERE modelo='xgboost' AND año='2026' AND mes='JULIO' GROUP BY nit, codigo), claves AS (SELECT nit, codigo FROM manual UNION SELECT nit, codigo FROM xgb) SELECT c.client_name cliente, k.nit, k.codigo, COALESCE(pr.product_name,k.codigo) referencia, COALESCE(m.k_manual,0) manual_kilos, COALESCE(x.k_xgb,0) xgboost_kilos, COALESCE(m.k_manual,0)-COALESCE(x.k_xgb,0) diferencia FROM claves k JOIN clients c ON c.nit=k.nit LEFT JOIN manual m ON m.nit=k.nit AND m.codigo=k.codigo LEFT JOIN xgb x ON x.nit=k.nit AND x.codigo=k.codigo LEFT JOIN product_ranked pr ON pr.client_id=c.id AND pr.code COLLATE utf8mb4_unicode_ci=k.codigo AND pr.rn=1 WHERE COALESCE(m.k_manual,0)+COALESCE(x.k_xgb,0)>0 ORDER BY ABS(COALESCE(m.k_manual,0)-COALESCE(x.k_xgb,0)) DESC LIMIT 40"
+  },
+  {
+    "question": "cuánto pronosticamos para este mes y cuánto llevamos ejecutado, con la proyección de cierre en kilos",
+    "sql": "SELECT (SELECT SUM(cantidad_forecast) FROM sales_forecasts WHERE modelo='manual' AND año='2026' AND mes='JULIO') AS kilos_pronosticados, SUM(par.quantity) AS kilos_ejecutados, DAY(CURDATE()) dias_transcurridos, DAY(LAST_DAY(CURDATE())) dias_del_mes, ROUND(SUM(par.quantity)/DAY(CURDATE())*DAY(LAST_DAY(CURDATE())),2) proyeccion_cierre_kilos, ROUND(SUM(par.quantity)/NULLIF((SELECT SUM(cantidad_forecast) FROM sales_forecasts WHERE modelo='manual' AND año='2026' AND mes='JULIO'),0)*100,2) cumplimiento_actual_pct FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-07-01' AND CURDATE()"
+  },
+  {
+    "question": "cuál es el cumplimiento acumulado del año por cliente, enero a julio 2026",
+    "sql": "WITH pron_cli AS (SELECT c.id client_id, c.client_name, c.nit, SUM(sf.cantidad_forecast) pron FROM sales_forecasts sf JOIN clients c ON c.nit=sf.nit WHERE sf.modelo='manual' AND sf.año='2026' AND sf.mes IN ('ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO') GROUP BY c.id, c.client_name, c.nit), real_cli AS (SELECT c.id client_id, SUM(par.quantity) real_k FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-01-01' AND '2026-07-31' GROUP BY c.id) SELECT p.client_name cliente, p.nit, p.pron kilos_pronosticados, COALESCE(r.real_k,0) kilos_reales, COALESCE(r.real_k,0)-p.pron brecha_kilos, ROUND(COALESCE(r.real_k,0)/NULLIF(p.pron,0)*100,2) cumplimiento_pct FROM pron_cli p LEFT JOIN real_cli r ON r.client_id=p.client_id ORDER BY cumplimiento_pct ASC"
+  },
+  {
+    "question": "cómo va cada referencia de Bouquet frente a su presupuesto en lo que va del 2026, incluyendo lo que se vendió sin presupuesto",
+    "sql": "WITH product_ranked AS (SELECT id, client_id, code, product_name, ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) rn FROM products), pron AS (SELECT sf.nit, sf.codigo, SUM(sf.cantidad_forecast) kilos_pron FROM sales_forecasts sf JOIN clients c ON c.nit=sf.nit WHERE sf.modelo='manual' AND sf.año='2026' AND sf.mes IN ('ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO') AND c.client_name LIKE '%Bouquet%' GROUP BY sf.nit, sf.codigo), reales AS (SELECT c.nit, p.code COLLATE utf8mb4_unicode_ci AS codigo, SUM(par.quantity) kilos_real FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-01-01' AND '2026-07-31' AND c.client_name LIKE '%Bouquet%' GROUP BY c.nit, p.code), claves AS (SELECT nit, codigo FROM pron UNION SELECT nit, codigo FROM reales) SELECT k.codigo, COALESCE(pr.product_name, k.codigo) referencia, COALESCE(p.kilos_pron,0) kilos_pronosticados, COALESCE(r.kilos_real,0) kilos_reales, COALESCE(r.kilos_real,0)-COALESCE(p.kilos_pron,0) brecha_kilos, ROUND(COALESCE(r.kilos_real,0)/NULLIF(p.kilos_pron,0)*100,2) cumplimiento_pct FROM claves k LEFT JOIN pron p ON p.nit=k.nit AND p.codigo=k.codigo LEFT JOIN reales r ON r.nit=k.nit AND r.codigo=k.codigo LEFT JOIN clients c ON c.nit=k.nit LEFT JOIN product_ranked pr ON pr.client_id=c.id AND pr.code COLLATE utf8mb4_unicode_ci=k.codigo AND pr.rn=1 ORDER BY brecha_kilos DESC"
+  },
+  {
+    "question": "rankea las ejecutivas por brecha en dólares entre lo pronosticado y lo despachado en julio 2026",
+    "sql": "WITH product_ranked AS (SELECT id, client_id, code, price, ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) rn FROM products), pron AS (SELECT c.id client_id, c.executive exec_email, SUM(sf.cantidad_forecast*COALESCE(NULLIF(pr.price,0),0)) usd_pron FROM sales_forecasts sf JOIN clients c ON c.nit=sf.nit JOIN product_ranked pr ON pr.client_id=c.id AND pr.code COLLATE utf8mb4_unicode_ci=sf.codigo AND pr.rn=1 WHERE sf.modelo='manual' AND sf.año='2026' AND sf.mes='JULIO' GROUP BY c.id, c.executive), reales AS (SELECT c.id client_id, SUM(par.quantity*COALESCE(NULLIF(pop.price,0),p.price,0)) usd_real FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-07-01' AND '2026-07-31' GROUP BY c.id) SELECT e.name ejecutiva, ROUND(SUM(COALESCE(pn.usd_pron,0)),2) usd_pronosticado, ROUND(SUM(COALESCE(rl.usd_real,0)),2) usd_real, ROUND(SUM(COALESCE(rl.usd_real,0))-SUM(COALESCE(pn.usd_pron,0)),2) brecha_usd FROM pron pn JOIN executives e ON e.email=pn.exec_email COLLATE utf8mb4_unicode_ci AND e.is_active=1 LEFT JOIN reales rl ON rl.client_id=pn.client_id GROUP BY e.id, e.name ORDER BY brecha_usd ASC"
+  },
+  {
+    "question": "compárame por mes el pronóstico manual, el del modelo xgboost y lo realmente despachado, de abril a julio 2026",
+    "sql": "WITH manual AS (SELECT mes, SUM(cantidad_forecast) k FROM sales_forecasts WHERE modelo='manual' AND año='2026' AND mes IN ('ABRIL','MAYO','JUNIO','JULIO') GROUP BY mes), xgb AS (SELECT mes, SUM(cantidad_forecast) k FROM sales_forecasts WHERE modelo='xgboost' AND año='2026' AND mes IN ('ABRIL','MAYO','JUNIO','JULIO') GROUP BY mes), reales AS (SELECT ELT(MONTH(par.dispatch_date)-3,'ABRIL','MAYO','JUNIO','JULIO') mes, SUM(par.quantity) k FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-04-01' AND '2026-07-31' GROUP BY MONTH(par.dispatch_date)) SELECT m.mes, COALESCE(man.k,0) manual_kilos, COALESCE(x.k,0) xgboost_kilos, COALESCE(r.k,0) real_despachado FROM (SELECT 'ABRIL' mes UNION SELECT 'MAYO' UNION SELECT 'JUNIO' UNION SELECT 'JULIO') m LEFT JOIN manual man ON man.mes=m.mes LEFT JOIN xgb x ON x.mes=m.mes LEFT JOIN reales r ON r.mes COLLATE utf8mb4_unicode_ci=m.mes ORDER BY FIELD(m.mes,'ABRIL','MAYO','JUNIO','JULIO')"
+  },
+  {
+    "question": "qué referencias le faltan por vender a Maria Juliana Ortega en julio 2026 según el presupuesto",
+    "sql": "WITH product_ranked AS (SELECT id, client_id, code, product_name, ROW_NUMBER() OVER (PARTITION BY client_id, code ORDER BY id) rn FROM products), reales AS (SELECT c.nit, p.code COLLATE utf8mb4_unicode_ci AS codigo, SUM(par.quantity) kilos_real FROM partials par JOIN purchase_order_product pop ON pop.id=par.product_order_id AND pop.muestra=0 JOIN products p ON p.id=pop.product_id JOIN purchase_orders po ON po.id=par.order_id AND po.status<>'cancelled' JOIN clients c ON c.id=po.client_id WHERE par.type='real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-07-01' AND '2026-07-31' GROUP BY c.nit, p.code) SELECT c.client_name cliente, sf.codigo, COALESCE(pr.product_name, sf.codigo) referencia, SUM(sf.cantidad_forecast) kilos_pronosticados, COALESCE(MAX(r.kilos_real),0) kilos_reales, SUM(sf.cantidad_forecast)-COALESCE(MAX(r.kilos_real),0) faltan FROM sales_forecasts sf JOIN clients c ON c.nit=sf.nit LEFT JOIN product_ranked pr ON pr.client_id=c.id AND pr.code COLLATE utf8mb4_unicode_ci=sf.codigo AND pr.rn=1 LEFT JOIN reales r ON r.nit=sf.nit AND r.codigo=sf.codigo WHERE sf.modelo='manual' AND sf.año='2026' AND sf.mes='JULIO' AND c.executive='maria.ortega@finearom.com' GROUP BY c.client_name, sf.codigo, pr.product_name HAVING SUM(sf.cantidad_forecast) > COALESCE(MAX(r.kilos_real),0) ORDER BY faltan DESC"
+  },
+  {
+    "question": "cuáles son las 15 referencias con más kilos despachados en el primer trimestre de 2026 (enero a marzo)",
+    "sql": "SELECT p.code, MAX(p.product_name) AS product_name, SUM(par.quantity) AS kilos_despachados FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-01-01' AND '2026-03-31' GROUP BY p.code ORDER BY kilos_despachados DESC LIMIT 15"
+  },
+  {
+    "question": "dame los 10 productos con mayor valor despachado en USD del cliente Beautik en 2026, con código, nombre y kilos",
+    "sql": "SELECT p.code, MAX(p.product_name) AS product_name, SUM(par.quantity) AS kilos, ROUND(SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)), 2) AS valor_usd FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' JOIN clients c ON c.id = po.client_id WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026 AND c.client_name LIKE '%Beautik%' GROUP BY p.code ORDER BY valor_usd DESC LIMIT 10"
+  },
+  {
+    "question": "cuántas referencias new win distintas hubo en 2026 (a nivel de línea, pop.new_win=1)",
+    "sql": "SELECT COUNT(DISTINCT pop.product_id) AS referencias_new_win, COUNT(DISTINCT pop.id) AS lineas_new_win FROM purchase_order_product pop JOIN purchase_orders po ON po.id = pop.purchase_order_id AND po.status != 'cancelled' JOIN products p ON p.id = pop.product_id WHERE pop.new_win = 1 AND pop.muestra = 0 AND YEAR(COALESCE(pop.new_win_date, po.order_creation_date)) = 2026"
+  },
+  {
+    "question": "cuantas referencias new win entraron cada mes en 2026?",
+    "sql": "SELECT DATE_FORMAT(COALESCE(pop.new_win_date, po.order_creation_date), '%Y-%m') AS mes, COUNT(DISTINCT pop.product_id) AS referencias_new_win FROM purchase_order_product pop JOIN purchase_orders po ON po.id = pop.purchase_order_id AND po.status != 'cancelled' WHERE pop.new_win = 1 AND pop.muestra = 0 AND YEAR(COALESCE(pop.new_win_date, po.order_creation_date)) = 2026 GROUP BY mes ORDER BY mes"
+  },
+  {
+    "question": "qué productos del catálogo nunca se han vendido (no tienen ningún despacho real registrado), por cliente",
+    "sql": "SELECT c.client_name, p.code, p.product_name, p.price FROM products p JOIN clients c ON c.id = p.client_id WHERE NOT EXISTS (SELECT 1 FROM purchase_order_product pop JOIN partials par ON par.product_order_id = pop.id AND par.type = 'real' AND par.deleted_at IS NULL WHERE pop.product_id = p.id) ORDER BY c.client_name, p.code LIMIT 100"
+  },
+  {
+    "question": "qué referencias tuvieron más cambios de precio durante 2026, con su precio mínimo y máximo",
+    "sql": "SELECT p.code, MAX(p.product_name) AS product_name, COUNT(DISTINCT pph.price) AS precios_distintos, MIN(pph.price) AS precio_min, MAX(pph.price) AS precio_max FROM product_price_history pph JOIN products p ON p.id = pph.product_id WHERE YEAR(pph.effective_date) = 2026 GROUP BY p.code HAVING COUNT(DISTINCT pph.price) > 1 ORDER BY precios_distintos DESC LIMIT 20"
+  },
+  {
+    "question": "cuántas referencias distintas se le despacharon a cada cliente en 2026, con el total de kilos",
+    "sql": "SELECT c.client_name, c.nit, COUNT(DISTINCT p.code) AS referencias_distintas, SUM(par.quantity) AS kilos_totales FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' JOIN clients c ON c.id = po.client_id WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026 GROUP BY c.id, c.client_name, c.nit ORDER BY referencias_distintas DESC LIMIT 20"
+  },
+  {
+    "question": "qué productos siguen vigentes, es decir con al menos un despacho real en los últimos 90 días",
+    "sql": "SELECT p.code, MAX(p.product_name) AS product_name, MAX(par.dispatch_date) AS ultimo_despacho, SUM(par.quantity) AS kilos_90d FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND par.dispatch_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY) GROUP BY p.code ORDER BY kilos_90d DESC LIMIT 30"
+  },
+  {
+    "question": "hazme un análisis de Pareto: qué referencias concentran hasta el 80% de los kilos despachados en 2026, con su porcentaje acumulado",
+    "sql": "WITH por_producto AS (SELECT p.code, MAX(p.product_name) AS product_name, SUM(par.quantity) AS kilos FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026 GROUP BY p.code), acum AS (SELECT code, product_name, kilos, SUM(kilos) OVER (ORDER BY kilos DESC) AS kilos_acum, SUM(kilos) OVER () AS kilos_total FROM por_producto) SELECT code, product_name, kilos, ROUND(kilos_acum / kilos_total * 100, 2) AS pct_acumulado FROM acum WHERE kilos_acum / kilos_total <= 0.80 ORDER BY kilos DESC"
+  },
+  {
+    "question": "dame los kilos y el valor en USD despachados por referencia en el segundo trimestre de 2026 (abril a junio), con código y nombre",
+    "sql": "SELECT p.code, MAX(p.product_name) AS product_name, SUM(par.quantity) AS kilos, ROUND(SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)), 2) AS valor_usd FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND par.dispatch_date BETWEEN '2026-04-01' AND '2026-06-30' GROUP BY p.code ORDER BY valor_usd DESC LIMIT 30"
+  },
+  {
+    "question": "cuál es la participación porcentual de cada referencia sobre el valor total en USD despachado en 2026",
+    "sql": "WITH por_producto AS (SELECT p.code, MAX(p.product_name) AS product_name, SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0)) AS valor_usd FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026 GROUP BY p.code) SELECT code, product_name, ROUND(valor_usd, 2) AS valor_usd, ROUND(valor_usd / SUM(valor_usd) OVER () * 100, 2) AS participacion_pct FROM por_producto ORDER BY valor_usd DESC LIMIT 30"
+  },
+  {
+    "question": "cuáles son las 15 referencias con mayor valor despachado en pesos (COP) en 2026, usando la cascada de TRM",
+    "sql": "SELECT code, MAX(product_name) AS product_name, ROUND(SUM(valor_cop), 2) AS valor_cop FROM (SELECT p.code AS code, p.product_name AS product_name, par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(NULLIF(CASE WHEN (par.trm + 0) BETWEEN 3200 AND 10000 THEN (par.trm + 0) WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100 ELSE NULL END, 0), NULLIF(CASE WHEN (po.trm + 0) BETWEEN 3200 AND 10000 THEN (po.trm + 0) WHEN (po.trm + 0) > 10000 THEN (po.trm + 0) / 100 ELSE NULL END, 0), (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 3200 ORDER BY td.date DESC LIMIT 1), 4000) AS valor_cop FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026) t GROUP BY code ORDER BY valor_cop DESC LIMIT 15"
+  },
+  {
+    "question": "qué referencias se despacharon a más clientes distintos en 2026 (mayor alcance de cartera)",
+    "sql": "SELECT p.code, MAX(p.product_name) AS product_name, COUNT(DISTINCT po.client_id) AS clientes, SUM(par.quantity) AS kilos FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026 GROUP BY p.code ORDER BY clientes DESC, kilos DESC LIMIT 20"
+  },
+  {
+    "question": "muéstrame la evolución mensual de kilos despachados de la referencia con código 6493 durante 2026",
+    "sql": "SELECT DATE_FORMAT(par.dispatch_date, '%Y-%m') AS mes, SUM(par.quantity) AS kilos FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = 2026 AND p.code = '6493' GROUP BY mes ORDER BY mes"
+  },
+  {
+    "question": "compárame los kilos por referencia de 2026 vs 2025 y muéstrame las que más cayeron",
+    "sql": "WITH v AS (SELECT p.code, MAX(p.product_name) AS product_name, YEAR(par.dispatch_date) AS anio, SUM(par.quantity) AS kilos FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status != 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) IN (2025, 2026) GROUP BY p.code, YEAR(par.dispatch_date)) SELECT code, MAX(product_name) AS product_name, SUM(CASE WHEN anio = 2025 THEN kilos ELSE 0 END) AS kilos_2025, SUM(CASE WHEN anio = 2026 THEN kilos ELSE 0 END) AS kilos_2026, SUM(CASE WHEN anio = 2026 THEN kilos ELSE 0 END) - SUM(CASE WHEN anio = 2025 THEN kilos ELSE 0 END) AS variacion FROM v GROUP BY code ORDER BY variacion ASC LIMIT 20"
+  },
+  {
+    "question": "cuantos clientes activos maneja cada ejecutiva",
+    "sql": "SELECT COALESCE(e.name,'Sin ejecutiva') AS ejecutiva, COUNT(*) AS clientes FROM clients c LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1 WHERE c.status = 'active' GROUP BY COALESCE(e.name,'Sin ejecutiva') ORDER BY clientes DESC"
+  },
+  {
+    "question": "cuántos clientes de exportación tenemos por país (fuera de Colombia)",
+    "sql": "SELECT c.country AS pais, COUNT(*) AS clientes FROM clients c WHERE c.country IS NOT NULL AND c.country NOT IN ('CO') GROUP BY c.country ORDER BY clientes DESC"
+  },
+  {
+    "question": "distribución de clientes activos por segmento (client_type)",
+    "sql": "SELECT c.client_type AS segmento, COUNT(*) AS clientes FROM clients c WHERE c.status = 'active' GROUP BY c.client_type ORDER BY clientes DESC"
+  },
+  {
+    "question": "en qué ciudades están concentrados nuestros clientes activos",
+    "sql": "SELECT COALESCE(NULLIF(c.city,''), NULLIF(c.ciudad,''), '(sin ciudad)') AS ciudad, COUNT(*) AS clientes FROM clients c WHERE c.status = 'active' GROUP BY ciudad ORDER BY clientes DESC LIMIT 15"
+  },
+  {
+    "question": "qué clientes están dormidos, sin despacho real en los últimos 3 meses, con su último despacho y su ejecutiva",
+    "sql": "SELECT c.client_name, COALESCE(e.name,'Sin ejecutiva') AS ejecutiva, MAX(pt.dispatch_date) AS ultimo_despacho FROM clients c LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1 LEFT JOIN purchase_orders po ON po.client_id = c.id AND po.status <> 'cancelled' LEFT JOIN partials pt ON pt.order_id = po.id AND pt.type = 'real' AND pt.deleted_at IS NULL WHERE c.status = 'active' GROUP BY c.id, c.client_name, e.name HAVING MAX(pt.dispatch_date) IS NULL OR MAX(pt.dispatch_date) < DATE_SUB(CURDATE(), INTERVAL 3 MONTH) ORDER BY ultimo_despacho DESC"
+  },
+  {
+    "question": "qué clientes nuevos se codificaron en el 2026 y con qué ejecutiva quedaron",
+    "sql": "SELECT c.client_name, COALESCE(e.name,'Sin ejecutiva') AS ejecutiva, DATE(c.created_at) AS fecha_alta FROM clients c LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1 WHERE YEAR(c.created_at) = 2026 ORDER BY c.created_at DESC"
+  },
+  {
+    "question": "qué clientes tuvieron referencias new win despachadas en 2026, con cuántas referencias y kilos",
+    "sql": "SELECT c.client_name, COUNT(DISTINCT p.id) AS refs_new_win, ROUND(SUM(pt.quantity),1) AS kilos FROM partials pt JOIN purchase_orders po ON po.id = pt.order_id JOIN clients c ON c.id = po.client_id JOIN purchase_order_product pop ON pop.id = pt.product_order_id JOIN products p ON p.id = pop.product_id WHERE pt.type = 'real' AND pt.deleted_at IS NULL AND pop.muestra = 0 AND pop.new_win = 1 AND po.status <> 'cancelled' AND YEAR(pt.dispatch_date) = 2026 GROUP BY c.id, c.client_name ORDER BY kilos DESC"
+  },
+  {
+    "question": "dame el scorecard de cada ejecutiva en 2026: cuántas OCs despacharon, kilos y valor en USD",
+    "sql": "SELECT COALESCE(e.name,'Sin ejecutiva') AS ejecutiva, COUNT(DISTINCT po.id) AS ocs, ROUND(SUM(pt.quantity),1) AS kilos, ROUND(SUM(COALESCE(NULLIF(pop.price,0), p.price, 0) * pt.quantity),2) AS valor_usd FROM partials pt JOIN purchase_orders po ON po.id = pt.order_id JOIN clients c ON c.id = po.client_id LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1 JOIN purchase_order_product pop ON pop.id = pt.product_order_id JOIN products p ON p.id = pop.product_id WHERE pt.type = 'real' AND pt.deleted_at IS NULL AND pop.muestra = 0 AND po.status <> 'cancelled' AND YEAR(pt.dispatch_date) = 2026 GROUP BY COALESCE(e.name,'Sin ejecutiva') ORDER BY valor_usd DESC"
+  },
+  {
+    "question": "cuál es el fill rate (kilos despachados sobre pedidos) por ejecutiva para las OCs creadas en 2026",
+    "sql": "WITH ped AS (SELECT c.executive AS ek, SUM(pop.quantity) AS pedido FROM purchase_orders po JOIN clients c ON c.id = po.client_id JOIN purchase_order_product pop ON pop.purchase_order_id = po.id WHERE po.status <> 'cancelled' AND pop.muestra = 0 AND YEAR(po.order_creation_date) = 2026 GROUP BY c.executive), desp AS (SELECT c.executive AS ek, SUM(pt.quantity) AS despachado FROM partials pt JOIN purchase_orders po ON po.id = pt.order_id JOIN clients c ON c.id = po.client_id JOIN purchase_order_product pop ON pop.id = pt.product_order_id WHERE pt.type = 'real' AND pt.deleted_at IS NULL AND pop.muestra = 0 AND po.status <> 'cancelled' AND YEAR(po.order_creation_date) = 2026 GROUP BY c.executive) SELECT COALESCE(e.name,'Sin ejecutiva') AS ejecutiva, ROUND(SUM(ped.pedido),1) AS kilos_pedidos, ROUND(SUM(COALESCE(desp.despachado,0)),1) AS kilos_despachados, ROUND(100 * SUM(COALESCE(desp.despachado,0)) / NULLIF(SUM(ped.pedido),0),1) AS fill_rate_pct FROM ped LEFT JOIN desp ON desp.ek = ped.ek LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = ped.ek AND e.is_active = 1 GROUP BY COALESCE(e.name,'Sin ejecutiva') ORDER BY fill_rate_pct DESC"
+  },
+  {
+    "question": "cuál es la participación porcentual de cada ejecutiva sobre el valor total despachado en USD en 2026",
+    "sql": "SELECT COALESCE(e.name,'Sin ejecutiva') AS ejecutiva, ROUND(SUM(COALESCE(NULLIF(pop.price,0), p.price, 0) * pt.quantity),2) AS valor_usd, ROUND(100 * SUM(COALESCE(NULLIF(pop.price,0), p.price, 0) * pt.quantity) / SUM(SUM(COALESCE(NULLIF(pop.price,0), p.price, 0) * pt.quantity)) OVER (),2) AS pct FROM partials pt JOIN purchase_orders po ON po.id = pt.order_id JOIN clients c ON c.id = po.client_id LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1 JOIN purchase_order_product pop ON pop.id = pt.product_order_id JOIN products p ON p.id = pop.product_id WHERE pt.type = 'real' AND pt.deleted_at IS NULL AND pop.muestra = 0 AND po.status <> 'cancelled' AND YEAR(pt.dispatch_date) = 2026 GROUP BY COALESCE(e.name,'Sin ejecutiva') ORDER BY valor_usd DESC"
+  },
+  {
+    "question": "ranking de ejecutivas por kilos despachados en 2026",
+    "sql": "SELECT COALESCE(e.name,'Sin ejecutiva') AS ejecutiva, ROUND(SUM(pt.quantity),1) AS kilos FROM partials pt JOIN purchase_orders po ON po.id = pt.order_id JOIN clients c ON c.id = po.client_id LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1 JOIN purchase_order_product pop ON pop.id = pt.product_order_id WHERE pt.type = 'real' AND pt.deleted_at IS NULL AND pop.muestra = 0 AND po.status <> 'cancelled' AND YEAR(pt.dispatch_date) = 2026 GROUP BY COALESCE(e.name,'Sin ejecutiva') ORDER BY kilos DESC"
+  },
+  {
+    "question": "qué clientes tienen más sucursales de entrega registradas",
+    "sql": "SELECT c.client_name, COUNT(bo.id) AS sucursales FROM clients c JOIN branch_offices bo ON bo.client_id = c.id GROUP BY c.id, c.client_name ORDER BY sucursales DESC LIMIT 12"
+  },
+  {
+    "question": "cuál es el correo de la ejecutiva Claudia Cueter en la tabla de ejecutivas",
+    "sql": "SELECT id, name, email, is_active FROM executives WHERE is_active = 1 AND (name LIKE '%claudia%' OR name LIKE '%cueter%')"
+  },
+  {
+    "question": "qué clientes activos tienen asignado un correo de ejecutiva que no corresponde a ninguna ejecutiva activa (dato huérfano o con typo)",
+    "sql": "SELECT c.id, c.client_name, c.executive FROM clients c WHERE c.status = 'active' AND c.executive IS NOT NULL AND c.executive <> '' AND c.executive NOT LIKE '%,%' AND NOT EXISTS (SELECT 1 FROM executives e WHERE e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1) ORDER BY c.id"
+  },
+  {
+    "question": "regalame la venta despachada en USD y kilos del 2026 de los clientes de Claudia Cueter, cliente por cliente",
+    "sql": "SELECT c.client_name, ROUND(SUM(COALESCE(NULLIF(pop.price,0), p.price, 0) * pt.quantity),2) AS valor_usd, ROUND(SUM(pt.quantity),1) AS kilos FROM clients c JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1 JOIN purchase_orders po ON po.client_id = c.id AND po.status <> 'cancelled' JOIN partials pt ON pt.order_id = po.id AND pt.type = 'real' AND pt.deleted_at IS NULL JOIN purchase_order_product pop ON pop.id = pt.product_order_id JOIN products p ON p.id = pop.product_id WHERE e.email = 'claudia.cueter@finearom.com' AND pop.muestra = 0 AND YEAR(pt.dispatch_date) = 2026 GROUP BY c.id, c.client_name ORDER BY valor_usd DESC"
+  },
+  {
+    "question": "qué porcentaje de entregas a tiempo tiene cada ejecutiva en 2026, comparando el despacho real contra la fecha estimada",
+    "sql": "SELECT COALESCE(e.name,'Sin ejecutiva') AS ejecutiva, COUNT(*) AS despachos, SUM(CASE WHEN pt.dispatch_date <= est.fecha_est THEN 1 ELSE 0 END) AS a_tiempo, ROUND(100 * SUM(CASE WHEN pt.dispatch_date <= est.fecha_est THEN 1 ELSE 0 END) / COUNT(*),1) AS pct_a_tiempo FROM partials pt JOIN purchase_orders po ON po.id = pt.order_id JOIN clients c ON c.id = po.client_id LEFT JOIN executives e ON e.email COLLATE utf8mb4_general_ci = c.executive AND e.is_active = 1 JOIN purchase_order_product pop ON pop.id = pt.product_order_id JOIN (SELECT product_order_id, MIN(dispatch_date) AS fecha_est FROM partials WHERE type = 'temporal' AND deleted_at IS NULL GROUP BY product_order_id) est ON est.product_order_id = pt.product_order_id WHERE pt.type = 'real' AND pt.deleted_at IS NULL AND pop.muestra = 0 AND po.status <> 'cancelled' AND YEAR(pt.dispatch_date) = 2026 GROUP BY COALESCE(e.name,'Sin ejecutiva') ORDER BY pct_a_tiempo DESC"
+  },
+  {
+    "question": "cuántos clientes activos hay",
+    "sql": "SELECT COUNT(*) AS clientes_activos FROM clients WHERE status = 'active';"
+  },
+  {
+    "question": "cuantos productos tenemos en el catalogo",
+    "sql": "SELECT COUNT(*) AS total_productos FROM products;"
+  },
+  {
+    "question": "cuántas ejecutivas activas hay",
+    "sql": "SELECT COUNT(*) AS ejecutivas_activas FROM executives WHERE is_active = 1;"
+  },
+  {
+    "question": "dame la lista de las ejecutivas activas con su correo",
+    "sql": "SELECT name, email FROM executives WHERE is_active = 1 ORDER BY name;"
+  },
+  {
+    "question": "cuántas órdenes de compra se han creado este año",
+    "sql": "SELECT COUNT(*) AS ocs_creadas FROM purchase_orders WHERE status <> 'cancelled' AND YEAR(order_creation_date) = YEAR(CURDATE());"
+  },
+  {
+    "question": "cuantas OCs se crearon este mes?",
+    "sql": "SELECT COUNT(*) AS ocs_este_mes FROM purchase_orders WHERE status <> 'cancelled' AND YEAR(order_creation_date) = YEAR(CURDATE()) AND MONTH(order_creation_date) = MONTH(CURDATE());"
+  },
+  {
+    "question": "cuántos clientes activos hay por país",
+    "sql": "SELECT COALESCE(country, 'sin pais') AS pais, COUNT(*) AS clientes FROM clients WHERE status = 'active' GROUP BY country ORDER BY clientes DESC;"
+  },
+  {
+    "question": "qué transportadoras hemos usado en los despachos",
+    "sql": "SELECT DISTINCT transporter AS transportadora FROM partials WHERE type = 'real' AND deleted_at IS NULL AND transporter IS NOT NULL AND transporter <> '' ORDER BY transporter;"
+  },
+  {
+    "question": "muéstrame los últimos 10 despachos reales",
+    "sql": "SELECT po.order_consecutive, c.client_name, p.product_name, par.quantity AS kilos, par.dispatch_date, par.invoice_number FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' JOIN clients c ON c.id = po.client_id WHERE par.type = 'real' AND par.deleted_at IS NULL ORDER BY par.dispatch_date DESC, par.id DESC LIMIT 10;"
+  },
+  {
+    "question": "cuántos kilos se despacharon esta semana",
+    "sql": "SELECT COUNT(*) AS despachos, ROUND(SUM(par.quantity), 2) AS kilos FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEARWEEK(par.dispatch_date, 1) = YEARWEEK(CURDATE(), 1);"
+  },
+  {
+    "question": "kilos despachados en los últimos 30 días",
+    "sql": "SELECT ROUND(SUM(par.quantity), 2) AS kilos_30d FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND par.dispatch_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND par.dispatch_date <= CURDATE();"
+  },
+  {
+    "question": "cuál es el promedio de kilos por orden despachada este año",
+    "sql": "SELECT ROUND(SUM(par.quantity) / COUNT(DISTINCT po.id), 2) AS kilos_prom_por_oc FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = YEAR(CURDATE());"
+  },
+  {
+    "question": "cuál es la orden más grande por kilos despachados",
+    "sql": "SELECT po.order_consecutive, c.client_name, ROUND(SUM(par.quantity), 2) AS kilos FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' JOIN clients c ON c.id = po.client_id WHERE par.type = 'real' AND par.deleted_at IS NULL GROUP BY po.id, po.order_consecutive, c.client_name ORDER BY kilos DESC LIMIT 1;"
+  },
+  {
+    "question": "qué cliente tiene más órdenes de compra creadas este año",
+    "sql": "SELECT c.client_name, COUNT(*) AS n_ocs FROM purchase_orders po JOIN clients c ON c.id = po.client_id WHERE po.status <> 'cancelled' AND YEAR(po.order_creation_date) = YEAR(CURDATE()) GROUP BY c.id, c.client_name ORDER BY n_ocs DESC LIMIT 1;"
+  },
+  {
+    "question": "cual es el producto mas despachado este año",
+    "sql": "SELECT p.code, p.product_name, ROUND(SUM(par.quantity), 2) AS kilos FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = YEAR(CURDATE()) GROUP BY p.code, p.product_name ORDER BY kilos DESC LIMIT 1;"
+  },
+  {
+    "question": "cuál es la TRM de hoy",
+    "sql": "SELECT date, value AS trm FROM trm_daily WHERE date = CURDATE();"
+  },
+  {
+    "question": "cuál es el valor promedio en USD de cada despacho este mes",
+    "sql": "SELECT ROUND(AVG(par.quantity * COALESCE(NULLIF(pop.price, 0), p.price, 0)), 2) AS valor_usd_prom FROM partials par JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0 JOIN products p ON p.id = pop.product_id JOIN purchase_orders po ON po.id = par.order_id AND po.status <> 'cancelled' WHERE par.type = 'real' AND par.deleted_at IS NULL AND YEAR(par.dispatch_date) = YEAR(CURDATE()) AND MONTH(par.dispatch_date) = MONTH(CURDATE());"
   }
 ]
