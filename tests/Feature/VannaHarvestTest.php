@@ -22,9 +22,11 @@ class VannaHarvestTest extends TestCase
             'period_end'   => '2026-07-31',
             'messages' => [
                 ['role' => 'user', 'content' => 'cuantos clientes hay'],
-                ['role' => 'assistant', 'content' => "Aquí:\n```sql\nSELECT COUNT(*) FROM clients\n```"],
+                ['role' => 'assistant', 'content' => "Aquí:\n<pre><code class=\"language-sql\">\nSELECT COUNT(*) FROM clients\n</code></pre>"],
                 ['role' => 'user', 'content' => 'algo roto'],
-                ['role' => 'assistant', 'content' => "```sql\nSELECT * FROM tabla_que_no_existe_xyz\n```"],
+                ['role' => 'assistant', 'content' => "<pre><code class=\"language-sql\">SELECT * FROM tabla_que_no_existe_xyz</code></pre>"],
+                ['role' => 'user', 'content' => 'clientes con dias vencidos'],
+                ['role' => 'assistant', 'content' => "<pre><code class=\"language-sql\">SELECT COUNT(*) FROM clients WHERE id &gt; 0</code></pre>"],
             ],
         ]);
 
@@ -36,5 +38,12 @@ class VannaHarvestTest extends TestCase
         $sqls = array_column($pairs, 'sql');
         $this->assertContains('SELECT COUNT(*) FROM clients', $sqls);
         $this->assertNotContains('SELECT * FROM tabla_que_no_existe_xyz', $sqls); // no ejecutó → descartado
+
+        $decoded = array_filter($sqls, fn ($sql) => str_contains($sql, 'WHERE id'));
+        $this->assertNotEmpty($decoded, 'debe conservar el SQL con entidad decodificada');
+        foreach ($decoded as $sql) {
+            $this->assertStringContainsString('>', $sql);
+            $this->assertStringNotContainsString('&gt;', $sql);
+        }
     }
 }

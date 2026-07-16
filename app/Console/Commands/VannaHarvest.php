@@ -62,10 +62,18 @@ class VannaHarvest extends Command
 
     private function extractSql(string $content): ?string
     {
-        if (preg_match('/```sql\s*(.+?)```/is', $content, $m)) {
-            return trim($m[1]);
+        // El historial real de chat guarda el SQL como HTML (lo que emite
+        // MonthlyReportController::parseStructuredResponse() para el frontend),
+        // así que se intenta primero ese formato y se cae al markdown como respaldo.
+        if (preg_match('/<code[^>]*class="[^"]*language-sql[^"]*"[^>]*>(.+?)<\/code>/is', $content, $m)) {
+            $sql = $m[1];
+        } elseif (preg_match('/```sql\s*(.+?)```/is', $content, $m)) {
+            $sql = $m[1];
+        } else {
+            return null;
         }
-        return null;
+
+        return trim(html_entity_decode($sql, ENT_QUOTES | ENT_HTML5));
     }
 
     private function isSafeSelect(string $sql): bool
