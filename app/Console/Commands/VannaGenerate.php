@@ -38,12 +38,17 @@ class VannaGenerate extends Command
         $ddlPath = base_path('training/ddl.sql');
         $ddl = is_file($ddlPath) ? file_get_contents($ddlPath) : '';
 
-        $sampleQuestions = array_map(
+        $docPath = base_path('training/documentation.md');
+        $documentation = is_file($docPath) ? file_get_contents($docPath) : '';
+
+        $fewShotPairs = $this->sampleFewShotPairs($existingPairs, 18);
+
+        $existingQuestions = array_map(
             fn (array $p) => $p['question'] ?? '',
-            array_slice($existingPairs, 0, 12)
+            $existingPairs
         );
 
-        $raw = $this->callDeepSeek($ddl, $sampleQuestions, $count);
+        $raw = $this->callDeepSeek($ddl, $documentation, $fewShotPairs, $existingQuestions, $count);
         if ($raw === null) {
             $this->error('No se pudo obtener respuesta de DeepSeek.');
             return self::FAILURE;
@@ -99,34 +104,88 @@ class VannaGenerate extends Command
     }
 
     /**
-     * Llama a DeepSeek pidiendo `$count` preguntas de negocio NUEVAS con su SQL
-     * (MariaDB, solo SELECT), en JSON estricto. Retorna el contenido crudo del
-     * mensaje del modelo, o null si la llamada falla.
+     * Toma una muestra determinística de `$limit` pares (question, sql) completos
+     * del corpus existente, repartidos a lo largo de todo el arreglo (paso fijo)
+     * en vez de tomar siempre los primeros N, para variar de intención cubierta.
      *
-     * @param  array<int, string>  $sampleQuestions
+     * @param  array<int, array{question?: string, sql?: string}>  $pairs
+     * @return array<int, array{question?: string, sql?: string}>
      */
-    private function callDeepSeek(string $ddl, array $sampleQuestions, int $count): ?string
+    private function sampleFewShotPairs(array $pairs, int $limit): array
+    {
+        $total = count($pairs);
+        if ($total === 0) {
+            return [];
+        }
+
+        $step = max(1, intdiv($total, $limit));
+
+        $sample = [];
+        for ($i = 0; $i < $total && count($sample) < $limit; $i += $step) {
+            $sample[] = $pairs[$i];
+        }
+
+        return $sample;
+    }
+
+    /**
+     * Llama a DeepSeek pidiendo `$count` preguntas de negocio NUEVAS con su SQL
+     * (MariaDB, solo SELECT), en JSON estricto. El prompt incluye el DDL completo,
+     * las reglas de negocio de documentation.md y ejemplos completos (question,SQL)
+     * del corpus, para que el modelo copie los patrones reales de joins/columnas
+     * en vez de adivinarlos. Retorna el contenido crudo del mensaje del modelo,
+     * o null si la llamada falla.
+     *
+     * @param  array<int, array{question?: string, sql?: string}>  $fewShotPairs
+     * @param  array<int, string>  $existingQuestions
+     */
+    private function callDeepSeek(string $ddl, string $documentation, array $fewShotPairs, array $existingQuestions, int $count): ?string
     {
         $key = config('custom.deepseek_api_key');
 
-        $samples = implode("\n", array_map(fn (string $q) => "- {$q}", array_filter($sampleQuestions)));
+        $examplesBlock = implode("\n\n", array_map(
+            function (array $p, int $i) {
+                $question = $p['question'] ?? '';
+                $sql = $p['sql'] ?? '';
+                $n = $i + 1;
+                return <<<EJ
+### Ejemplo {$n}
+Pregunta: {$question}
+SQL:
+```sql
+{$sql}
+```
+EJ;
+            },
+            $fewShotPairs,
+            array_keys($fewShotPairs)
+        ));
+
+        $existing = implode("\n", array_map(fn (string $q) => "- {$q}", array_filter($existingQuestions)));
 
         $prompt = <<<PROMPT
-Eres un analista de datos experto en el negocio comercial de Finearom (pedidos, cartera, clientes, productos).
+Eres un analista de datos experto en el negocio comercial de Finearom (pedidos, cartera, clientes, productos, pronósticos de venta).
 
-Este es el esquema de la base de datos (MariaDB):
+## Esquema de la base de datos (MariaDB)
 ```sql
 {$ddl}
 ```
 
-Estas son preguntas de negocio que YA existen en el corpus de entrenamiento (para que NO las repitas, ni generes variaciones triviales de las mismas):
-{$samples}
+## Reglas de negocio y convenciones SQL de Finearom (léelas y respétalas estrictamente: dialecto MariaDB, gotchas de collation, cascada de TRM, resolución de ejecutiva por email, soft delete de partials, ONLY_FULL_GROUP_BY, anti-duplicación de forecasts, etc.)
+{$documentation}
 
-Genera exactamente {$count} preguntas de negocio NUEVAS y DISTINTAS entre sí, en español, que un analista comercial de Finearom haría, cubriendo intenciones que NO estén ya cubiertas por la lista anterior (por ejemplo: cartera vencida, cumplimiento de pronóstico, clientes inactivos, rentabilidad por producto, tiempos de despacho, etc. — lo que aplique según el esquema).
+## Ejemplos reales validados (pregunta → SQL exacto). Sigue estos mismos patrones de joins, nombres de columnas, CTEs y agregaciones — NO inventes columnas ni relaciones que no aparezcan aquí o en el esquema
+{$examplesBlock}
 
-Para cada pregunta, escribe la consulta SQL en dialecto MariaDB que la responde correctamente:
+## Preguntas que YA existen en el corpus de entrenamiento (no las repitas, ni generes variaciones triviales de las mismas)
+{$existing}
+
+## Tarea
+Genera exactamente {$count} preguntas de negocio NUEVAS y DISTINTAS entre sí, en español, que un analista comercial de Finearom haría, cubriendo intenciones que NO estén ya cubiertas por la lista anterior (por ejemplo: cartera vencida, cumplimiento de pronóstico, clientes inactivos, rentabilidad por producto, tiempos de despacho, rezago de órdenes, comparativas entre ejecutivas, etc. — lo que aplique según el esquema y las reglas de negocio).
+
+Para cada pregunta, escribe la consulta SQL en dialecto MariaDB que la responde correctamente, siguiendo EXACTAMENTE los patrones de columnas/joins/CTEs de los ejemplos y las reglas de negocio anteriores:
 - SOLO sentencias SELECT (o WITH ... SELECT) de solo lectura.
-- NO uses FULL JOIN (no existe en MariaDB) ni ninguna sintaxis no soportada por MariaDB.
+- NO uses FULL JOIN (no existe en MariaDB) ni ninguna sintaxis no soportada por MariaDB (ver reglas de negocio arriba).
 - NO uses DROP, DELETE, UPDATE, INSERT, ALTER, CREATE, TRUNCATE, REPLACE, GRANT, EXECUTE, INTO OUTFILE/DUMPFILE, ni LOAD_FILE.
 
 Responde ÚNICAMENTE con un array JSON válido, sin texto adicional ni explicaciones, con esta forma exacta:
@@ -148,6 +207,7 @@ PROMPT;
                         ['role' => 'user', 'content' => $prompt],
                     ],
                     'temperature' => 0.4,
+                    'max_tokens'  => 4000,
                     'stream'      => false,
                 ]);
 
