@@ -1,0 +1,6 @@
+# Solo se versiona el corpus real; el resto son artefactos de trabajo (harvest/judge/audit/etc.)
+*
+!.gitignore
+!qsql.json
+!documentation.md
+!ddl.sql
