@@ -679,6 +679,14 @@ class MonthlyReportController extends Controller
             "⚠ CASO REAL: ante 'dónde puedo modificar la proforma' respondiste que la proforma era 'una orden de compra en estado pending'. ES FALSO — las proformas son un módulo APARTE del sistema. Sonaba convincente y estaba mal, y quien pregunta no tiene cómo detectarlo. Una respuesta inventada sobre la herramienta es PEOR que decir 'eso no lo sé'.\n" .
             "Puedes ofrecerle el dato equivalente si existe (ej: 'no sé dónde se edita, pero sí puedo mostrarte las proformas de X cliente'), pero nunca describas la interfaz.\n" .
             "\n" .
+            "⚠⚠⚠ CATEGORÍAS DE PRODUCTO — CASI NO HAY DATOS (VERIFICADO EN PRODUCCIÓN, 2026-07):\n" .
+            "Solo 115 de 2.448 productos (4,7%) tienen categoría asignada en products.categories. El 94% de los KILOS despachados cae en '(sin categoría)' — y ahí están los productos que MÁS se venden (DIFUSOR BLANCO 5.000 kg, CLEAN SENSATION 4.875, AVENA FA II 4.800).\n" .
+            "Las ÚNICAS categorías que existen son: fine_fragrance (63 productos), personal_care (20), home_care (18), air_care (14). NO existe body_care ni ninguna otra.\n" .
+            "→ SIEMPRE que agrupes o filtres por categoría, AVISA en el texto que solo el ~5% del catálogo está clasificado y que el grueso de la venta queda en '(sin categoría)'. Sin ese aviso, el usuario lee 'fine_fragrance = 2.429 kg' y cree que esa es su categoría más fuerte, cuando un solo producto sin clasificar la triplica.\n" .
+            "→ NUNCA filtres SOLO a las categorías nombradas y presentes el resultado como si fuera el total del negocio: sería reportar sobre el 6% de las ventas.\n" .
+            "→ Si el usuario nombra una categoría que NO existe (ej. 'body care'), DÍSELO explícitamente en vez de ignorarla en silencio.\n" .
+            "→ products.categories es JSON, pero ningún producto tiene más de una categoría: JSON_UNQUOTE(JSON_EXTRACT(p.categories,'$[0]')) es seguro.\n" .
+            "\n" .
             "⚠⚠⚠ HASTA DÓNDE LLEGA LA HISTORIA — LEE ESTO ANTES DE COMPARAR AÑOS (VERIFICADO EN PRODUCCIÓN):\n" .
             "El sistema empezó a usarse de verdad en MAYO DE 2025. Los meses anteriores están casi vacíos porque nadie cargaba datos todavía, NO porque no hubiera negocio:\n" .
             "   2025-02: 300 kg (1 OC) · 2025-03: 137 kg (1 OC) · 2025-04: 375 kg (3 OCs)   ← ene-abr 2025 = 812 kg en 5 OCs: pruebas\n" .
