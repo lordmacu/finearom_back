@@ -89,6 +89,29 @@ class VannaHarvestTest extends TestCase
         }
     }
 
+    public function test_harvest_extracts_sql_from_json_content(): void
+    {
+        $user = User::factory()->create();
+        ChatSession::create([
+            'user_id'      => $user->id,
+            'thread_id'    => 'test-thread-json',
+            'period_label' => 'Julio 2026',
+            'period_start' => '2026-07-01',
+            'period_end'   => '2026-07-31',
+            'messages' => [
+                ['role' => 'user', 'content' => 'cuantos clientes hay'],
+                ['role' => 'assistant', 'content' => '{"html":"<p>x</p>","sql":"SELECT COUNT(*) FROM clients"}'],
+            ],
+        ]);
+
+        $this->artisan('vanna:harvest')->assertExitCode(0);
+
+        $path = base_path('training/qsql-harvested.json');
+        $pairs = json_decode(file_get_contents($path), true);
+        $sqls = array_column($pairs, 'sql');
+        $this->assertContains('SELECT COUNT(*) FROM clients', $sqls, 'debe extraer el SQL cuando content es un JSON con clave sql');
+    }
+
     public function test_harvest_discards_unsafe_delete_statement(): void
     {
         $user = User::factory()->create();

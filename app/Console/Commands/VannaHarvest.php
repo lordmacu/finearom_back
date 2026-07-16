@@ -66,9 +66,16 @@ class VannaHarvest extends Command
 
     private function extractSql(string $content): ?string
     {
-        // El historial real de chat guarda el SQL como HTML (lo que emite
-        // MonthlyReportController::parseStructuredResponse() para el frontend),
-        // así que se intenta primero ese formato y se cae al markdown como respaldo.
+        // La mayoría de mensajes reales del chat guardan el content como un
+        // objeto JSON con clave "sql" explícita (ej. {"html": "...", "sql": "..."}),
+        // así que se intenta primero ese formato. Si falla o no trae "sql" usable,
+        // se cae al HTML (lo que emite MonthlyReportController::parseStructuredResponse()
+        // para el frontend) y finalmente al markdown como último respaldo.
+        $decoded = json_decode($content, true);
+        if (is_array($decoded) && !empty($decoded['sql']) && is_string($decoded['sql'])) {
+            return trim(html_entity_decode($decoded['sql'], ENT_QUOTES | ENT_HTML5));
+        }
+
         if (preg_match('/<code[^>]*class="[^"]*language-sql[^"]*"[^>]*>(.+?)<\/code>/is', $content, $m)) {
             $sql = $m[1];
         } elseif (preg_match('/```sql\s*(.+?)```/is', $content, $m)) {
