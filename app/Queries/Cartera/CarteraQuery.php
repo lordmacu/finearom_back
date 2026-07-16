@@ -66,7 +66,6 @@ class CarteraQuery
      */
     public function clients(Carbon $from, Carbon $to, array $filters): array
     {
-        $snapshotDate = $this->latestSnapshotDate($filters['catera_type'] ?? null);
         $today = Carbon::now('America/Bogota')->toDateString();
 
         $query = DB::table('cartera as car')
@@ -75,7 +74,7 @@ class CarteraQuery
                 $join->on('r.numero_factura', '=', 'car.documento')
                     ->whereBetween('r.fecha_recaudo', [$from->toDateString(), $to->toDateString()]);
             })
-            ->where('car.fecha_cartera', '=', $snapshotDate)
+            ->whereRaw($this->latestSnapshotPerNitClause($filters['catera_type'] ?? null))
             ->select(
                 'c.id as client_id',
                 'c.client_name',
@@ -260,7 +259,7 @@ class CarteraQuery
     {
         $query = DB::table('cartera as car')
             ->leftJoin('clients as c', 'car.nit', '=', 'c.nit')
-            ->where('car.fecha_cartera', '=', $snapshotDate);
+            ->whereRaw($this->latestSnapshotPerNitClause($filters['catera_type'] ?? null));
 
         if ($overdueOnly) {
             $today = Carbon::now('America/Bogota')->toDateString();
@@ -308,7 +307,7 @@ class CarteraQuery
         $query = DB::table('cartera as car')
             ->leftJoin('clients as c', 'car.nit', '=', 'c.nit')
             ->leftJoin('recaudos as r', 'r.numero_factura', '=', 'car.documento')
-            ->where('car.fecha_cartera', '=', $snapshotDate);
+            ->whereRaw($this->latestSnapshotPerNitClause($filters['catera_type'] ?? null));
 
         if ($overdueOnly) {
             $today = Carbon::now('America/Bogota')->toDateString();
@@ -359,7 +358,7 @@ class CarteraQuery
     {
         $query = DB::table('cartera as car')
             ->leftJoin('clients as c', 'car.nit', '=', 'c.nit')
-            ->where('car.fecha_cartera', '=', $snapshotDate)
+            ->whereRaw($this->latestSnapshotPerNitClause($filters['catera_type'] ?? null))
             ->where(function ($q) {
                 $q->whereNull('car.dias')->orWhere('car.dias', '>=', 0);
             });
@@ -466,6 +465,27 @@ class CarteraQuery
 
         $row = $query->first();
         return (float) ($row->total_projected ?? 0);
+    }
+
+    /**
+     * Cláusula SQL para el snapshot MÁS RECIENTE POR NIT (correlacionado).
+     *
+     * Los snapshots de `cartera` se ingieren en fechas distintas y alternan entre
+     * completos y parciales, por lo que NINGÚN corte global tiene a todos los clientes.
+     * El único patrón que ve a los ~104 clientes es correlacionar el snapshot por nit:
+     * cada nit usa su propio MAX(fecha_cartera) (respetando el filtro de catera_type).
+     */
+    private function latestSnapshotPerNitClause(?string $cateraType): string
+    {
+        if ($cateraType === 'internacional') {
+            return "car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit AND c2.catera_type = 'internacional')";
+        }
+
+        if ($cateraType === 'nacional') {
+            return "car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit AND (c2.catera_type IS NULL OR c2.catera_type = 'nacional'))";
+        }
+
+        return "car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)";
     }
 
     public function latestSnapshotDate(?string $cateraType): string

@@ -1379,10 +1379,14 @@ GROUP BY e.id, e.name
 ORDER BY cumplimiento_pct DESC;
 
 ─── D. CARTERA Y RECAUDOS ─────────────────────────────────────────────────
-# ⚠ CRÍTICO — La tabla `cartera` guarda múltiples SNAPSHOTS por fecha (~77 fechas históricas).
-# SIEMPRE filtra `car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)` para usar
-# el último snapshot disponible. Sin este filtro, el SUM se infla a través de toda la historia.
-# Si el usuario pide un snapshot específico, usa `car.fecha_cartera = 'YYYY-MM-DD'`.
+# ⚠ CRÍTICO — La tabla `cartera` guarda múltiples SNAPSHOTS por fecha. Los cortes se ingieren
+# en fechas distintas y ALTERNAN entre completos (~34-35 nits) y parciales (1-6 nits), por lo
+# que NINGÚN corte global tiene a todos los clientes: el MAX(fecha_cartera) GLOBAL suele cubrir
+# solo 1-2 nits. Por eso el snapshot correcto es el MÁS RECIENTE POR NIT (correlacionado):
+#   SIEMPRE filtra `car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)`
+# Ese es el ÚNICO patrón que ve a los ~104 clientes. NUNCA uses el MAX global para "cartera más
+# reciente por cliente" — devuelve resultados casi vacíos. Si el usuario pide un snapshot específico,
+# usa `car.fecha_cartera = 'YYYY-MM-DD'`.
 
 # 19. Cartera vencida por cliente (con detalle de factura) — usa snapshot más reciente
 # IMPORTANTE: cartera.saldo_vencido es VARCHAR — usar (col + 0) para sumas y comparaciones.
@@ -1390,7 +1394,7 @@ SELECT car.nit, car.nombre_empresa, car.documento, car.fecha, car.vence,
        car.dias, (car.saldo_vencido + 0) AS saldo_vencido_usd,
        car.nombre_vendedor
 FROM cartera car
-WHERE car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)
   AND (car.saldo_vencido + 0) > 0
 ORDER BY (car.saldo_vencido + 0) DESC;
 
@@ -1400,7 +1404,7 @@ SELECT c.executive AS ejecutiva_email,
        SUM(car.saldo_vencido + 0) AS saldo_vencido_total_usd
 FROM cartera car
 JOIN clients c ON c.nit = car.nit
-WHERE car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)
   AND (car.saldo_vencido + 0) > 0
 GROUP BY c.executive
 ORDER BY saldo_vencido_total_usd DESC;
@@ -1454,14 +1458,14 @@ SELECT
   SUM(CASE WHEN car.dias BETWEEN 61 AND 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS de_61_a_90,
   SUM(CASE WHEN car.dias > 90 THEN (car.saldo_vencido + 0) ELSE 0 END) AS mayor_90
 FROM cartera car
-WHERE car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera);
+WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit);
 
 # 24. Estado consolidado del cliente (cartera + recaudos del mes) — snapshot reciente
 WITH cart AS (
-  SELECT nit, SUM(saldo_vencido + 0) AS vencido_usd, SUM(saldo_contable + 0) AS contable_usd
-  FROM cartera
-  WHERE fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
-  GROUP BY nit
+  SELECT car.nit, SUM(car.saldo_vencido + 0) AS vencido_usd, SUM(car.saldo_contable + 0) AS contable_usd
+  FROM cartera car
+  WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)
+  GROUP BY car.nit
 ),
 rec_mes AS (
   SELECT CAST(nit AS CHAR) AS nit_char, SUM(valor_cancelado) AS recaudado_mes_cop
@@ -1671,7 +1675,7 @@ SELECT car.nit, car.nombre_empresa, car.documento, car.vence,
        DATEDIFF(car.vence, CURDATE()) AS dias_hasta_vencimiento,
        CAST(car.saldo_contable AS DECIMAL(15,2)) AS saldo_a_recaudar_cop
 FROM cartera car
-WHERE car.fecha_cartera = (SELECT MAX(fecha_cartera) FROM cartera)
+WHERE car.fecha_cartera = (SELECT MAX(c2.fecha_cartera) FROM cartera c2 WHERE c2.nit = car.nit)
   AND car.vence BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
   AND CAST(car.saldo_contable AS DECIMAL(15,2)) > 0
 ORDER BY car.vence ASC, saldo_a_recaudar_cop DESC;
