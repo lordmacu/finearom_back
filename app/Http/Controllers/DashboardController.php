@@ -60,6 +60,7 @@ class DashboardController extends Controller
                 ->leftJoin('partials as pt', function($join) use ($startDate, $endDate) {
                     $join->on('pt.product_order_id', '=', 'pop.id')
                         ->where('pt.type', '=', 'real')
+                        ->whereNull('pt.deleted_at')
                         ->whereNotNull('pt.dispatch_date')
                         ->whereBetween('pt.dispatch_date', [$startDate, $endDate]);
                 })
@@ -129,6 +130,7 @@ class DashboardController extends Controller
                 ->leftJoin('trm_daily', 'partials.dispatch_date', '=', 'trm_daily.date')
                 ->where('po.client_id', $client->id)
                 ->where('partials.type', 'real')
+                ->whereNull('partials.deleted_at')
                 ->whereNotNull('partials.dispatch_date')
                 ->whereBetween('partials.dispatch_date', [$startDate, $endDate])
                 ->select('partials.quantity',
@@ -835,6 +837,7 @@ class DashboardController extends Controller
                 ->join('purchase_order_product as pop', 'partials.product_order_id', '=', 'pop.id')
                 ->join('products as p', 'pop.product_id', '=', 'p.id')
                 ->where('partials.type', 'real')
+                ->whereNull('partials.deleted_at')
                 ->whereNotNull('partials.dispatch_date')
                 ->whereBetween('partials.dispatch_date', [$startDate, $endDate])
                 ->where('pop.muestra', 0)
@@ -1037,6 +1040,7 @@ class DashboardController extends Controller
                     ->from('partials as pt')
                     ->whereColumn('pt.product_order_id', 'pop.id')
                     ->where('pt.type', 'real')
+                    ->whereNull('pt.deleted_at')
                     ->whereNotNull('pt.dispatch_date')
                     ->whereBetween('pt.dispatch_date', [$startDate, $endDate]);
             })
