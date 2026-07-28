@@ -807,12 +807,17 @@ class MonthlyReportController extends Controller
             "- \"New Win rate\" = new_win_orders / total_orders_creadas × 100\n" .
             "- \"New Win (nivel línea)\" = COUNT(DISTINCT CASE WHEN pop.new_win=1 THEN pop.id END)\n" .
             "  ⚠ LOS DOS FLAGS NO COINCIDEN (VERIFICADO 2026-07-28): 203 OCs tienen al menos una línea pop.new_win=1, pero solo 127 tienen po.is_new_win=1 → 77 OCs con línea marcada y la orden sin marcar. NO son intercambiables ni sumables. Si el usuario pide 'new win' sin aclarar el nivel, usa el de LÍNEA (pop.new_win) porque es el que Francy marca producto por producto, y DI en el texto cuál usaste y cuántas OCs da el otro. Nunca presentes un número de new win sin decir de qué nivel es.\n" .
-            "⚠⚠ products SIEMPRE CON LEFT JOIN — NUNCA INNER JOIN (VERIFICADO EN PRODUCCIÓN 2026-07-28):\n" .
+            "⚠⚠ products: LEFT JOIN **+ COALESCE OBLIGATORIO** — LAS DOS COSAS, NO UNA (VERIFICADO EN PRODUCCIÓN 2026-07-28):\n" .
             "Hay líneas de purchase_order_product cuyo product_id ya NO existe en products (el producto se borró del catálogo, pero la línea de la OC histórica sigue ahí). 51 de ellas tienen new_win=1.\n" .
-            "Un 'JOIN products' las BORRA DEL RESULTADO SIN AVISAR. Caso real: un informe de new win perdió 31 de 391 filas (8%) y el usuario nunca supo que faltaban.\n" .
-            "→ SIEMPRE: LEFT JOIN products p ON p.id = pop.product_id, y en el SELECT protege cada columna:\n" .
-            "    COALESCE(p.product_name, '(producto borrado del catálogo)') AS referencia,\n" .
-            "    COALESCE(p.code, CONCAT('[eliminado #', pop.product_id, ']')) AS codigo\n" .
+            "Son DOS errores distintos y hay que evitar los dos:\n" .
+            "  ✗ ERROR 1 — 'JOIN products' (INNER): borra esas filas del resultado SIN AVISAR. Caso real: un informe de new win perdió 31 de 391 filas (8%) y el usuario nunca supo que faltaban.\n" .
+            "  ✗ ERROR 2 — LEFT JOIN pero con 'p.product_name' y 'p.code' pelados en el SELECT: las filas aparecen pero con la referencia y el código EN BLANCO. Caso real: las 31 filas volvieron al Excel como celdas vacías, imposible saber de qué producto hablaban. Un LEFT JOIN sin COALESCE está INCOMPLETO.\n" .
+            "  ✓ CORRECTO — LEFT JOIN y ADEMÁS proteger CADA columna de products en el SELECT:\n" .
+            "      LEFT JOIN products p ON p.id = pop.product_id\n" .
+            "      COALESCE(p.product_name, CONCAT('(producto eliminado del catálogo #', pop.product_id, ')')) AS referencia,\n" .
+            "      COALESCE(p.code, CONCAT('[eliminado #', pop.product_id, ']')) AS codigo\n" .
+            "→ REGLA MECÁNICA: si escribes 'LEFT JOIN products', entonces NINGUNA columna p.* puede ir sola en el SELECT. Toda p.<columna> va envuelta en COALESCE con un texto que incluya pop.product_id. Revisa tu SELECT antes de entregar la query.\n" .
+            "→ OJO CON EL PRECIO: en las filas huérfanas p.price es NULL, así que COALESCE(NULLIF(pop.price,0), p.price, 0) devuelve 0 y en el Excel se lee como 'producto gratis'. Si pop.price también es 0, el precio real es IRRECUPERABLE: usa NULL en vez de 0 y adviértelo en el texto. Patrón: COALESCE(NULLIF(pop.price,0), p.price) — sin el ', 0' final, para que salga vacío y no un cero falso.\n" .
             "→ Lo mismo aplica a cualquier reporte de detalle de líneas de OC, no solo new win. Para clients sí puedes usar INNER JOIN: no hay OCs con cliente huérfano.\n" .
             "- \"Días de atraso vs fecha estimada\" = GREATEST(DATEDIFF(CURDATE(), fecha_estimada), 0) — SIEMPRE usar GREATEST para evitar valores negativos cuando la fecha estimada es futura\n" .
             "- \"Muestra (nivel OC)\" = po.is_muestra=1 → toda la OC es muestra (excluir de totales)\n" .
@@ -2076,13 +2081,15 @@ ORDER BY pph.effective_date;
 # pop.new_win = ese producto específico es nuevo para ese cliente.
 # ⚠ ANOMALÍA DE DATOS: hay ~299 pops con new_win=1 pero new_win_date IS NULL (carga histórica).
 # Usa COALESCE(pop.new_win_date, po.order_creation_date) para no excluirlos del filtro de fecha.
-# ⚠⚠ products SIEMPRE con LEFT JOIN (VERIFICADO EN PRODUCCIÓN 2026-07-28): 51 líneas con new_win=1
-# apuntan a un product_id que ya NO existe en products. Con INNER JOIN desaparecen EN SILENCIO
-# (en un informe real al usuario se perdieron 31 de 391 filas = 8% sin ningún aviso).
-# Con LEFT JOIN + COALESCE quedan visibles y marcadas como producto borrado del catálogo.
+# ⚠⚠ products con LEFT JOIN **Y COALESCE EN CADA COLUMNA p.*** (VERIFICADO EN PRODUCCIÓN 2026-07-28):
+# 51 líneas con new_win=1 apuntan a un product_id que ya NO existe en products.
+#   - Con INNER JOIN desaparecen EN SILENCIO (un informe real perdió 31 de 391 filas = 8%).
+#   - Con LEFT JOIN pero p.product_name pelado, vuelven pero con la referencia EN BLANCO (mismo informe: 31 celdas vacías).
+# Hay que hacer LAS DOS COSAS. Y el precio: sin el ', 0' final para no mostrar un 0 falso como si fuera gratis.
 SELECT c.client_name,
-       COALESCE(p.code, CONCAT('[eliminado #', pop.product_id, ']')) AS code,
-       COALESCE(p.product_name, '(producto borrado del catálogo)')   AS product_name,
+       COALESCE(p.code, CONCAT('[eliminado #', pop.product_id, ']'))                          AS code,
+       COALESCE(p.product_name, CONCAT('(producto eliminado del catálogo #', pop.product_id, ')')) AS product_name,
+       COALESCE(NULLIF(pop.price, 0), p.price) AS precio_usd_kg,  -- NULL si es irrecuperable, no 0
        pop.quantity AS kilos,
        COALESCE(pop.new_win_date, po.order_creation_date) AS fecha_new_win,
        po.order_consecutive
