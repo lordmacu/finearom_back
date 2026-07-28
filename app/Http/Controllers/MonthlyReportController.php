@@ -695,13 +695,20 @@ class MonthlyReportController extends Controller
             "→ Si el usuario nombra una categoría que NO existe (ej. 'body care'), DÍSELO explícitamente en vez de ignorarla en silencio.\n" .
             "→ products.categories es JSON, pero ningún producto tiene más de una categoría: JSON_UNQUOTE(JSON_EXTRACT(p.categories,'$[0]')) es seguro.\n" .
             "\n" .
-            "⚠⚠⚠ HASTA DÓNDE LLEGA LA HISTORIA — LEE ESTO ANTES DE COMPARAR AÑOS (VERIFICADO EN PRODUCCIÓN):\n" .
-            "El sistema empezó a usarse de verdad en MAYO DE 2025. Los meses anteriores están casi vacíos porque nadie cargaba datos todavía, NO porque no hubiera negocio:\n" .
-            "   2025-02: 300 kg (1 OC) · 2025-03: 137 kg (1 OC) · 2025-04: 375 kg (3 OCs)   ← ene-abr 2025 = 812 kg en 5 OCs: pruebas\n" .
-            "   2025-05: 10.709 kg (60 OCs, 32 clientes)   ← aquí arranca la operación real\n" .
-            "→ REGLA: NUNCA presentes una comparación contra ene-abr 2025 como si fuera crecimiento comercial. Un '+490%' contra ese período mide la ADOPCIÓN DEL SISTEMA, no las ventas.\n" .
-            "→ CASO REAL: 'primer semestre 2026 vs primer semestre 2025 por ejecutiva' da +326%/+461%/+396%/+490%. Es FALSO como lectura de negocio: 2025-H1 = 16.967 kg (y 16.155 de esos son solo mayo+junio) contra 2025-H2 = 93.416 kg. Comparado contra un período comparable (2026-H1 = 88.887 kg vs 2025-H2 = 93.416 kg) el negocio está PLANO (-5%), no creciendo 5x.\n" .
-            "→ QUÉ HACER: si el usuario pide una comparación que toca ene-abr 2025, PUEDES darle el dato, pero AVISA en el texto (no en el SQL) que ese período no es comparable porque el sistema arrancó en mayo 2025, y ofrece la alternativa: comparar desde mayo 2025 en adelante, o 12 meses móviles. Si la comparación es de mayo 2025 en adelante, no hay problema y no hace falta advertir nada.\n" .
+            "⚠⚠⚠ HASTA DÓNDE LLEGA LA HISTORIA — LEE ESTO ANTES DE ADVERTIR QUE FALTAN DATOS (VERIFICADO EN PRODUCCIÓN 2026-07-28):\n" .
+            "Hay DOS fechas de arranque DISTINTAS según de dónde salga la métrica. No las mezcles y no apliques la advertencia donde no toca:\n" .
+            "  (1) LADO ÓRDENES (purchase_orders / purchase_order_product): datos COMPLETOS y con volumen normal desde 2024-10-01.\n" .
+            "      OCs creadas por mes: 2024-10=74 · 2024-11=134 · 2024-12=74 · 2025-01=83 · 2025-02=111 · 2025-03=133 · 2025-04=97 · 2025-05=78 · 2025-06=71.\n" .
+            "      Totales: 2024=282 OCs · 2025=1.188 · 2026=626 (a julio). Todas con líneas de producto y kilos (2024-11 = 33.489 kg pedidos, el mes más alto del histórico).\n" .
+            "      → Si la métrica sale de OCs creadas, líneas, kg pedidos, precios, clientes, new_win o muestras: NO ADVIERTAS NADA. Los datos están completos desde octubre 2024.\n" .
+            "      → PROHIBIDO decir 'el sistema no tiene datos de órdenes de 2024', 'los registros empiezan en mayo 2025' o 'el sistema empezó a operar en mayo de 2025'. Es FALSO, contradice los datos que tú mismo devuelves, y ya se le reportó como error grave al usuario.\n" .
+            "  (2) LADO DESPACHOS (partials, type='real' y 'temporal'): el REGISTRO de despachos arrancó el 2025-03-17, con rampa en los primeros meses.\n" .
+            "      Partials reales creados por mes: 2025-03=150 · 2025-04=262 · 2025-05=318 · 2025-06=289 · 2025-07=286.\n" .
+            "      → Consecuencia: hay ~5,5 meses de OCs (oct 2024 – mar 2025) que existen y tienen kilos pedidos, pero SIN despachos cargados. No es que no hubiera negocio ni que el sistema no se usara: es que ese módulo entró después.\n" .
+            "      → SOLO aquí adviertes, y con la razón CORRECTA: 'el registro de despachos arrancó en marzo 2025, así que las OCs anteriores a esa fecha no tienen despachos cargados en el sistema'.\n" .
+            "→ REGLA DE COMPARACIÓN DE AÑOS: toda métrica basada en partials (facturado, despachado, kg reales, cumplimiento, on-time, TRM de despacho) solo es comparable de 2025-04 en adelante. Si el usuario pide comparar contra oct 2024 – mar 2025 en una métrica de DESPACHO, dale el dato pero avisa en el TEXTO (nunca en el SQL) que ese período no tiene despachos cargados, y ofrece la alternativa: comparar desde abril 2025, o 12 meses móviles.\n" .
+            "→ Si la métrica es de ORDEN y no de despacho, no hace falta advertir nada en ningún período.\n" .
+            "→ ANTES DE ESCRIBIR CUALQUIER ADVERTENCIA SOBRE FALTA DE DATOS: mira las filas que devolvió tu propia query. Si trae filas de un período, ese período TIENE datos — no digas que está vacío. Nunca inventes una fecha de arranque que no esté en este bloque.\n" .
             "FRANCY (pedidos): crea la OC → status='pending'. Marca is_muestra (orden sin costo) y is_new_win (cliente/producto nuevo).\n" .
             "MARLON (logística): revisa pending → agrega observaciones (new_observation=email al cliente, internal_observation=nota interna) → pone fechas estimadas de despacho por producto (partials type='temporal') → OC pasa a status='processing'. OC processing >7 días sin despachar = REZAGADA.\n" .
             "ALEXA (facturación/despacho): cuando la mercancía sale físicamente registra despachos reales → crea partials type='real' (dispatch_date, invoice_number, tracking_number, transporter, trm, quantity) → OC pasa a 'parcial_status' (despachó parte) o 'completed' (despachó todo). Una OC puede tener múltiples partials type='real' en cuotas.\n" .
@@ -799,6 +806,14 @@ class MonthlyReportController extends Controller
             "- \"New Win (nivel OC)\" = COUNT(DISTINCT CASE WHEN po.is_new_win=1 THEN po.id END) — NUNCA SUM(is_new_win) sin DISTINCT, contaría líneas no órdenes\n" .
             "- \"New Win rate\" = new_win_orders / total_orders_creadas × 100\n" .
             "- \"New Win (nivel línea)\" = COUNT(DISTINCT CASE WHEN pop.new_win=1 THEN pop.id END)\n" .
+            "  ⚠ LOS DOS FLAGS NO COINCIDEN (VERIFICADO 2026-07-28): 203 OCs tienen al menos una línea pop.new_win=1, pero solo 127 tienen po.is_new_win=1 → 77 OCs con línea marcada y la orden sin marcar. NO son intercambiables ni sumables. Si el usuario pide 'new win' sin aclarar el nivel, usa el de LÍNEA (pop.new_win) porque es el que Francy marca producto por producto, y DI en el texto cuál usaste y cuántas OCs da el otro. Nunca presentes un número de new win sin decir de qué nivel es.\n" .
+            "⚠⚠ products SIEMPRE CON LEFT JOIN — NUNCA INNER JOIN (VERIFICADO EN PRODUCCIÓN 2026-07-28):\n" .
+            "Hay líneas de purchase_order_product cuyo product_id ya NO existe en products (el producto se borró del catálogo, pero la línea de la OC histórica sigue ahí). 51 de ellas tienen new_win=1.\n" .
+            "Un 'JOIN products' las BORRA DEL RESULTADO SIN AVISAR. Caso real: un informe de new win perdió 31 de 391 filas (8%) y el usuario nunca supo que faltaban.\n" .
+            "→ SIEMPRE: LEFT JOIN products p ON p.id = pop.product_id, y en el SELECT protege cada columna:\n" .
+            "    COALESCE(p.product_name, '(producto borrado del catálogo)') AS referencia,\n" .
+            "    COALESCE(p.code, CONCAT('[eliminado #', pop.product_id, ']')) AS codigo\n" .
+            "→ Lo mismo aplica a cualquier reporte de detalle de líneas de OC, no solo new win. Para clients sí puedes usar INNER JOIN: no hay OCs con cliente huérfano.\n" .
             "- \"Días de atraso vs fecha estimada\" = GREATEST(DATEDIFF(CURDATE(), fecha_estimada), 0) — SIEMPRE usar GREATEST para evitar valores negativos cuando la fecha estimada es futura\n" .
             "- \"Muestra (nivel OC)\" = po.is_muestra=1 → toda la OC es muestra (excluir de totales)\n" .
             "- \"Muestra (nivel línea)\" = pop.muestra=1 → solo esa línea es muestra (excluir esa línea de totales)\n" .
@@ -2061,14 +2076,20 @@ ORDER BY pph.effective_date;
 # pop.new_win = ese producto específico es nuevo para ese cliente.
 # ⚠ ANOMALÍA DE DATOS: hay ~299 pops con new_win=1 pero new_win_date IS NULL (carga histórica).
 # Usa COALESCE(pop.new_win_date, po.order_creation_date) para no excluirlos del filtro de fecha.
-SELECT c.client_name, p.code, p.product_name,
+# ⚠⚠ products SIEMPRE con LEFT JOIN (VERIFICADO EN PRODUCCIÓN 2026-07-28): 51 líneas con new_win=1
+# apuntan a un product_id que ya NO existe en products. Con INNER JOIN desaparecen EN SILENCIO
+# (en un informe real al usuario se perdieron 31 de 391 filas = 8% sin ningún aviso).
+# Con LEFT JOIN + COALESCE quedan visibles y marcadas como producto borrado del catálogo.
+SELECT c.client_name,
+       COALESCE(p.code, CONCAT('[eliminado #', pop.product_id, ']')) AS code,
+       COALESCE(p.product_name, '(producto borrado del catálogo)')   AS product_name,
        pop.quantity AS kilos,
        COALESCE(pop.new_win_date, po.order_creation_date) AS fecha_new_win,
        po.order_consecutive
 FROM purchase_order_product pop
 JOIN purchase_orders po ON po.id = pop.purchase_order_id AND po.status != 'cancelled'
 JOIN clients c ON c.id = po.client_id
-JOIN products p ON p.id = pop.product_id
+LEFT JOIN products p ON p.id = pop.product_id
 WHERE pop.new_win = 1 AND pop.muestra = 0
   AND COALESCE(pop.new_win_date, po.order_creation_date) BETWEEN '2026-05-01' AND '2026-05-31'
 ORDER BY COALESCE(pop.new_win_date, po.order_creation_date) DESC;
