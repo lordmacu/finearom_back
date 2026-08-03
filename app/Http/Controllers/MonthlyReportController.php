@@ -773,14 +773,14 @@ class MonthlyReportController extends Controller
             "- \"Valor COP\" = valor_usd × TRM_normalizada. Cascada: partial.trm → po.trm → trm_daily → 4000\n" .
             "  → El +0 es necesario porque trm es string en MariaDB\n" .
             "  → ⚠ NORMALIZACIÓN TRM OBLIGATORIA: algunos partials tienen trm almacenada ×100 (ej: 370005 en lugar de 3700.05). SIEMPRE validar rango:\n" .
-            "     CASE WHEN NULLIF(par.trm+0,0) BETWEEN 2900 AND 10000 THEN NULLIF(par.trm+0,0)\n" .
+            "     CASE WHEN NULLIF(par.trm+0,0) BETWEEN 2500 AND 10000 THEN NULLIF(par.trm+0,0)\n" .
             "          WHEN NULLIF(par.trm+0,0) > 10000 THEN NULLIF(par.trm+0,0)/100\n" .
             "          ELSE NULL END\n" .
             "     Aplicar el mismo patrón a po.trm. Fallback final: trm_daily → 4000\n" .
             "  → ⚠⚠ CRÍTICO ONLY_FULL_GROUP_BY + TRM diaria: la subconsulta correlacionada a trm_daily (…WHERE td.date <= par.dispatch_date…) referencia par.dispatch_date. Si la dejas DENTRO de un SUM()/agregado en una query que tiene GROUP BY, MariaDB lanza error 1055 'dispatch_date isn't in GROUP BY' (es un FALSO POSITIVO del analizador: la cascada es correcta, pero MariaDB no la acepta a través del borde de la subconsulta).\n" .
             "     SOLUCIÓN OBLIGATORIA cuando la query AGRUPA (GROUP BY por cliente / ejecutiva / producto / mes): calcula valor_usd y valor_cop POR FILA en una subconsulta derivada SIN GROUP BY, y haz el SUM + GROUP BY en la consulta EXTERNA. NUNCA pongas la subconsulta a trm_daily con par.dispatch_date dentro de un SUM agrupado.\n" .
             "  ⚠⚠ NORMALIZA **CUALQUIER** COLUMNA DE TRM, SIEMPRE — no solo par.trm: aplica IGUAL a po.trm y a cualquier trm que leas de una tabla. La regla es de la COLUMNA, no del contexto:\n" .
-            "       NULLIF(CASE WHEN (<x>.trm + 0) BETWEEN 2900 AND 10000 THEN (<x>.trm + 0) WHEN (<x>.trm + 0) > 10000 THEN (<x>.trm + 0) / 100 ELSE NULL END, 0)\n" .
+            "       NULLIF(CASE WHEN (<x>.trm + 0) BETWEEN 2500 AND 10000 THEN (<x>.trm + 0) WHEN (<x>.trm + 0) > 10000 THEN (<x>.trm + 0) / 100 ELSE NULL END, 0)\n" .
             "     ✗ NUNCA `COALESCE(NULLIF(po.trm+0, 0), ...)` a secas: NULLIF solo descarta el CERO, así que una TRM imposible pasa tal cual. VERIFICADO en producción: hay 5 OCs con trm de 401,25 / 423,35 / 2.056,31 — con NULLIF a secas esas órdenes calcularían el COP ~10 veces por debajo, en silencio. El CASE las manda a NULL y la cascada cae al trm_daily, que es la estimación correcta.\n" .
             "     Esto importa sobre todo en preguntas de ÓRDENES CREADAS (no de despachos): ahí no hay partials, se usa po.trm directo, y es donde más fácil se olvida el CASE.\n" .
             "  ⚠ po.trm es la TRM PACTADA en la orden, NO la del mercado de ese día (VERIFICADO: solo el 12% coincide con trm_daily; el 43% se aparta más de 50 pesos, hasta 765). Por eso NO se reemplaza ni se 'corrige' con trm_daily cuando es un valor válido: solo se descarta cuando es imposible.\n" .
@@ -790,9 +790,9 @@ class MonthlyReportController extends Controller
             "         SELECT c.client_name AS cliente, c.nit AS nit, par.quantity AS kilos,\n" .
             "           par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) AS valor_usd,\n" .
             "           par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(\n" .
-            "             NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2900 AND 10000 THEN (par.trm + 0) WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100 ELSE NULL END, 0),\n" .
-            "             NULLIF(CASE WHEN (po.trm + 0) BETWEEN 2900 AND 10000 THEN (po.trm + 0) WHEN (po.trm + 0) > 10000 THEN (po.trm + 0) / 100 ELSE NULL END, 0),\n" .
-            "             (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2900 ORDER BY td.date DESC LIMIT 1), 4000) AS valor_cop\n" .
+            "             NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2500 AND 10000 THEN (par.trm + 0) WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100 ELSE NULL END, 0),\n" .
+            "             NULLIF(CASE WHEN (po.trm + 0) BETWEEN 2500 AND 10000 THEN (po.trm + 0) WHEN (po.trm + 0) > 10000 THEN (po.trm + 0) / 100 ELSE NULL END, 0),\n" .
+            "             (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2500 ORDER BY td.date DESC LIMIT 1), 4000) AS valor_cop\n" .
             "         FROM partials par\n" .
             "         JOIN purchase_order_product pop ON pop.id = par.product_order_id AND pop.muestra = 0\n" .
             "         JOIN products p ON p.id = pop.product_id\n" .
@@ -1261,17 +1261,17 @@ SELECT par.dispatch_date, c.client_name, p.code, p.product_name,
        par.quantity AS kilos, pop.price AS precio_usd,
        (par.quantity * pop.price) AS valor_usd,
        COALESCE(
-         NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2900 AND 10000 THEN (par.trm + 0)
+         NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2500 AND 10000 THEN (par.trm + 0)
                      WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
                      ELSE NULL END, 0),
-         (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2900 ORDER BY td.date DESC LIMIT 1),
+         (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2500 ORDER BY td.date DESC LIMIT 1),
          4000
        ) AS trm_eff,
        par.quantity * pop.price * COALESCE(
-         NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2900 AND 10000 THEN (par.trm + 0)
+         NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2500 AND 10000 THEN (par.trm + 0)
                      WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
                      ELSE NULL END, 0),
-         (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2900 ORDER BY td.date DESC LIMIT 1),
+         (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2500 ORDER BY td.date DESC LIMIT 1),
          4000
        ) AS valor_cop
 FROM partials par
@@ -1289,10 +1289,10 @@ SELECT MONTH(par.dispatch_date) AS mes_num,
        SUM(par.quantity) AS kilos,
        SUM(par.quantity * pop.price) AS valor_usd,
        SUM(par.quantity * pop.price * COALESCE(
-         NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2900 AND 10000 THEN (par.trm + 0)
+         NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2500 AND 10000 THEN (par.trm + 0)
                      WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
                      ELSE NULL END, 0),
-         (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2900 ORDER BY td.date DESC LIMIT 1),
+         (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2500 ORDER BY td.date DESC LIMIT 1),
          4000
        )) AS valor_cop
 FROM partials par
@@ -1531,10 +1531,10 @@ ORDER BY r.fecha_recaudo DESC;
 # Nota: recaudos.nit es BIGINT — usar CAST(... AS CHAR) para cruzar con clients.nit VARCHAR.
 WITH facturado AS (
   SELECT c.nit, SUM(par.quantity * pop.price * COALESCE(
-    NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2900 AND 10000 THEN (par.trm + 0)
+    NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2500 AND 10000 THEN (par.trm + 0)
                 WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
                 ELSE NULL END, 0),
-    (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2900 ORDER BY td.date DESC LIMIT 1),
+    (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2500 ORDER BY td.date DESC LIMIT 1),
     4000
   )) AS facturado_cop
   FROM partials par
@@ -1803,10 +1803,10 @@ WITH ventas_periodo AS (
   SELECT c.id AS client_id, c.client_name,
          YEAR(par.dispatch_date) AS anio,
          SUM(par.quantity * COALESCE(NULLIF(pop.price,0), p.price, 0) * COALESCE(
-           NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2900 AND 10000 THEN (par.trm + 0)
+           NULLIF(CASE WHEN (par.trm + 0) BETWEEN 2500 AND 10000 THEN (par.trm + 0)
                        WHEN (par.trm + 0) > 10000 THEN (par.trm + 0) / 100
                        ELSE NULL END, 0),
-           (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2900 ORDER BY td.date DESC LIMIT 1),
+           (SELECT td.value FROM trm_daily td WHERE td.date <= par.dispatch_date AND td.value >= 2500 ORDER BY td.date DESC LIMIT 1),
            4000
          )) AS valor_cop
   FROM partials par
@@ -3634,7 +3634,7 @@ PROMPT;
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pt.quantity *
                     (CASE
-                        WHEN pt.trm >= 2900 THEN pt.trm
+                        WHEN pt.trm >= 2500 THEN pt.trm
                         WHEN td.value IS NOT NULL THEN td.value
                         ELSE 4000
                     END)
@@ -3714,11 +3714,11 @@ PROMPT;
             if (!$isSample) {
                 $price = ($first->order_product_price > 0) ? $first->order_product_price : ($first->product_price ?? 0);
                 $trm   = 4000.0;
-                if ($realPartial && !empty($partialTrm) && $partialTrm >= 2900) {
+                if ($realPartial && !empty($partialTrm) && $partialTrm >= 2500) {
                     $trm = (float) $partialTrm;
                 } elseif (isset($trmData[$plannedDate])) {
                     $trm = (float) $trmData[$plannedDate];
-                } elseif (!empty($first->order_trm) && $first->order_trm >= 2900) {
+                } elseif (!empty($first->order_trm) && $first->order_trm >= 2500) {
                     $trm = (float) $first->order_trm;
                 }
 
@@ -3750,7 +3750,7 @@ PROMPT;
                 SUM(
                     (CASE WHEN pop.price > 0 THEN pop.price ELSE p.price END) * pop.quantity *
                     (CASE
-                        WHEN po.trm >= 2900 THEN po.trm
+                        WHEN po.trm >= 2500 THEN po.trm
                         WHEN td.value IS NOT NULL THEN td.value
                         ELSE 4000
                     END)

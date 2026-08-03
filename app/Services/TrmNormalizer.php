@@ -14,7 +14,7 @@ class TrmNormalizer
     /**
      * Valor mínimo considerado válido para TRM
      */
-    const MIN_VALID_TRM = 2900;
+    const MIN_VALID_TRM = 2500;
 
     /**
      * Valor máximo considerado válido para TRM
