@@ -27,6 +27,18 @@ class Kernel extends ConsoleKernel
                 \Log::error('Error al sincronizar TRM Banrep');
             });
 
+        // ⭐ Seguimiento de despachos - 6:00 AM (antes de que arranque la operación)
+        $schedule->command('shipments:sync-trackings')
+            ->dailyAt('06:00')
+            ->timezone('America/Bogota')
+            ->withoutOverlapping(30)
+            ->onSuccess(function () {
+                \Log::info('Seguimiento de despachos actualizado');
+            })
+            ->onFailure(function () {
+                \Log::error('Error al actualizar el seguimiento de despachos');
+            });
+
         // ⭐ Generar estadísticas de órdenes - 10:00 AM (después del TRM que llega a las 9AM)
         $schedule->command('stats:generate-daily')
             ->dailyAt('10:00')
