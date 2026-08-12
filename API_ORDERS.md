@@ -184,6 +184,29 @@ misma que arma el aviso del email al cliente.
 
 ---
 
+### GET /shipment-trackings
+Seguimiento de despachos. Una fila por (pedido, guía) — la guía identifica el
+envío completo, con todos los parciales que van en él.
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `status` | `pendiente`, `en_transito`, `entregado`, `devuelto`, `novedad`, `sin_datos` |
+| `carrier` | `dhl` (las demás transportadoras aún no tienen driver) |
+| `client_id` | Filtra por cliente de la OC |
+| `purchase_order_id` | Guías de un pedido |
+| `per_page` | Por defecto 50, máximo 200 |
+
+Se actualiza sola con `shipments:sync-trackings`, agendado a las 6:00 am.
+`entregado` y `devuelto` son finales: no se vuelven a consultar.
+
+### GET /shipment-trackings/{id}/events
+Historial completo de eventos de una guía, del más viejo al más reciente.
+
+### POST /shipment-trackings/{id}/refresh
+Consulta la transportadora en el momento, con la misma lógica del job.
+
+---
+
 ## Estados de la orden
 
 | Valor | Descripción |

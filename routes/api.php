@@ -521,6 +521,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // DHL Tracking
     Route::get('/dhl/track/{trackingNumber}', [\App\Http\Controllers\DhlController::class, 'track']);
 
+    Route::get('/shipment-trackings', [\App\Http\Controllers\ShipmentTrackingController::class, 'index']);
+    Route::get('/shipment-trackings/{id}/events', [\App\Http\Controllers\ShipmentTrackingController::class, 'events']);
+    Route::post('/shipment-trackings/{id}/refresh', [\App\Http\Controllers\ShipmentTrackingController::class, 'refresh']);
+
     Route::post('/dashboard/chat/start',             [\App\Http\Controllers\MonthlyReportController::class, 'chatStart']);
     Route::post('/dashboard/chat/start-v2',          [\App\Http\Controllers\MonthlyReportController::class, 'chatStartV2']);
     Route::post('/dashboard/chat/message',           [\App\Http\Controllers\MonthlyReportController::class, 'chatMessage']);
