@@ -1,0 +1,42 @@
+{
+  "shipments": [
+    {
+      "shipmentTrackingNumber": "4068449733",
+      "status": "Success",
+      "shipmentTimestamp": "2026-07-17T15:57:44",
+      "productCode": "P",
+      "description": "4 BOXES CONTAINING FRAGRANCES (UN3082), 3 BOXES (UN1993), AND 3 BOXES",
+      "numberOfPieces": 10,
+      "events": [
+        {
+          "date": "2026-07-17",
+          "time": "15:57:44",
+          "typeCode": "PU",
+          "description": "Shipment picked up",
+          "serviceArea": [{ "code": "BOG", "description": "Bogota-CO" }]
+        },
+        {
+          "date": "2026-07-17",
+          "time": "21:55:28",
+          "typeCode": "PL",
+          "description": "Processed at BOGOTA-COLOMBIA",
+          "serviceArea": [{ "code": "BOG", "description": "Bogota-CO" }]
+        },
+        {
+          "date": "2026-07-17",
+          "time": "21:55:58",
+          "typeCode": "DF",
+          "description": "Shipment has departed from a DHL facility BOGOTA-COLOMBIA",
+          "serviceArea": [{ "code": "BOG", "description": "Bogota-CO" }]
+        },
+        {
+          "date": "2026-07-22",
+          "time": "16:18:40",
+          "typeCode": "RT",
+          "description": "Returned to shipper",
+          "serviceArea": [{ "code": "BOG", "description": "Bogota-CO" }]
+        }
+      ]
+    }
+  ]
+}

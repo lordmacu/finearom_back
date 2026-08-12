@@ -16,6 +16,10 @@ return [
     'dhl_password' => env('DHL_PASSWORD', ''),
     'dhl_base_url' => env('DHL_BASE_URL', 'https://express.api.dhl.com/mydhlapi'),
 
+    // Códigos typeCode de DHL que significan novedad (no entregado, no devuelto).
+    // Arranca vacío a propósito: se van agregando con códigos vistos en producción.
+    'dhl_exception_codes' => array_filter(explode(',', (string) env('DHL_EXCEPTION_CODES', ''))),
+
     'coordinadora_client_id'     => env('COORDINADORA_CLIENT_ID', ''),
     'coordinadora_client_secret' => env('COORDINADORA_CLIENT_SECRET', ''),
     'coordinadora_auth_url'      => env('COORDINADORA_AUTH_URL', 'https://api.coordinadora.tech'),
