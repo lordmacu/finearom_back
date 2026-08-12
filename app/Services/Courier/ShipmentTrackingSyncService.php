@@ -69,7 +69,7 @@ class ShipmentTrackingSyncService
 
         $this->storeEvents($tracking, $result->events);
 
-        $ultimo = end($result->events) ?: null;
+        $ultimo = $this->lastEvent($result);
 
         $tracking->status                 = $result->status;
         $tracking->check_attempts         = 0;
@@ -81,6 +81,19 @@ class ShipmentTrackingSyncService
         $tracking->save();
 
         return $tracking->status;
+    }
+
+    /**
+     * Extrae el último evento del resultado (el más reciente).
+     * Devuelve null si no hay eventos.
+     */
+    public function lastEvent(CourierResult $result): ?CourierEvent
+    {
+        if ($result->events === []) {
+            return null;
+        }
+
+        return $result->events[array_key_last($result->events)];
     }
 
     /** @param CourierEvent[] $events */
