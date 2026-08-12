@@ -35,6 +35,20 @@ class ShipmentTrackingSyncService
             ->get();
     }
 
+    /**
+     * Reabre las guías cerradas por agotar reintentos de "sin_datos" (5
+     * respuestas 404 seguidas). Pensada para cuando el cierre fue producto de
+     * una falla de configuración (ej. URL de sandbox) y no de que la
+     * transportadora ya no tenga la guía. No toca `entregado` ni `devuelto`:
+     * sólo filas cuyo status sea `sin_datos`.
+     */
+    public function reopenSinDatos(): int
+    {
+        return ShipmentTracking::query()
+            ->where('status', CourierStatus::SIN_DATOS)
+            ->update(['is_final' => false, 'check_attempts' => 0]);
+    }
+
     public function syncOne(ShipmentTracking $tracking): string
     {
         $driver = $this->registry->driverFor($tracking->carrier);

@@ -29,21 +29,33 @@ class ShipmentDiscoveryService
             ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
             ->whereNull('pt.deleted_at')
             ->where('pt.type', 'real')
-            ->whereNotIn('po.status', ['completed', 'cancelled'])
+            ->where('po.status', '!=', 'cancelled')
+            ->where(function ($query) {
+                // Las OCs que cierran el mismo día del despacho no pueden esperar
+                // a la corrida de mañana: se incluyen mientras el despacho sea
+                // reciente, para no perder su seguimiento hasta la entrega.
+                $query->where('po.status', '!=', 'completed')
+                    ->orWhere('pt.dispatch_date', '>=', now()->subDays(30)->toDateString());
+            })
             ->whereNotNull('pt.tracking_number')
             ->where('pt.tracking_number', '!=', '')
             ->whereRaw("LOWER(pt.tracking_number) <> 'null'")
             ->groupBy('po.id', 'pt.tracking_number')
             ->selectRaw('po.id as purchase_order_id, pt.tracking_number,
-                         MIN(LOWER(pt.transporter)) as carrier,
+                         MIN(LOWER(TRIM(pt.transporter))) as carrier,
                          SUM(pt.quantity) as total_kg,
                          COUNT(*) as partials_count,
                          MIN(pt.dispatch_date) as dispatch_date')
             ->get();
 
-        $tocados = 0;
+        $tocados        = 0;
+        $ordenesTocadas = [];
+        $paresVivos     = [];
 
         foreach ($candidatos as $c) {
+            $ordenesTocadas[$c->purchase_order_id] = true;
+            $paresVivos[$c->purchase_order_id . '|' . $c->tracking_number] = true;
+
             if (!$this->registry->canTrack($c->carrier, $c->tracking_number)) {
                 continue;
             }
@@ -68,6 +80,41 @@ class ShipmentDiscoveryService
             $tocados++;
         }
 
+        $this->closeOrphanedTrackings($ordenesTocadas, $paresVivos);
+
         return $tocados;
+    }
+
+    /**
+     * Cierra las filas de shipment_trackings cuya guía ya no aparece entre los
+     * parciales vivos de la orden: pasa cuando alguien corrige una guía mal
+     * digitada (soft-delete + recreación de parciales). No se borran: el
+     * historial de eventos sirve como registro. Sólo mira órdenes que
+     * aparecieron en el descubrimiento de esta corrida.
+     *
+     * @param array<int|string, bool> $ordenesTocadas
+     * @param array<string, bool> $paresVivos
+     */
+    private function closeOrphanedTrackings(array $ordenesTocadas, array $paresVivos): void
+    {
+        if (empty($ordenesTocadas)) {
+            return;
+        }
+
+        ShipmentTracking::query()
+            ->whereIn('purchase_order_id', array_keys($ordenesTocadas))
+            ->where('is_final', false)
+            ->get()
+            ->each(function (ShipmentTracking $tracking) use ($paresVivos) {
+                $clave = $tracking->purchase_order_id . '|' . $tracking->tracking_number;
+
+                if (isset($paresVivos[$clave])) {
+                    return;
+                }
+
+                $tracking->is_final      = true;
+                $tracking->error_message = 'La guía ya no está en los parciales de la orden (fue corregida o eliminada)';
+                $tracking->save();
+            });
     }
 }

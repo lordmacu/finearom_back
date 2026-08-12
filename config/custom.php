@@ -18,7 +18,11 @@ return [
 
     // Códigos typeCode de DHL que significan novedad (no entregado, no devuelto).
     // Arranca vacío a propósito: se van agregando con códigos vistos en producción.
-    'dhl_exception_codes' => array_filter(explode(',', (string) env('DHL_EXCEPTION_CODES', ''))),
+    // trim por elemento: en el .env de prod la lista se separa "HP, UD" con espacio.
+    'dhl_exception_codes' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('DHL_EXCEPTION_CODES', ''))
+    ))),
 
     'coordinadora_client_id'     => env('COORDINADORA_CLIENT_ID', ''),
     'coordinadora_client_secret' => env('COORDINADORA_CLIENT_SECRET', ''),

@@ -11,7 +11,9 @@ class ShipmentTrackingController extends Controller
 {
     public function __construct(
         private readonly ShipmentTrackingSyncService $sync
-    ) {}
+    ) {
+        $this->middleware('can:purchase_order list');
+    }
 
     public function index(Request $request): JsonResponse
     {

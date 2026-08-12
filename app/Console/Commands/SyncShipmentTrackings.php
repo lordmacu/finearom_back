@@ -18,7 +18,8 @@ class SyncShipmentTrackings extends Command
 {
     protected $signature = 'shipments:sync-trackings
                             {--dry-run : Sólo descubre y lista, sin consultar transportadoras}
-                            {--limit= : Máximo de guías a consultar en esta corrida}';
+                            {--limit= : Máximo de guías a consultar en esta corrida}
+                            {--reopen-sin-datos : Reabre las guías sin_datos cerradas por agotar reintentos y termina sin consultar transportadoras}';
 
     protected $description = 'Actualiza el estado de los despachos no entregados consultando a las transportadoras';
 
@@ -31,6 +32,14 @@ class SyncShipmentTrackings extends Command
 
     public function handle(): int
     {
+        if ($this->option('reopen-sin-datos')) {
+            $reabiertas = $this->sync->reopenSinDatos();
+            $this->info("♻️  {$reabiertas} guías sin_datos reabiertas (is_final = false, check_attempts = 0)");
+            Log::info('[Courier] Reapertura manual de guías sin_datos', ['reabiertas' => $reabiertas]);
+
+            return self::SUCCESS;
+        }
+
         $this->info('🔎 Descubriendo despachos de OCs abiertas...');
         $descubiertos = $this->discovery->discover();
         $this->line("   {$descubiertos} despachos rastreables");
