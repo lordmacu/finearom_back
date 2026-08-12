@@ -16,8 +16,8 @@ return new class extends Migration
             $table->string('ip', 45);
             $table->string('tracking_number', 100)->nullable();
             $table->json('payload');
-            $table->boolean('accepted')->default(true);
-            $table->string('rejection_reason', 255)->nullable();
+            $table->boolean('accepted')->default(false);
+            $table->text('rejection_reason')->nullable();
             $table->dateTime('processed_at')->nullable();
             $table->timestamps();
 
