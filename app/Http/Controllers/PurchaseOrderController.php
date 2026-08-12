@@ -11,6 +11,7 @@ use App\Models\OrderGoogleTaskConfig;
 use App\Services\GoogleDriveService;
 use App\Services\GoogleSheetsService;
 use App\Services\GoogleTaskService;
+use App\Services\ForecastAlertService;
 use App\Services\TrmService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -34,6 +35,7 @@ class PurchaseOrderController extends Controller
     protected $googleTaskService;
     protected $driveService;
     protected $sheetsService;
+    protected $forecastAlertService;
 
     public function __construct(
         TrmService $trmService,
@@ -41,12 +43,14 @@ class PurchaseOrderController extends Controller
         GoogleTaskService $googleTaskService,
         GoogleDriveService $driveService,
         GoogleSheetsService $sheetsService,
+        ForecastAlertService $forecastAlertService,
     ) {
         $this->trmService = $trmService;
         $this->emailTrackingService = $emailTrackingService;
         $this->googleTaskService = $googleTaskService;
         $this->driveService = $driveService;
         $this->sheetsService = $sheetsService;
+        $this->forecastAlertService = $forecastAlertService;
         $this->middleware('can:purchase_order list')->only(['index']);
     }
 
@@ -2337,132 +2341,52 @@ class PurchaseOrderController extends Controller
     }
 
     /**
-     * Verifica el pronóstico manual del mes para un cliente+producto.
-     * Retorna: pronóstico, ya despachado en el mes y disponible.
+     * Verifica el pronóstico manual para un cliente+producto en el mes de ENTREGA.
+     * Retorna: pronóstico del mes, kilos ya comprometidos y disponible.
      * Usado en el formulario de OC para alertar cuando se excede el pronóstico.
      */
     public function forecastCheck(Request $request): JsonResponse
     {
         $request->validate([
-            'client_id'  => ['required', 'integer'],
-            'product_id' => ['required', 'integer'],
+            'client_id'     => ['required', 'integer'],
+            'product_id'    => ['required', 'integer'],
+            'delivery_date' => ['nullable', 'date'],
+            'order_id'      => ['nullable', 'integer'],
         ]);
 
-        $now = \Carbon\Carbon::now('America/Bogota');
-        $meses = [1=>'ENERO',2=>'FEBRERO',3=>'MARZO',4=>'ABRIL',5=>'MAYO',6=>'JUNIO',
-                  7=>'JULIO',8=>'AGOSTO',9=>'SEPTIEMBRE',10=>'OCTUBRE',11=>'NOVIEMBRE',12=>'DICIEMBRE'];
-        $mes = $meses[$now->month];
-        $año = (string) $now->year;
+        $resultado = $this->forecastAlertService->checkLine(
+            (int) $request->client_id,
+            (int) $request->product_id,
+            $request->input('delivery_date'),
+            $request->filled('order_id') ? (int) $request->input('order_id') : null,
+        );
 
-        // Obtener nit del cliente y code del producto
-        $client  = \DB::table('clients')->where('id', $request->client_id)->select('nit')->first();
-        $product = \DB::table('products')->where('id', $request->product_id)->select('code')->first();
-
-        if (!$client || !$product) {
+        if (!($resultado['found'] ?? false)) {
             return response()->json(['success' => false, 'message' => 'Cliente o producto no encontrado'], 404);
         }
 
-        // Pronóstico manual del mes actual
-        $forecast = \DB::table('sales_forecasts')
-            ->where('nit', $client->nit)
-            ->where('codigo', $product->code)
-            ->where('modelo', 'manual')
-            ->where('año', $año)
-            ->where('mes', $mes)
-            ->value('cantidad_forecast');
-
-        if ($forecast === null) {
+        if ($resultado['pronostico'] === null) {
             return response()->json([
-                'success'     => true,
+                'success'      => true,
                 'has_forecast' => false,
             ]);
         }
 
-        // Ya despachado este mes para este cliente+producto (desde partials reales)
-        $vendido = (float) \DB::table('partials as pt')
-            ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
-            ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
-            ->join('products as p', 'pop.product_id', '=', 'p.id')
-            ->where('po.client_id', $request->client_id)
-            ->where('p.id', $request->product_id)
-            ->where('pt.type', 'real')
-            ->whereNull('pt.deleted_at')
-            ->where('pop.muestra', 0)
-            ->whereBetween('pt.dispatch_date', [
-                $now->copy()->startOfMonth()->toDateString(),
-                $now->copy()->endOfMonth()->toDateString(),
-            ])
-            ->sum('pt.quantity');
+        $evaluacion = $this->forecastAlertService->evaluate(
+            $resultado['pronostico'],
+            $resultado['comprometido'],
+            0.0
+        );
 
         return response()->json([
             'success'      => true,
             'has_forecast' => true,
-            'pronostico'   => (int) $forecast,
-            'vendido'      => round($vendido, 2),
-            'disponible'   => max(0, $forecast - $vendido),
-            'mes'          => $mes,
-            'año'          => $año,
+            'pronostico'   => $evaluacion['pronostico'],
+            'comprometido' => $evaluacion['comprometido'],
+            'disponible'   => $evaluacion['disponible'],
+            'mes'          => $resultado['month']['mes'],
+            'año'          => $resultado['month']['año'],
         ]);
-    }
-
-    /**
-     * Calcula qué productos de una orden exceden el pronóstico manual del mes.
-     * Retorna array de filas: ['nombre', 'codigo', 'cantidad', 'excedente']
-     */
-    private function buildForecastExceedances(PurchaseOrder $purchaseOrder): array
-    {
-        $now      = \Carbon\Carbon::now('America/Bogota');
-        $meses    = [1=>'ENERO',2=>'FEBRERO',3=>'MARZO',4=>'ABRIL',5=>'MAYO',6=>'JUNIO',
-                     7=>'JULIO',8=>'AGOSTO',9=>'SEPTIEMBRE',10=>'OCTUBRE',11=>'NOVIEMBRE',12=>'DICIEMBRE'];
-        $mes      = $meses[$now->month];
-        $año      = (string) $now->year;
-        $mesStart = $now->copy()->startOfMonth()->toDateString();
-        $mesEnd   = $now->copy()->endOfMonth()->toDateString();
-
-        $clientNit = $purchaseOrder->client->nit;
-        $excedencias = [];
-
-        foreach ($purchaseOrder->products as $product) {
-            // Ignorar muestras
-            if ($product->pivot->muestra) continue;
-
-            $cantidad = (float) $product->pivot->quantity;
-            if ($cantidad <= 0) continue;
-
-            $forecast = \DB::table('sales_forecasts')
-                ->where('nit', $clientNit)
-                ->where('codigo', $product->code)
-                ->where('modelo', 'manual')
-                ->where('año', $año)
-                ->where('mes', $mes)
-                ->value('cantidad_forecast');
-
-            if ($forecast === null) continue;
-
-            $vendido = (float) \DB::table('partials as pt')
-                ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
-                ->join('purchase_order_product as pop', 'pt.product_order_id', '=', 'pop.id')
-                ->join('products as p', 'pop.product_id', '=', 'p.id')
-                ->where('po.client_id', $purchaseOrder->client_id)
-                ->where('p.id', $product->id)
-                ->where('pt.type', 'real')
-                ->whereNull('pt.deleted_at')
-                ->where('pop.muestra', 0)
-                ->whereBetween('pt.dispatch_date', [$mesStart, $mesEnd])
-                ->sum('pt.quantity');
-
-            $excedente = ($vendido + $cantidad) - $forecast;
-            if ($excedente > 0) {
-                $excedencias[] = [
-                    'nombre'    => $product->product_name,
-                    'codigo'    => $product->code,
-                    'cantidad'  => $cantidad,
-                    'excedente' => round($excedente, 2),
-                ];
-            }
-        }
-
-        return $excedencias;
     }
 
     /**
@@ -2621,7 +2545,7 @@ class PurchaseOrderController extends Controller
                     }
                 });
 
-                $forecastExceedances = $this->buildForecastExceedances($purchaseOrder);
+                $forecastExceedances = $this->forecastAlertService->exceedancesForOrder($purchaseOrder);
 
                 \Mail::to($primaryToEmail)
                     ->cc($ccEmails)

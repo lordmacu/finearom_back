@@ -151,6 +151,39 @@ Reenvía proforma.
 
 ---
 
+### GET /purchase-orders/forecast-check
+Alerta de pronóstico para una línea del formulario de OC. Compara contra el
+**mes de entrega** de la línea, no contra el mes en curso.
+
+| Parámetro | Requerido | Descripción |
+|-----------|-----------|-------------|
+| `client_id` | sí | Cliente de la orden |
+| `product_id` | sí | Producto de la línea |
+| `delivery_date` | no | Fecha de entrega de la línea. Sin ella cae al mes en curso |
+| `order_id` | no | OC en edición: se excluye de lo comprometido para no contarla dos veces |
+
+```json
+{
+  "success": true,
+  "has_forecast": true,
+  "pronostico": 100,
+  "comprometido": 0,
+  "disponible": 100,
+  "mes": "OCTUBRE",
+  "año": "2026"
+}
+```
+
+`has_forecast: false` cuando no hay pronóstico manual cargado para
+(nit, código, mes) — ahí no se muestra alerta.
+
+`comprometido` = kilos ya despachados en ese mes (`partials.type = 'real'`)
+**más** los pedidos en líneas de otras OCs que entregan ese mismo mes y todavía
+no despachan. La lógica vive en `app/Services/ForecastAlertService.php` y es la
+misma que arma el aviso del email al cliente.
+
+---
+
 ## Estados de la orden
 
 | Valor | Descripción |
