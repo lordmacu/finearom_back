@@ -25,23 +25,47 @@ class ShipmentDiscoveryService
 
     public function discover(): int
     {
-        $candidatos = DB::table('partials as pt')
-            ->join('purchase_orders as po', 'pt.order_id', '=', 'po.id')
-            ->whereNull('pt.deleted_at')
-            ->where('pt.type', 'real')
+        // Paso 1: qué órdenes entran al descubrimiento. La ventana de 30 días
+        // sólo se usa aquí, para decidir si una OC completed sigue vigente
+        // (despacho reciente que aún no puede esperar a la corrida de mañana).
+        // No debe usarse más adelante para recortar los parciales de una orden
+        // ya incluida: eso rompía la agregación y el cálculo de huérfanas.
+        $ordenesElegibles = DB::table('purchase_orders as po')
             ->where('po.status', '!=', 'cancelled')
             ->where(function ($query) {
-                // Las OCs que cierran el mismo día del despacho no pueden esperar
-                // a la corrida de mañana: se incluyen mientras el despacho sea
-                // reciente, para no perder su seguimiento hasta la entrega.
                 $query->where('po.status', '!=', 'completed')
-                    ->orWhere('pt.dispatch_date', '>=', now()->subDays(30)->toDateString());
+                    ->orWhereExists(function ($sub) {
+                        $sub->selectRaw('1')
+                            ->from('partials as pt')
+                            ->whereColumn('pt.order_id', 'po.id')
+                            ->whereNull('pt.deleted_at')
+                            ->where('pt.type', 'real')
+                            ->where('pt.dispatch_date', '>=', now()->subDays(30)->toDateString())
+                            ->whereNotNull('pt.tracking_number')
+                            ->where('pt.tracking_number', '!=', '')
+                            ->whereRaw("LOWER(pt.tracking_number) <> 'null'");
+                    });
             })
+            ->pluck('po.id');
+
+        if ($ordenesElegibles->isEmpty()) {
+            return 0;
+        }
+
+        // Paso 2: pares (orden, guía) vivos de esas órdenes, sin predicado de
+        // fecha — una vez que la orden entró, se consideran TODOS sus
+        // parciales vigentes, no sólo los recientes. Esta misma consulta
+        // alimenta tanto la actualización de shipment_trackings como el
+        // conjunto de pares vivos que decide el cierre por orfandad.
+        $candidatos = DB::table('partials as pt')
+            ->whereIn('pt.order_id', $ordenesElegibles)
+            ->whereNull('pt.deleted_at')
+            ->where('pt.type', 'real')
             ->whereNotNull('pt.tracking_number')
             ->where('pt.tracking_number', '!=', '')
             ->whereRaw("LOWER(pt.tracking_number) <> 'null'")
-            ->groupBy('po.id', 'pt.tracking_number')
-            ->selectRaw('po.id as purchase_order_id, pt.tracking_number,
+            ->groupBy('pt.order_id', 'pt.tracking_number')
+            ->selectRaw('pt.order_id as purchase_order_id, pt.tracking_number,
                          MIN(LOWER(TRIM(pt.transporter))) as carrier,
                          SUM(pt.quantity) as total_kg,
                          COUNT(*) as partials_count,
@@ -93,7 +117,8 @@ class ShipmentDiscoveryService
      * aparecieron en el descubrimiento de esta corrida.
      *
      * @param array<int|string, bool> $ordenesTocadas
-     * @param array<string, bool> $paresVivos
+     * @param array<string, bool> $paresVivos pares (orden, guía) vivos, sin
+     *        filtrar por fecha de despacho — ver paso 2 de discover().
      */
     private function closeOrphanedTrackings(array $ordenesTocadas, array $paresVivos): void
     {
