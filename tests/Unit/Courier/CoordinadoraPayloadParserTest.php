@@ -174,6 +174,74 @@ class CoordinadoraPayloadParserTest extends TestCase
         $this->assertSame(CourierStatus::EN_TRANSITO, $estado);
     }
 
+    public function test_comment_como_arreglo_se_trata_como_ausente_y_no_revienta(): void
+    {
+        Log::shouldReceive('info')->once();
+
+        $estado = $this->parser->mapTrackingStatus([
+            'codigo'  => '1',
+            'comment' => ['no', 'es', 'texto'],
+        ]);
+
+        $this->assertSame(CourierStatus::EN_TRANSITO, $estado);
+    }
+
+    public function test_desc_estado_como_arreglo_se_trata_como_ausente_y_no_revienta(): void
+    {
+        Log::shouldReceive('info')->once();
+
+        $estado = $this->parser->mapTrackingStatus([
+            'codigo'      => '1',
+            'desc_estado' => ['no', 'es', 'texto'],
+        ]);
+
+        $this->assertSame(CourierStatus::EN_TRANSITO, $estado);
+    }
+
+    public function test_comment_y_desc_estado_null_explicitos_no_revienta(): void
+    {
+        Log::shouldReceive('info')->once();
+
+        $estado = $this->parser->mapTrackingStatus([
+            'codigo'      => '1',
+            'comment'     => null,
+            'desc_estado' => null,
+        ]);
+
+        $this->assertSame(CourierStatus::EN_TRANSITO, $estado);
+    }
+
+    public function test_comment_numerico_se_usa_como_texto_sin_reventar(): void
+    {
+        Log::shouldReceive('info')
+            ->once()
+            ->with(\Mockery::on(function (string $mensaje) {
+                return str_contains($mensaje, '123456');
+            }));
+
+        $estado = $this->parser->mapTrackingStatus([
+            'codigo'  => '1',
+            'comment' => 123456,
+        ]);
+
+        $this->assertSame(CourierStatus::EN_TRANSITO, $estado);
+    }
+
+    public function test_log_de_estado_no_mapeado_separa_comment_y_desc_estado_con_espacio(): void
+    {
+        Log::shouldReceive('info')
+            ->once()
+            ->with(\Mockery::on(function (string $mensaje) {
+                return str_contains($mensaje, 'Uno Dos') && !str_contains($mensaje, 'UnoDos');
+            }));
+
+        $this->parser->mapTrackingStatus([
+            'codigo'      => '1',
+            'comment'     => 'Uno',
+            'desc_estado' => 'Dos',
+        ]);
+    }
+
     // --- toEvent ----------------------------------------------------------
 
     public function test_arma_el_evento_con_codigo_y_descripcion_desde_comment(): void
@@ -227,6 +295,113 @@ class CoordinadoraPayloadParserTest extends TestCase
         $evento = $this->parser->toEvent($payload);
 
         $this->assertSame($payload, $evento->raw);
+    }
+
+    public function test_codigo_como_arreglo_no_revienta_y_code_queda_null(): void
+    {
+        $evento = $this->parser->toEvent([
+            'codigo'  => ['x'],
+            'comment' => 'ENTREGADA',
+            'fecha'   => '2026-08-10',
+            'hora'    => '13:51:43',
+        ]);
+
+        $this->assertNull($evento->code);
+    }
+
+    public function test_comment_como_arreglo_no_revienta_y_description_cae_a_desc_estado(): void
+    {
+        $evento = $this->parser->toEvent([
+            'codigo'      => '801',
+            'comment'     => ['no', 'es', 'texto'],
+            'desc_estado' => 'EN REPARTO',
+            'fecha'       => '2026-08-10',
+            'hora'        => '09:00:00',
+        ]);
+
+        $this->assertSame('EN REPARTO', $evento->description);
+    }
+
+    public function test_comment_y_desc_estado_no_escalares_no_revienta_y_description_queda_null(): void
+    {
+        $evento = $this->parser->toEvent([
+            'codigo'      => '801',
+            'comment'     => ['a'],
+            'desc_estado' => ['b'],
+            'fecha'       => '2026-08-10',
+            'hora'        => '09:00:00',
+        ]);
+
+        $this->assertNull($evento->description);
+    }
+
+    public function test_comment_numerico_no_revienta_y_se_convierte_a_texto(): void
+    {
+        $evento = $this->parser->toEvent([
+            'codigo'  => '6',
+            'comment' => 12345,
+            'fecha'   => '2026-08-10',
+            'hora'    => '13:51:43',
+        ]);
+
+        $this->assertSame('12345', $evento->description);
+    }
+
+    public function test_comment_null_explicito_cae_a_desc_estado(): void
+    {
+        $evento = $this->parser->toEvent([
+            'codigo'      => '801',
+            'comment'     => null,
+            'desc_estado' => 'EN REPARTO',
+            'fecha'       => '2026-08-10',
+            'hora'        => '09:00:00',
+        ]);
+
+        $this->assertSame('EN REPARTO', $evento->description);
+    }
+
+    public function test_toEvent_lanza_excepcion_si_falta_fecha(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->parser->toEvent([
+            'codigo'  => '6',
+            'comment' => 'ENTREGADA',
+            'hora'    => '13:51:43',
+        ]);
+    }
+
+    public function test_toEvent_lanza_excepcion_si_falta_hora(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->parser->toEvent([
+            'codigo'  => '6',
+            'comment' => 'ENTREGADA',
+            'fecha'   => '2026-08-10',
+        ]);
+    }
+
+    public function test_toEvent_lanza_excepcion_si_faltan_fecha_y_hora(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->parser->toEvent([
+            'codigo'  => '6',
+            'comment' => 'ENTREGADA',
+        ]);
+    }
+
+    public function test_toEvent_lanza_excepcion_si_fecha_es_un_arreglo(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->parser->toEvent([
+            'codigo'  => '6',
+            'comment' => 'ENTREGADA',
+            'fecha'   => ['x'],
+            'hora'    => '13:51:43',
+        ]);
     }
 
     // --- mapNovedadStatus ---------------------------------------------

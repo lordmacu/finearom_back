@@ -65,8 +65,8 @@ class CoordinadoraPayloadParser
      */
     public function mapTrackingStatus(array $payload): string
     {
-        $comment    = (string) ($payload['comment'] ?? '');
-        $descEstado = (string) ($payload['desc_estado'] ?? '');
+        $comment    = self::campoEscalar($payload, 'comment') ?? '';
+        $descEstado = self::campoEscalar($payload, 'desc_estado') ?? '';
         $texto      = self::normalizar($comment . ' ' . $descEstado);
 
         if (str_contains($texto, 'ENTREGA')) {
@@ -81,8 +81,9 @@ class CoordinadoraPayloadParser
             return CourierStatus::NOVEDAD;
         }
 
-        $codigo = $payload['codigo'] ?? 'sin código';
-        Log::info("[Coordinadora] estado no mapeado: código={$codigo}, descripcion=\"{$comment}{$descEstado}\"");
+        $codigo      = self::campoEscalar($payload, 'codigo') ?? 'sin código';
+        $descripcion = trim($comment . ' ' . $descEstado);
+        Log::info("[Coordinadora] estado no mapeado: código={$codigo}, descripcion=\"{$descripcion}\"");
 
         return CourierStatus::EN_TRANSITO;
     }
@@ -91,11 +92,20 @@ class CoordinadoraPayloadParser
      * Arma el evento normalizado de un payload de tracking. La marca de
      * tiempo se compone de `fecha` + `hora`; si `hora` trae microsegundos
      * (`13:51:43.456818`) se recortan al formato `Y-m-d H:i:s`.
+     *
+     * Todo campo que llegue con un tipo no escalar (arreglo, objeto) se trata
+     * como ausente en vez de castearse a ciegas — el endpoint es público y
+     * sin autenticación, así que el payload no es de fiar.
+     *
+     * @throws \InvalidArgumentException si `fecha`/`hora` no arman una marca
+     *         de tiempo válida en formato `Y-m-d H:i:s`. El llamador debe
+     *         capturarla y descartar el evento (p. ej. registrar el rechazo
+     *         en la bitácora) en vez de dejar pasar un `occurredAt` inválido.
      */
     public function toEvent(array $payload): CourierEvent
     {
-        $fecha = trim((string) ($payload['fecha'] ?? ''));
-        $hora  = trim((string) ($payload['hora'] ?? ''));
+        $fecha = trim(self::campoEscalar($payload, 'fecha') ?? '');
+        $hora  = trim(self::campoEscalar($payload, 'hora') ?? '');
 
         // Recorta microsegundos: "13:51:43.456818" -> "13:51:43"
         $puntoPos = strpos($hora, '.');
@@ -105,10 +115,16 @@ class CoordinadoraPayloadParser
 
         $occurredAt = trim($fecha . ' ' . $hora);
 
+        if (!self::esTimestampValido($occurredAt)) {
+            throw new \InvalidArgumentException(
+                "Coordinadora: no se pudo armar una marca de tiempo válida a partir de fecha=\"{$fecha}\" hora=\"{$hora}\""
+            );
+        }
+
         return new CourierEvent(
             occurredAt:  $occurredAt,
-            code:        isset($payload['codigo']) ? (string) $payload['codigo'] : null,
-            description: $payload['comment'] ?? $payload['desc_estado'] ?? null,
+            code:        self::campoEscalar($payload, 'codigo'),
+            description: self::campoEscalar($payload, 'comment') ?? self::campoEscalar($payload, 'desc_estado'),
             location:    null,
             raw:         $payload,
         );
@@ -142,5 +158,31 @@ class CoordinadoraPayloadParser
     private static function normalizar(string $texto): string
     {
         return strtr(mb_strtoupper($texto, 'UTF-8'), self::ACENTOS);
+    }
+
+    /**
+     * Lee `$payload[$clave]` como texto, tratando cualquier valor no escalar
+     * (arreglo, objeto) o ausente/`null` como si el campo no existiera. Evita
+     * castear a ciegas datos de un payload no confiable (endpoint público sin
+     * autenticación): un `(string)` sobre un arreglo emite un aviso de PHP y
+     * produce el texto inútil `"Array"`.
+     */
+    private static function campoEscalar(array $payload, string $clave): ?string
+    {
+        $valor = $payload[$clave] ?? null;
+
+        if ($valor === null || !is_scalar($valor)) {
+            return null;
+        }
+
+        return (string) $valor;
+    }
+
+    /** `true` solo si `$valor` es exactamente una marca de tiempo `Y-m-d H:i:s` real. */
+    private static function esTimestampValido(string $valor): bool
+    {
+        $fecha = \DateTime::createFromFormat('Y-m-d H:i:s', $valor);
+
+        return $fecha !== false && $fecha->format('Y-m-d H:i:s') === $valor;
     }
 }
