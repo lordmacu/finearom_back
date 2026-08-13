@@ -29,6 +29,20 @@ return [
     'coordinadora_auth_url'      => env('COORDINADORA_AUTH_URL', 'https://api.coordinadora.tech'),
     'coordinadora_guias_url'     => env('COORDINADORA_GUIAS_URL', 'https://guias-service.coordinadora.com'),
 
+    // Coordinadora empuja sus notificaciones sin autenticación propia: este
+    // token viaja como segmento de la URL (/webhooks/coordinadora/{token}/...)
+    // y es la única barrera del endpoint. Sin valor por defecto a propósito:
+    // el middleware falla cerrado (rechaza todo) si no está configurado.
+    'coordinadora_webhook_token' => env('COORDINADORA_WEBHOOK_TOKEN', ''),
+
+    // Lista blanca de IPs del proveedor para el webhook. Arranca vacía a
+    // propósito: aún no tenemos las IPs de Coordinadora. Vacía = filtro
+    // desactivado. trim por elemento, mismo patrón que dhl_exception_codes.
+    'coordinadora_ips' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('COORDINADORA_IPS', ''))
+    ))),
+
     'siigo_proxy_url'      => env('SIIGO_PROXY_URL', ''),
     'siigo_proxy_username' => env('SIIGO_PROXY_USERNAME', ''),
     'siigo_proxy_password' => env('SIIGO_PROXY_PASSWORD', ''),
