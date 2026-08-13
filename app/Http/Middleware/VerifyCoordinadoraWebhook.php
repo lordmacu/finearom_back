@@ -29,6 +29,38 @@ use Throwable;
 class VerifyCoordinadoraWebhook
 {
     /**
+     * Tope de bytes que se persiste como `payload` en un intento rechazado.
+     *
+     * El camino de rechazo por token inválido es la superficie más expuesta
+     * del endpoint (no pasa por el filtro de IP), así que cualquiera puede
+     * golpearlo repetidamente con cuerpos grandes. Sin este tope,
+     * `courier_webhook_logs` crecería sin límite — un problema de
+     * disponibilidad en un endpoint público sin autenticación. 2 KB alcanza
+     * para conservar la forma del payload con fines de diagnóstico sin dejar
+     * crecer la tabla sin control. No aplica a peticiones aceptadas: esas
+     * necesitan el payload completo y las guarda la Tarea 5.
+     */
+    private const MAX_REJECTED_PAYLOAD_BYTES = 2048;
+
+    /**
+     * Ambiente (`prod`|`test`) según el segmento literal `/test/` de la URL,
+     * NO según `APP_ENV`: las rutas de prueba de Coordinadora viven en el
+     * mismo servidor de producción (no hay servidor de staging), distinguidas
+     * solo por ese segmento:
+     *
+     *   /webhooks/coordinadora/{token}/tracking          → prod
+     *   /webhooks/coordinadora/{token}/test/tracking     → test
+     *
+     * Público y estático a propósito: la Tarea 5 debe usar exactamente este
+     * mismo criterio al guardar las filas aceptadas, para que la columna
+     * `environment` sea comparable entre aceptadas y rechazadas.
+     */
+    public static function environmentFor(Request $request): string
+    {
+        return $request->segment(4) === 'test' ? 'test' : 'prod';
+    }
+
+    /**
      * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
      */
     public function handle(Request $request, Closure $next): Response
@@ -82,12 +114,12 @@ class VerifyCoordinadoraWebhook
                 $endpoint = 'desconocido';
             }
 
-            $payload = $request->all();
+            $payload = $this->truncatedPayload($request);
 
             CourierWebhookLog::create([
                 'carrier'          => 'coordinadora',
                 'endpoint'         => $endpoint,
-                'environment'      => app()->isProduction() ? 'prod' : 'test',
+                'environment'      => self::environmentFor($request),
                 'ip'               => (string) ($request->ip() ?? ''),
                 'tracking_number'  => null,
                 'payload'          => $payload,
@@ -101,5 +133,29 @@ class VerifyCoordinadoraWebhook
             // petición: solo una marca de que la auditoría falló.
             Log::warning('[Coordinadora] no se pudo registrar intento rechazado en la bitácora de webhooks');
         }
+    }
+
+    /**
+     * Payload del intento rechazado, acotado a `MAX_REJECTED_PAYLOAD_BYTES`.
+     * Mide sobre el JSON ya combinado (cuerpo + query string, lo mismo que
+     * terminaría persistido) para que un query string inflado no esquive el
+     * tope. Si excede el límite, no guarda el arreglo parseado sino un
+     * resumen truncado que deja constancia explícita de que se recortó.
+     */
+    private function truncatedPayload(Request $request): array
+    {
+        $payload = $request->all();
+        $encoded = json_encode($payload);
+        $size    = $encoded === false ? PHP_INT_MAX : strlen($encoded);
+
+        if ($size <= self::MAX_REJECTED_PAYLOAD_BYTES) {
+            return $payload;
+        }
+
+        return [
+            '_truncated'           => true,
+            '_original_size_bytes' => $size,
+            '_preview'             => substr((string) $encoded, 0, self::MAX_REJECTED_PAYLOAD_BYTES),
+        ];
     }
 }
