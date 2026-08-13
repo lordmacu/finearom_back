@@ -48,8 +48,20 @@ class VerifyCoordinadoraWebhook
      * mismo servidor de producción (no hay servidor de staging), distinguidas
      * solo por ese segmento:
      *
-     *   /webhooks/coordinadora/{token}/tracking          → prod
-     *   /webhooks/coordinadora/{token}/test/tracking     → test
+     *   .../{token}/tracking          → prod
+     *   .../{token}/test/tracking     → test
+     *
+     * Posición **relativa al final**, no absoluta: el endpoint (`tracking`,
+     * `novedades`, `soluciones`) es siempre el último segmento, y cuando hay
+     * marcador de ambiente es el penúltimo. Un índice absoluto (p. ej.
+     * "segmento 4") se rompe apenas cambia el prefijo de la ruta — ya pasó
+     * una vez con el prefijo `api/` del `RouteServiceProvider` — y además ahí
+     * caía justo sobre el token, no sobre 'test'.
+     *
+     * El penúltimo segmento puede ser el propio token (en la forma sin
+     * `/test/`). Se compara contra la cadena `'test'` y se descarta: nunca se
+     * devuelve, se registra ni se expone, solo se usa para decidir el
+     * resultado `prod`/`test`.
      *
      * Público y estático a propósito: la Tarea 5 debe usar exactamente este
      * mismo criterio al guardar las filas aceptadas, para que la columna
@@ -57,7 +69,25 @@ class VerifyCoordinadoraWebhook
      */
     public static function environmentFor(Request $request): string
     {
-        return $request->segment(4) === 'test' ? 'test' : 'prod';
+        return self::environmentForSegments($request->segments());
+    }
+
+    /**
+     * @param  array<int, string>  $segments  Segmentos de la URL, en el mismo
+     *         orden que devuelve `Request::segments()` (índice base 0).
+     */
+    private static function environmentForSegments(array $segments): string
+    {
+        $count = count($segments);
+
+        // Ruta con menos segmentos de los esperados: no hay forma fiable de
+        // ubicar el penúltimo. Cae a 'prod', el valor conservador — así
+        // ninguna fila ambigua queda descartada como "ruido de pruebas".
+        if ($count < 2) {
+            return 'prod';
+        }
+
+        return $segments[$count - 2] === 'test' ? 'test' : 'prod';
     }
 
     /**
@@ -119,7 +149,7 @@ class VerifyCoordinadoraWebhook
             CourierWebhookLog::create([
                 'carrier'          => 'coordinadora',
                 'endpoint'         => $endpoint,
-                'environment'      => self::environmentFor($request),
+                'environment'      => self::environmentForSegments($segments),
                 'ip'               => (string) ($request->ip() ?? ''),
                 'tracking_number'  => null,
                 'payload'          => $payload,
