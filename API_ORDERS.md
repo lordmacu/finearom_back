@@ -191,7 +191,7 @@ envío completo, con todos los parciales que van en él.
 | Parámetro | Descripción |
 |-----------|-------------|
 | `status` | `pendiente`, `en_transito`, `entregado`, `devuelto`, `novedad`, `sin_datos` |
-| `carrier` | `dhl` (las demás transportadoras aún no tienen driver) |
+| `carrier` | `dhl`, `coordinadora` (las demás transportadoras aún no tienen driver) |
 | `client_id` | Filtra por cliente de la OC |
 | `purchase_order_id` | Guías de un pedido |
 | `per_page` | Por defecto 50, máximo 200 |
@@ -204,6 +204,79 @@ Historial completo de eventos de una guía, del más viejo al más reciente.
 
 ### POST /shipment-trackings/{id}/refresh
 Consulta la transportadora en el momento, con la misma lógica del job.
+
+---
+
+## Coordinadora — Push Tracking / Novedades / Soluciones
+
+Coordinadora no se consulta (es push-only): ella empuja las notificaciones a
+estos endpoints. **El servicio del proveedor no tiene autenticación propia**
+— la única barrera es el middleware `coordinadora.webhook` (token en la URL
++ IP whitelist opcional). Por eso van fuera del grupo `auth:sanctum`, con
+`throttle:60,1`. El token nunca se loguea.
+
+| Método | URL |
+|--------|-----|
+| `POST` | `/api/webhooks/coordinadora/{token}/tracking` |
+| `POST` | `/api/webhooks/coordinadora/{token}/novedades` |
+| `POST` | `/api/webhooks/coordinadora/{token}/soluciones` |
+| `POST` | `/api/webhooks/coordinadora/{token}/test/tracking` |
+| `POST` | `/api/webhooks/coordinadora/{token}/test/novedades` |
+| `POST` | `/api/webhooks/coordinadora/{token}/test/soluciones` |
+
+Las rutas `/test/*` son el mismo endpoint en ambiente de prueba (Coordinadora
+no tiene servidor de staging aparte): solo quedan registradas en la bitácora,
+nunca tocan `shipment_trackings` ni `shipment_tracking_events`.
+
+### Formato de los payloads
+
+**`tracking`** llega envuelto en Google Pub/Sub — el JSON real va en Base64
+dentro de `message.data`:
+
+```json
+{
+  "message": {
+    "data": "eyJ0cmFja2luZ19udW1iZXIiOiIzMDM4MDAwMDU1MCIsImNvbW1lbnQiOiJFTlRSRUdBREEiLCJjb2RpZ28iOiI2IiwiZmVjaGEiOiIyMDI2LTA4LTEwIiwiaG9yYSI6IjEzOjUxOjQzIn0="
+  }
+}
+```
+
+Decodificado: `tracking_number`, `comment` / `desc_estado`, `codigo`, `fecha`
+(`Y-m-d`), `hora` (`H:i:s`, puede traer microsegundos).
+
+**`novedades`** y **`soluciones`** llegan como JSON plano (formato "NyS"),
+identificando la guía con `numero_guia` en lugar de `tracking_number`:
+
+```json
+{
+  "numero_guia": "30380000551",
+  "evento": "reporte",
+  "id_novedad": "12",
+  "descripcion_novedad": "Dirección errada",
+  "fecha": "2026-08-10",
+  "hora": "09:00:00"
+}
+```
+
+### Procesamiento (rutas de producción)
+
+1. El payload crudo siempre queda en `courier_webhook_logs` antes de
+   procesar (endpoint, ambiente, IP), pase lo que pase después.
+2. Si no se puede extraer la guía (envoltura corrupta, campo ausente, o
+   `fecha`/`hora` no arman un timestamp válido) → **400**, rechazo
+   registrado en la bitácora.
+3. La guía debe existir en un parcial vivo (`partials.deleted_at IS NULL`,
+   `type = 'real'`) con `LOWER(TRIM(transporter)) = 'coordinadora'`. Si no
+   existe → **200** (no 400: puede ser guía de otro cliente de Coordinadora;
+   un 400 haría que el proveedor reintentara indefinidamente).
+4. Si existe, se ubica o crea la fila de `shipment_trackings` de esa pareja
+   (orden, guía) y se agrega el evento normalizado (sin duplicar: índice
+   único `shipment_tracking_id + occurred_at + code`). Una misma guía puede
+   pertenecer a varias órdenes de compra (218 casos reales): el evento se
+   aplica a **todas**. Se actualiza `status`, `last_event_*`, `checked_at` y
+   se marca `is_final` cuando el estado es `entregado` o `devuelto`.
+5. **500** solo ante un fallo real del servicio — el payload ya quedó en la
+   bitácora, así que se puede reprocesar.
 
 ---
 

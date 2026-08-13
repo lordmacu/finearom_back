@@ -537,6 +537,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/dashboard/chat/sessions/{session}', [\App\Http\Controllers\MonthlyReportController::class, 'chatSessionDelete']);
 });
 
+// =====================================================
+// Coordinadora - Push Tracking / Novedades / Soluciones
+// El proveedor no tiene autenticación propia: la única barrera es el
+// middleware coordinadora.webhook (token de ruta + IP whitelist opcional).
+// Fuera de auth:sanctum. Ver API_ORDERS.md para el detalle de payloads.
+// =====================================================
+Route::middleware(['coordinadora.webhook', 'throttle:60,1'])->group(function () {
+    Route::post('/webhooks/coordinadora/{token}/tracking', [\App\Http\Controllers\CoordinadoraWebhookController::class, 'tracking']);
+    Route::post('/webhooks/coordinadora/{token}/novedades', [\App\Http\Controllers\CoordinadoraWebhookController::class, 'novedades']);
+    Route::post('/webhooks/coordinadora/{token}/soluciones', [\App\Http\Controllers\CoordinadoraWebhookController::class, 'soluciones']);
+    Route::post('/webhooks/coordinadora/{token}/test/tracking', [\App\Http\Controllers\CoordinadoraWebhookController::class, 'tracking']);
+    Route::post('/webhooks/coordinadora/{token}/test/novedades', [\App\Http\Controllers\CoordinadoraWebhookController::class, 'novedades']);
+    Route::post('/webhooks/coordinadora/{token}/test/soluciones', [\App\Http\Controllers\CoordinadoraWebhookController::class, 'soluciones']);
+});
+
 // Webhook (no requiere auth Sanctum - usa HMAC signature)
 Route::post('/siigo/webhook', [SiigoSyncController::class, 'webhook']);
 
