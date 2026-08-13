@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ShipmentTracking;
+use App\Services\Courier\CourierRegistry;
 use App\Services\Courier\ShipmentTrackingSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -10,7 +11,8 @@ use Illuminate\Http\Request;
 class ShipmentTrackingController extends Controller
 {
     public function __construct(
-        private readonly ShipmentTrackingSyncService $sync
+        private readonly ShipmentTrackingSyncService $sync,
+        private readonly CourierRegistry $registry
     ) {
         $this->middleware('can:purchase_order list');
     }
@@ -51,7 +53,22 @@ class ShipmentTrackingController extends Controller
     public function refresh(int $id): JsonResponse
     {
         $tracking = ShipmentTracking::findOrFail($id);
-        $estado   = $this->sync->syncOne($tracking);
+
+        // Coordinadora (y cualquier otra transportadora push-only) no se
+        // consulta: nadie le pregunta, ella empuja. Antes, este botón
+        // llamaba syncOne() igual para cualquier fila: sobre Coordinadora
+        // eso grababa un error_message de "no se consulta", movía
+        // checked_at y el frontend mostraba éxito. Se rechaza explícito con
+        // un mensaje claro en vez de tocar la fila.
+        $driver = $this->registry->driverFor($tracking->carrier);
+
+        if ($driver !== null && $driver->isPushOnly()) {
+            return response()->json([
+                'message' => "{$tracking->carrier} no se consulta: es push-only, solo recibe notificaciones del proveedor.",
+            ], 422);
+        }
+
+        $estado = $this->sync->syncOne($tracking);
 
         return response()->json([
             'data'    => $tracking->fresh(),

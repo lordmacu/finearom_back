@@ -204,6 +204,10 @@ Historial completo de eventos de una guía, del más viejo al más reciente.
 
 ### POST /shipment-trackings/{id}/refresh
 Consulta la transportadora en el momento, con la misma lógica del job.
+Si la fila es de una transportadora **push-only** (p. ej. Coordinadora: ella
+empuja, no se le pregunta) responde **422** sin tocar la fila. Cada fila de
+`GET /shipment-trackings` trae `is_push_only` (bool) para que el frontend no
+ofrezca el botón "Consultar" en esos casos.
 
 ---
 
@@ -213,7 +217,10 @@ Coordinadora no se consulta (es push-only): ella empuja las notificaciones a
 estos endpoints. **El servicio del proveedor no tiene autenticación propia**
 — la única barrera es el middleware `coordinadora.webhook` (token en la URL
 + IP whitelist opcional). Por eso van fuera del grupo `auth:sanctum`, con
-`throttle:60,1`. El token nunca se loguea.
+`throttle:600,1` (alto a propósito: el proveedor empuja los eventos de todas
+las guías activas y puede hacerlo en ráfaga; el limitador corre antes que
+cualquier middleware propio, así que un 429 no deja registro en la bitácora
+— el evento se pierde sin rastro). El token nunca se loguea.
 
 | Método | URL |
 |--------|-----|

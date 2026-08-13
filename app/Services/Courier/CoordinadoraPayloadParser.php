@@ -62,6 +62,16 @@ class CoordinadoraPayloadParser
      * `comment` o `desc_estado`. Insensible a mayúsculas y a tildes. Cuando no
      * reconoce nada registra en el log el código y la descripción para poder
      * ampliar el mapa con datos reales.
+     *
+     * Orden deliberado: devolución/cancelación y entrega-fallida se evalúan
+     * ANTES que entrega-exitosa. La subcadena "ENTREGA" por sí sola aparece
+     * tanto en "ENTREGADA" como en "NO SE PUDO ENTREGAR", "ENTREGA FALLIDA" o
+     * "DEVOLUCIÓN POR NO ENTREGA" — si "entregado" se evaluara primero (como
+     * antes), un despacho devuelto o con entrega fallida quedaba marcado como
+     * entregado con is_final=true, para siempre: Coordinadora es push-only,
+     * nada lo vuelve a corregir. Por eso la regla de éxito exige una forma
+     * verbal concreta (ENTREGADA/ENTREGADO/ENTREGA EXITOSA) y nunca se evalúa
+     * si antes se detectó una negación del verbo.
      */
     public function mapTrackingStatus(array $payload): string
     {
@@ -69,16 +79,28 @@ class CoordinadoraPayloadParser
         $descEstado = self::campoEscalar($payload, 'desc_estado') ?? '';
         $texto      = self::normalizar($comment . ' ' . $descEstado);
 
-        if (str_contains($texto, 'ENTREGA')) {
-            return CourierStatus::ENTREGADO;
-        }
-
         if (str_contains($texto, 'DEVOLUC') || str_contains($texto, 'DEVUELT')) {
             return CourierStatus::DEVUELTO;
         }
 
         if (str_contains($texto, 'CANCELAD')) {
             return CourierStatus::NOVEDAD;
+        }
+
+        // Entrega fallida/negada: "NO SE PUDO ENTREGAR", "NO FUE POSIBLE
+        // ENTREGAR" (NO + hasta 4 palabras + ENTREG) y "ENTREGA FALLIDA"
+        // (ENTREG... seguido de FALLID...). Es una novedad real que alguien
+        // debe perseguir, nunca "entregado".
+        if (preg_match('/\bNO\b(?:\s+\S+){0,4}\s+ENTREG/u', $texto)
+            || preg_match('/ENTREG\w*\s+FALLID/u', $texto)
+        ) {
+            return CourierStatus::NOVEDAD;
+        }
+
+        // Entrega exitosa: solo formas verbales concretas, no cualquier
+        // subcadena "ENTREGA" (ver nota arriba).
+        if (preg_match('/ENTREG(AD[AO]\b|A\s+EXITOS)/u', $texto)) {
+            return CourierStatus::ENTREGADO;
         }
 
         $codigo      = self::campoEscalar($payload, 'codigo') ?? 'sin código';
@@ -121,10 +143,21 @@ class CoordinadoraPayloadParser
             );
         }
 
+        $codigo      = self::campoEscalar($payload, 'codigo');
+        $descripcion = self::campoEscalar($payload, 'comment') ?? self::campoEscalar($payload, 'desc_estado');
+
         return new CourierEvent(
-            occurredAt:  $occurredAt,
-            code:        self::campoEscalar($payload, 'codigo'),
-            description: self::campoEscalar($payload, 'comment') ?? self::campoEscalar($payload, 'desc_estado'),
+            occurredAt: $occurredAt,
+            // shipment_tracking_events.code / shipment_trackings.last_event_code
+            // son VARCHAR(20); *_description son VARCHAR(255). MySQL en modo
+            // estricto lanza excepción ante un valor más largo que la columna
+            // — sin este tope, un `comment` largo del proveedor produce un
+            // 500 que Coordinadora reintenta indefinidamente sin que el
+            // evento entre nunca. buildNysEvent() ya truncaba su lado antes
+            // de llamar a este método; acá se acota también el camino de
+            // tracking, que llegaba sin recortar.
+            code:        $codigo === null ? null : mb_substr($codigo, 0, 20),
+            description: $descripcion === null ? null : mb_substr($descripcion, 0, 255),
             location:    null,
             raw:         $payload,
         );

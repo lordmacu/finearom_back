@@ -542,8 +542,18 @@ Route::middleware('auth:sanctum')->group(function () {
 // El proveedor no tiene autenticación propia: la única barrera es el
 // middleware coordinadora.webhook (token de ruta + IP whitelist opcional).
 // Fuera de auth:sanctum. Ver API_ORDERS.md para el detalle de payloads.
+//
+// throttle:600,1 (no 60,1): Coordinadora empuja los eventos de TODAS sus
+// guías activas por estos mismos endpoints, y puede hacerlo en ráfaga (p.
+// ej. tras una reconexión de su lado). El limitador de Laravel corre ANTES
+// que cualquier middleware nuestro, así que un 429 no pasa ni siquiera por
+// VerifyCoordinadoraWebhook: no queda registro en courier_webhook_logs. Es
+// push-only y sin reintentos garantizados — un evento tumbado por el
+// throttle se pierde sin rastro, no se puede reprocesar. Un límite alto
+// aquí es barato (el middleware de token+IP ya filtra el tráfico real) y
+// evita perder datos de negocio en silencio.
 // =====================================================
-Route::middleware(['coordinadora.webhook', 'throttle:60,1'])->group(function () {
+Route::middleware(['coordinadora.webhook', 'throttle:600,1'])->group(function () {
     Route::post('/webhooks/coordinadora/{token}/tracking', [\App\Http\Controllers\CoordinadoraWebhookController::class, 'tracking']);
     Route::post('/webhooks/coordinadora/{token}/novedades', [\App\Http\Controllers\CoordinadoraWebhookController::class, 'novedades']);
     Route::post('/webhooks/coordinadora/{token}/soluciones', [\App\Http\Controllers\CoordinadoraWebhookController::class, 'soluciones']);

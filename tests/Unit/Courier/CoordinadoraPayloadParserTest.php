@@ -139,6 +139,46 @@ class CoordinadoraPayloadParserTest extends TestCase
         $this->assertSame(CourierStatus::DEVUELTO, $estado);
     }
 
+    /**
+     * Regresión del CRÍTICO 1: "NO SE PUDO ENTREGAR" contiene la subcadena
+     * "ENTREGA", así que con la regla vieja (str_contains ENTREGA, evaluada
+     * antes que devolución/cancelación) esto mapeaba a `entregado`. Es el
+     * peor caso posible: una entrega fallida quedaba marcada como exitosa,
+     * con is_final=true, para siempre.
+     */
+    public function test_no_se_pudo_entregar_mapea_a_novedad_y_no_a_entregado(): void
+    {
+        $estado = $this->parser->mapTrackingStatus(['comment' => 'NO SE PUDO ENTREGAR']);
+
+        $this->assertSame(CourierStatus::NOVEDAD, $estado);
+    }
+
+    public function test_entrega_fallida_mapea_a_novedad_y_no_a_entregado(): void
+    {
+        $estado = $this->parser->mapTrackingStatus(['desc_estado' => 'ENTREGA FALLIDA']);
+
+        $this->assertSame(CourierStatus::NOVEDAD, $estado);
+    }
+
+    /**
+     * Este texto trae "ENTREGA" Y "DEVOLUC" a la vez: con la regla vieja
+     * (ENTREGA evaluada primero) mapeaba a `entregado`. Devolución/cancelación
+     * deben gobernar siempre sobre cualquier mención de "entrega".
+     */
+    public function test_devolucion_por_no_entrega_mapea_a_devuelto_y_no_a_entregado(): void
+    {
+        $estado = $this->parser->mapTrackingStatus(['comment' => 'DEVOLUCIÓN POR NO ENTREGA']);
+
+        $this->assertSame(CourierStatus::DEVUELTO, $estado);
+    }
+
+    public function test_entrega_exitosa_mapea_a_entregado(): void
+    {
+        $estado = $this->parser->mapTrackingStatus(['comment' => 'ENTREGA EXITOSA']);
+
+        $this->assertSame(CourierStatus::ENTREGADO, $estado);
+    }
+
     public function test_codigo_y_descripcion_desconocidos_mapea_a_en_transito_y_no_revienta(): void
     {
         Log::shouldReceive('info')->once();
@@ -402,6 +442,40 @@ class CoordinadoraPayloadParserTest extends TestCase
             'fecha'   => ['x'],
             'hora'    => '13:51:43',
         ]);
+    }
+
+    /**
+     * shipment_tracking_events.code y shipment_trackings.last_event_code son
+     * VARCHAR(20). Sin truncar, un `codigo` largo del proveedor rompe el
+     * INSERT en modo estricto de MySQL (500, y Coordinadora reintenta el
+     * mismo payload para siempre).
+     */
+    public function test_codigo_largo_se_trunca_a_20_caracteres(): void
+    {
+        $evento = $this->parser->toEvent([
+            'codigo'  => str_repeat('9', 40),
+            'comment' => 'ENTREGADA',
+            'fecha'   => '2026-08-10',
+            'hora'    => '13:51:43',
+        ]);
+
+        $this->assertSame(str_repeat('9', 20), $evento->code);
+    }
+
+    /**
+     * *_description son VARCHAR(255): mismo riesgo que el código, con
+     * `comment`/`desc_estado`, que sí es texto libre del proveedor.
+     */
+    public function test_comment_largo_se_trunca_a_255_caracteres(): void
+    {
+        $evento = $this->parser->toEvent([
+            'codigo'  => '6',
+            'comment' => str_repeat('a', 300),
+            'fecha'   => '2026-08-10',
+            'hora'    => '13:51:43',
+        ]);
+
+        $this->assertSame(str_repeat('a', 255), $evento->description);
     }
 
     // --- mapNovedadStatus ---------------------------------------------

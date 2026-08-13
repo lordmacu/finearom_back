@@ -44,10 +44,12 @@ use Throwable;
 class CoordinadoraInboundService
 {
     /**
-     * Tope de bytes del payload persistido en la bitácora. El endpoint es
-     * público, sin autenticación propia del proveedor, y admite hasta 60
-     * peticiones/min: sin tope, un payload gigante o repetido haría crecer
-     * `courier_webhook_logs` sin control. Mismo criterio que
+     * Tope de bytes del payload persistido en la bitácora (y, reutilizado en
+     * boundedEventRaw(), del `raw` por evento). El endpoint es público, sin
+     * autenticación propia del proveedor, y admite hasta 600 peticiones/min
+     * (ver throttle:600,1 en routes/api.php): sin tope, un payload gigante o
+     * repetido haría crecer `courier_webhook_logs` y
+     * `shipment_tracking_events` sin control. Mismo criterio que
      * VerifyCoordinadoraWebhook::MAX_REJECTED_PAYLOAD_BYTES, algo más
      * generoso porque este camino sí necesita poder reprocesar el envío.
      */
@@ -191,8 +193,9 @@ class CoordinadoraInboundService
         //
         // La columna `tracking_number` va DESNUDA (sin envolver en TRIM) a
         // propósito: es un endpoint público sin autenticación propia que
-        // admite hasta 60 peticiones/min, y envolver la columna en una
-        // función anula cualquier índice sobre ella. El valor entrante ya
+        // admite hasta 600 peticiones/min (ver throttle:600,1 en
+        // routes/api.php), y envolver la columna en una función anula
+        // cualquier índice sobre ella. El valor entrante ya
         // llega normalizado (trim) desde el parser; ver migración
         // add_tracking_number_index_to_partials_table.
         $partialOrders = DB::table('partials')
@@ -237,12 +240,39 @@ class CoordinadoraInboundService
 
         // Una guía puede pertenecer a varias órdenes (218 casos reales): el
         // evento se aplica a TODAS las filas de shipment_trackings de esa
-        // guía, no solo a la primera que aparezca.
-        DB::transaction(function () use ($partialOrders, $trackingNumber, $endpoint, $payload, $event) {
-            foreach ($partialOrders as $partialRow) {
-                $this->applyEvent($partialRow, $trackingNumber, $endpoint, $payload, $event);
+        // guía, no solo a la primera que aparezca. Cada orden en su PROPIA
+        // transacción: antes, una sola transacción envolvía el lote
+        // completo, así que un fallo puntual en una orden (deadlock, fila
+        // corrupta) revertía también las órdenes sanas y devolvía 500 para
+        // todas. Aislar por orden evita que un problema puntual arrastre al
+        // resto.
+        $ordenesAplicadas = 0;
+
+        foreach ($partialOrders as $partialRow) {
+            try {
+                DB::transaction(function () use ($partialRow, $trackingNumber, $endpoint, $payload, $event) {
+                    $this->applyEvent($partialRow, $trackingNumber, $endpoint, $payload, $event);
+                });
+                $ordenesAplicadas++;
+            } catch (Throwable $e) {
+                Log::error("[Coordinadora] fallo aplicando el evento de la guía {$trackingNumber} "
+                    . "a la orden {$partialRow->order_id}: {$e->getMessage()}");
             }
-        });
+        }
+
+        // Resultado global, de forma sensata: si al menos una orden recibió
+        // el evento, se acepta (200) — las que fallaron quedaron en el log
+        // de aplicación (arriba) para diagnosticar y reprocesar puntualmente,
+        // sin bloquear el acuse al proveedor. Solo si TODAS fallaron es un
+        // fallo real del servicio (500); el payload ya está en la bitácora
+        // para reprocesar.
+        if ($ordenesAplicadas === 0) {
+            $this->safeUpdateLog($log, [
+                'rejection_reason' => "fallo aplicando el evento a las {$partialOrders->count()} orden(es) de la guía",
+            ]);
+
+            return $this->response(500, 'error interno');
+        }
 
         $this->safeUpdateLog($log, ['accepted' => true, 'tracking_number' => $trackingNumber]);
 
@@ -257,10 +287,10 @@ class CoordinadoraInboundService
      */
     private function applyEvent(object $partialRow, string $trackingNumber, string $endpoint, array $payload, CourierEvent $event): void
     {
-        // Bloqueo de fila dentro de la transacción de processProduction():
-        // dos pushes simultáneos de la misma guía no deben poder crear dos
-        // filas ni pisarse la creación (firstOrNew + save por separado no
-        // es atómico). Bajo REPEATABLE READ (por defecto en InnoDB/MySQL),
+        // Bloqueo de fila dentro de la transacción por-orden de
+        // processProduction(): dos pushes simultáneos de la misma guía no
+        // deben poder crear dos filas ni pisarse la creación (firstOrNew +
+        // save por separado no es atómico). Bajo REPEATABLE READ (por defecto en InnoDB/MySQL),
         // un SELECT ... FOR UPDATE que no encuentra fila toma un gap lock
         // que serializa a cualquier otra transacción que intente el mismo
         // insert hasta que esta confirme.
@@ -316,9 +346,38 @@ class CoordinadoraInboundService
             [
                 'description' => $event->description,
                 'location'    => $event->location,
-                'raw'         => $event->raw,
+                // Acotado igual que la bitácora (MAX_PAYLOAD_BYTES): este
+                // mismo evento se guarda una vez POR CADA orden de la guía
+                // (hasta 218 casos reales), así que un payload grande sin
+                // tope se multiplica por cada una.
+                'raw'         => $this->boundedEventRaw($event->raw),
             ]
         );
+    }
+
+    /**
+     * Acota el `raw` de un evento a MAX_PAYLOAD_BYTES antes de guardarlo en
+     * shipment_tracking_events. Mismo criterio que boundedPayload() para la
+     * bitácora, pero aplicado por evento: sin esto, el `raw` completo de
+     * NyS (que arrastra todo el payload original, incluido
+     * `listado_soluciones[]`) se repite sin control multiplicado por cada
+     * orden de la guía.
+     *
+     * @param array<string, mixed> $raw
+     * @return array<string, mixed>
+     */
+    private function boundedEventRaw(array $raw): array
+    {
+        $encoded = json_encode($raw);
+
+        if ($encoded !== false && strlen($encoded) <= self::MAX_PAYLOAD_BYTES) {
+            return $raw;
+        }
+
+        return [
+            '_truncated'           => true,
+            '_original_size_bytes' => $encoded === false ? null : strlen($encoded),
+        ];
     }
 
     /**
@@ -334,6 +393,17 @@ class CoordinadoraInboundService
         }
 
         if ($endpoint === 'novedades') {
+            // Mismo guard que soluciones, más abajo: el endpoint de
+            // novedades siempre devuelve 'novedad' (mapNovedadStatus() no
+            // distingue casos), así que sin este guard cualquier evento
+            // posterior — p. ej. un "edicion reporte" con fecha después de
+            // la entrega — reabre para siempre un despacho ya cerrado.
+            // Coordinadora es push-only (fuera de pullKeys()): ningún job
+            // lo corrige después.
+            if ($currentStatus !== null && CourierStatus::isFinal($currentStatus)) {
+                return $currentStatus;
+            }
+
             return $this->parser->mapNovedadStatus($payload);
         }
 
