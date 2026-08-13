@@ -34,6 +34,11 @@ class DhlDriver implements CourierDriver
         return (bool) preg_match('/^\d{10}$/', trim($trackingNumber));
     }
 
+    public function isPushOnly(): bool
+    {
+        return false;
+    }
+
     public function track(string $trackingNumber): CourierResult
     {
         $baseUrl  = rtrim((string) config('custom.dhl_base_url'), '/');

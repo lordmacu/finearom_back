@@ -2,6 +2,7 @@
 
 namespace App\Services\Courier;
 
+use App\Services\Courier\Drivers\CoordinadoraDriver;
 use App\Services\Courier\Drivers\DhlDriver;
 
 /**
@@ -10,6 +11,11 @@ use App\Services\Courier\Drivers\DhlDriver;
  * Para sumar una transportadora: crear su driver y agregarlo a defaultDrivers().
  * Todo lo que no tenga driver (aldia, reymor, nombres de conductores) devuelve
  * null y queda fuera del seguimiento automático.
+ *
+ * Ojo con `keys()` vs `pullKeys()`: `keys()` lista TODAS las transportadoras
+ * con driver (incluye push-only, como Coordinadora, que se necesitan para el
+ * descubrimiento). `pullKeys()` excluye las push-only y es la que debe usarse
+ * para armar la cola de consulta activa (ShipmentTrackingSyncService::pending()).
  */
 class CourierRegistry
 {
@@ -27,7 +33,7 @@ class CourierRegistry
     /** @return CourierDriver[] */
     public static function defaultDrivers(): array
     {
-        return [new DhlDriver()];
+        return [new DhlDriver(), new CoordinadoraDriver()];
     }
 
     public function driverFor(?string $transporter): ?CourierDriver
@@ -50,9 +56,18 @@ class CourierRegistry
         return $driver->matches($trackingNumber);
     }
 
-    /** @return string[] */
+    /** @return string[] todas las transportadoras con driver, push-only incluidas. */
     public function keys(): array
     {
         return array_keys($this->drivers);
+    }
+
+    /** @return string[] solo las transportadoras que sí se consultan (no push-only). */
+    public function pullKeys(): array
+    {
+        return array_keys(array_filter(
+            $this->drivers,
+            fn (CourierDriver $driver): bool => !$driver->isPushOnly()
+        ));
     }
 }

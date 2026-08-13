@@ -29,7 +29,10 @@ class ShipmentTrackingSyncService
     {
         return ShipmentTracking::query()
             ->where('is_final', false)
-            ->whereIn('carrier', $this->registry->keys())
+            // pullKeys(), no keys(): Coordinadora tiene driver (para que el
+            // descubrimiento reconozca sus guías) pero es push-only, así que
+            // nunca debe entrar a la cola de consulta activa.
+            ->whereIn('carrier', $this->registry->pullKeys())
             ->orderByRaw('checked_at IS NULL DESC')
             ->orderBy('checked_at')
             ->get();
