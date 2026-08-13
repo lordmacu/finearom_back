@@ -154,8 +154,14 @@ class CoordinadoraPayloadParser
         return $valor !== '' ? $valor : null;
     }
 
-    /** Mayúsculas y sin tildes, para comparar texto que llega en cualquier formato. */
-    private static function normalizar(string $texto): string
+    /**
+     * Mayúsculas y sin tildes, para comparar texto que llega en cualquier
+     * formato. Pública a propósito: CoordinadoraInboundService la reusa
+     * para comparar el campo `evento` de novedades/soluciones (`"Aprobación"`,
+     * `"APROBACION"`, con o sin espacios) en vez de duplicar esta
+     * normalización — el texto de este proveedor nunca es de fiar.
+     */
+    public static function normalizar(string $texto): string
     {
         return strtr(mb_strtoupper($texto, 'UTF-8'), self::ACENTOS);
     }

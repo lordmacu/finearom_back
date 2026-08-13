@@ -9,7 +9,6 @@ use App\Models\ShipmentTrackingEvent;
 use App\Services\Courier\Drivers\CoordinadoraDriver;
 use DateTimeImmutable;
 use DateTimeZone;
-use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -54,6 +53,28 @@ class CoordinadoraInboundService
      */
     private const MAX_PAYLOAD_BYTES = 8192;
 
+    /**
+     * Formatos ISO 8601 estrictos aceptados para `fecha_hora` (NyS), con y
+     * sin milisegundos. `\Z` es un literal (no un especificador de zona):
+     * por eso `parseFechaHoraEstricta()` pasa UTC explícito como zona del
+     * DateTimeImmutable resultante.
+     */
+    private const NYS_TIMESTAMP_FORMATS = [
+        'Y-m-d\TH:i:s\Z',
+        'Y-m-d\TH:i:s.v\Z',
+    ];
+
+    /**
+     * Margen de desfase de reloj aceptado para el timestamp de un evento
+     * (segundos). Sin este tope, un solo evento fechado en el futuro
+     * congelaría la guía para siempre: el guard de orden de applyEvent()
+     * trataría cualquier evento real posterior como "más viejo" y lo
+     * descartaría — un ataque de un solo mensaje en un endpoint público sin
+     * autenticación propia. Minutos, no días: es margen de reloj, no una
+     * ventana para timestamps genuinamente futuros.
+     */
+    private const MAX_FUTURE_SKEW_SECONDS = 300;
+
     public function __construct(
         private readonly CoordinadoraPayloadParser $parser,
         private readonly CoordinadoraDriver $coordinadoraDriver
@@ -74,7 +95,15 @@ class CoordinadoraInboundService
         $rawContent = (string) $request->getContent();
         $decodedRaw = json_decode($rawContent, true);
         $decodeOk   = json_last_error() === JSON_ERROR_NONE && is_array($decodedRaw);
-        $body       = $decodeOk ? $decodedRaw : [];
+
+        // Cuerpo para PROCESAR: el JSON crudo si decodificó bien; si no
+        // —p. ej. un Content-Type distinto a JSON, como
+        // x-www-form-urlencoded, que Laravel sí sabe interpretar— se cae a
+        // la entrada ya interpretada por el framework. La documentación de
+        // Coordinadora habla de JSON, así que esto es solo una red de
+        // seguridad: NO cambia lo que se guarda en la bitácora (sigue
+        // siendo el crudo acotado, ver boundedPayload() más abajo).
+        $body = $decodeOk ? $decodedRaw : $request->all();
 
         // Requisito 1: la bitácora se guarda SIEMPRE, antes de procesar,
         // pase lo que pase después. Si esto mismo falla no hay nada que
@@ -86,7 +115,10 @@ class CoordinadoraInboundService
                 'environment'      => $environment,
                 'ip'               => $ip,
                 'tracking_number'  => null,
-                'payload'          => $this->boundedPayload($rawContent, $body, $decodeOk),
+                // boundedPayload() recibe $decodedRaw (no $body): la
+                // bitácora debe seguir guardando el cuerpo crudo, nunca la
+                // entrada interpretada por el fallback de $request->all().
+                'payload'          => $this->boundedPayload($rawContent, $decodeOk ? $decodedRaw : [], $decodeOk),
                 'accepted'         => false,
                 'rejection_reason' => null,
                 'processed_at'     => now(),
@@ -192,6 +224,13 @@ class CoordinadoraInboundService
             $event = $endpoint === 'tracking'
                 ? $this->parser->toEvent($payload)
                 : $this->buildNysEvent($endpoint, $payload);
+
+            // Aplica a los dos caminos (toEvent() de tracking, que ya
+            // valida el FORMATO pero no qué tan lejos en el futuro cae, y
+            // buildNysEvent() de NyS): sin este tope, un evento fechado en
+            // el futuro congelaría la guía para siempre contra el guard de
+            // orden de applyEvent().
+            $this->assertNotUnreasonablyFuture($event->occurredAt);
         } catch (InvalidArgumentException) {
             return $this->reject($log, 400, 'fecha/hora del evento no arman un timestamp válido');
         }
@@ -299,20 +338,26 @@ class CoordinadoraInboundService
         }
 
         // soluciones: 'aprobacion' significa que la novedad quedó resuelta
-        // y el envío continúa — NUNCA debe reabrir un despacho ya cerrado
-        // (Coordinadora es push-only, fuera de pullKeys(): ningún job la va
-        // a corregir después, así que un error acá queda mal para siempre).
-        // 'rechazo' (o cualquier evento no reconocido) sí es una novedad
-        // real, igual que mapNovedadStatus().
+        // y el envío continúa. El texto de Coordinadora no es de fiar
+        // ("Aprobación", "APROBACION", con espacios alrededor...), así que
+        // se compara normalizado con el mismo criterio que usa el parser
+        // para comment/desc_estado, en vez de una comparación literal.
         $evento = self::campoTexto($payload, 'evento');
+        $eventoNormalizado = $evento === null ? null : CoordinadoraPayloadParser::normalizar($evento);
 
-        if ($evento === 'aprobacion') {
-            return ($currentStatus !== null && CourierStatus::isFinal($currentStatus))
-                ? $currentStatus
-                : CourierStatus::EN_TRANSITO;
+        $estadoNatural = $eventoNormalizado === 'APROBACION'
+            ? CourierStatus::EN_TRANSITO
+            : CourierStatus::NOVEDAD; // 'rechazo' o cualquier evento no reconocido.
+
+        // Ni 'aprobacion' ni 'rechazo' (ni un evento no reconocido) deben
+        // reabrir un despacho ya cerrado: Coordinadora es push-only, fuera
+        // de pullKeys(), así que ningún job lo va a corregir después — un
+        // error acá queda mal para siempre.
+        if ($currentStatus !== null && CourierStatus::isFinal($currentStatus)) {
+            return $currentStatus;
         }
 
-        return CourierStatus::NOVEDAD;
+        return $estadoNatural;
     }
 
     /**
@@ -338,14 +383,14 @@ class CoordinadoraInboundService
             throw new InvalidArgumentException('Coordinadora: el payload NyS no trae fecha_hora');
         }
 
-        try {
-            // fecha_hora llega en UTC ("Z"); el resto del sistema —
-            // incluida la fecha/hora de tracking, que ya viene en hora
-            // local— trabaja en la zona horaria de la aplicación.
-            $momento = (new DateTimeImmutable($fechaHora))->setTimezone(new DateTimeZone(config('app.timezone')));
-        } catch (Exception) {
-            throw new InvalidArgumentException("Coordinadora: fecha_hora inválida: \"{$fechaHora}\"");
-        }
+        // Formato ESTRICTO, no el parseo libre de `new DateTimeImmutable()`:
+        // ese constructor acepta cadenas relativas ("now", "+1 year") sin
+        // que el payload tenga que parecerse a una fecha real. `fecha_hora`
+        // llega en UTC ("Z"); el resto del sistema —incluida la fecha/hora
+        // de tracking, que ya viene en hora local— trabaja en la zona
+        // horaria de la aplicación, así que se convierte antes de usarla.
+        $momento = self::parseFechaHoraEstricta($fechaHora);
+        $momento = $momento->setTimezone(new DateTimeZone(config('app.timezone')));
 
         $codigo = self::campoTexto($payload, 'id_registro_novedad')
             ?? self::campoTexto($payload, 'id_novedad')
@@ -370,6 +415,52 @@ class CoordinadoraInboundService
         ]);
 
         return $this->parser->toEvent($sintetico);
+    }
+
+    /**
+     * `occurredAt` ya viene en hora local ('Y-m-d H:i:s', tanto de
+     * toEvent() como de buildNysEvent()). Rechaza cualquier evento fechado
+     * más adelante de lo que un desfase de reloj razonable explica — ver
+     * MAX_FUTURE_SKEW_SECONDS.
+     *
+     * @throws InvalidArgumentException si el evento está en el futuro (más allá del margen) o el timestamp no es interpretable.
+     */
+    private function assertNotUnreasonablyFuture(string $occurredAt): void
+    {
+        $momento = \DateTime::createFromFormat('Y-m-d H:i:s', $occurredAt, new DateTimeZone(config('app.timezone')));
+
+        if ($momento === false) {
+            throw new InvalidArgumentException("Coordinadora: timestamp de evento no interpretable: \"{$occurredAt}\"");
+        }
+
+        if ($momento->getTimestamp() > time() + self::MAX_FUTURE_SKEW_SECONDS) {
+            throw new InvalidArgumentException("Coordinadora: timestamp de evento está en el futuro: \"{$occurredAt}\"");
+        }
+    }
+
+    /**
+     * Parsea `fecha_hora` con un formato ISO 8601 fijo — nunca con el
+     * constructor libre de DateTimeImmutable, que interpreta cadenas
+     * relativas ("now", "+1 year") como si fueran fechas reales. Acepta
+     * con o sin milisegundos.
+     *
+     * @throws InvalidArgumentException si no calza con ninguno de los dos formatos exactos.
+     */
+    private static function parseFechaHoraEstricta(string $fechaHora): DateTimeImmutable
+    {
+        foreach (self::NYS_TIMESTAMP_FORMATS as $formato) {
+            $momento = DateTimeImmutable::createFromFormat($formato, $fechaHora, new DateTimeZone('UTC'));
+
+            // Verificación de ida y vuelta: createFromFormat() es
+            // permisivo con desbordes (p. ej. "2026-13-45" se acepta y se
+            // normaliza); formatear de regreso y comparar contra el texto
+            // original es lo que realmente garantiza el formato exacto.
+            if ($momento !== false && $momento->format($formato) === $fechaHora) {
+                return $momento;
+            }
+        }
+
+        throw new InvalidArgumentException("Coordinadora: fecha_hora no tiene un formato ISO 8601 reconocido: \"{$fechaHora}\"");
     }
 
     /**
