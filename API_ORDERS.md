@@ -245,37 +245,62 @@ Decodificado: `tracking_number`, `comment` / `desc_estado`, `codigo`, `fecha`
 (`Y-m-d`), `hora` (`H:i:s`, puede traer microsegundos).
 
 **`novedades`** y **`soluciones`** llegan como JSON plano (formato "NyS"),
-identificando la guía con `numero_guia` en lugar de `tracking_number`:
+identificando la guía con `numero_guia` en lugar de `tracking_number` y la
+marca de tiempo en un único campo `fecha_hora` (ISO 8601 con `Z`, no
+`fecha`+`hora` separados como en tracking):
 
 ```json
 {
   "numero_guia": "30380000551",
   "evento": "reporte",
+  "id_registro_novedad": "550e8400-e29b-41d4-a716-446655440000",
   "id_novedad": "12",
   "descripcion_novedad": "Dirección errada",
-  "fecha": "2026-08-10",
-  "hora": "09:00:00"
+  "fecha_hora": "2026-08-10T14:00:00Z"
 }
 ```
 
+`soluciones` usa el mismo formato con `evento` ∈ {`aprobacion`, `rechazo`} y
+sus propios campos (`id_solucion`, `descripcion_solucion`,
+`observacion_rechazo`).
+
 ### Procesamiento (rutas de producción)
 
-1. El payload crudo siempre queda en `courier_webhook_logs` antes de
-   procesar (endpoint, ambiente, IP), pase lo que pase después.
-2. Si no se puede extraer la guía (envoltura corrupta, campo ausente, o
-   `fecha`/`hora` no arman un timestamp válido) → **400**, rechazo
-   registrado en la bitácora.
-3. La guía debe existir en un parcial vivo (`partials.deleted_at IS NULL`,
-   `type = 'real'`) con `LOWER(TRIM(transporter)) = 'coordinadora'`. Si no
-   existe → **200** (no 400: puede ser guía de otro cliente de Coordinadora;
-   un 400 haría que el proveedor reintentara indefinidamente).
+1. El cuerpo crudo de la petición (no `$request->all()`, que queda vacío con
+   JSON mal formado) siempre queda en `courier_webhook_logs` antes de
+   procesar (endpoint, ambiente, IP), pase lo que pase después: ya
+   interpretado si es JSON válido y cabe en el tope de tamaño, o en Base64
+   si no, para poder reprocesarlo igual.
+2. Si no se puede extraer la guía (envoltura corrupta, campo ausente) →
+   **400**, rechazo registrado en la bitácora.
+3. La guía debe tener el formato de Coordinadora (11 dígitos numéricos) —
+   esto descarta antes de tocar la base de datos el texto literal `'null'`
+   que arrastran 207 parciales sucios en producción — y existir en un
+   parcial vivo (`partials.deleted_at IS NULL`, `type = 'real'`) con
+   `LOWER(TRIM(transporter)) = 'coordinadora'`. Si no existe → **200** (no
+   400: puede ser guía de otro cliente de Coordinadora; un 400 haría que el
+   proveedor reintentara indefinidamente). Solo después de este cruce se
+   valida que `fecha`/`hora` (o `fecha_hora` en NyS) armen un timestamp
+   válido — validarlo antes convertiría una guía ajena con timestamp raro en
+   un 400 con reintentos infinitos.
 4. Si existe, se ubica o crea la fila de `shipment_trackings` de esa pareja
-   (orden, guía) y se agrega el evento normalizado (sin duplicar: índice
-   único `shipment_tracking_id + occurred_at + code`). Una misma guía puede
-   pertenecer a varias órdenes de compra (218 casos reales): el evento se
-   aplica a **todas**. Se actualiza `status`, `last_event_*`, `checked_at` y
-   se marca `is_final` cuando el estado es `entregado` o `devuelto`.
-5. **500** solo ante un fallo real del servicio — el payload ya quedó en la
+   (orden, guía) y se agrega el evento normalizado al historial (sin
+   duplicar: índice único `shipment_tracking_id + occurred_at + code` — en
+   NyS el código siempre es no nulo: `id_registro_novedad` / `id_novedad` /
+   `id_solucion`, o un valor fijo si el payload no trae ninguno). Una misma
+   guía puede pertenecer a varias órdenes de compra (218 casos reales): el
+   evento se aplica a **todas**.
+5. `status`, `last_event_*` e `is_final` solo se actualizan si el evento
+   entrante es igual o más reciente que el último registrado (comparando
+   `fecha`/`hora`): Pub/Sub no garantiza orden ni deduplica reintentos, así
+   que un evento viejo que llega tarde no puede degradar un estado más
+   nuevo. El evento se guarda en el historial de todos modos. `is_final` se
+   marca cuando el estado resultante es `entregado` o `devuelto`.
+6. En `soluciones`, `evento: "aprobacion"` nunca reabre un despacho ya
+   cerrado: si el estado actual es final se conserva; si no, pasa a
+   `en_transito`. `evento: "rechazo"` (o cualquier valor no reconocido) se
+   trata como `novedad`.
+7. **500** solo ante un fallo real del servicio — el payload ya quedó en la
    bitácora, así que se puede reprocesar.
 
 ---
