@@ -904,6 +904,13 @@ class ClientController extends Controller
         ]);
     }
 
+    /**
+     * Campos que solo maneja Finearom. No se le muestran al cliente en el
+     * formulario público ni se aceptan desde él, aunque los envíe a mano.
+     * Debe coincidir con INTERNAL_ONLY_FIELDS en `frontend/src/components/clients/ClientForm.vue`.
+     */
+    private const CLIENT_INTERNAL_ONLY_FIELDS = ['credit_term', 'client_type', 'lead_time'];
+
     public function showByToken(string $token): JsonResponse
     {
         try {
@@ -911,10 +918,16 @@ class ClientController extends Controller
             $client = Client::findOrFail($clientId);
             $offices = BranchOffice::where('client_id', $client->id)->get();
 
+            // El cliente no debe ver los campos de manejo interno: se quitan de la
+            // respuesta, no solo del formulario.
+            $clientData = collect($client->toArray())
+                ->except(self::CLIENT_INTERNAL_ONLY_FIELDS)
+                ->all();
+
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'client' => $client,
+                    'client' => $clientData,
                     'branch_offices' => $offices
                 ],
             ]);
@@ -931,8 +944,14 @@ class ClientController extends Controller
         try {
             $clientId = decrypt($token);
             $client = Client::findOrFail($clientId);
-            
+
             $data = $this->prepareClientPayload($request->validated(), $request);
+
+            // Los campos de manejo interno se descartan aunque vengan en la
+            // petición: el formulario público no los envía, pero el endpoint es
+            // público y no puede confiar en eso.
+            $data = collect($data)->except(self::CLIENT_INTERNAL_ONLY_FIELDS)->all();
+
             $client->update($data);
 
             // Envío de correo de bienvenida interno
@@ -955,7 +974,9 @@ class ClientController extends Controller
                     'welcome_date' => now()->format('d/m/Y'),
                 ];
 
-                Mail::to($internalEmails)->send(new ClientWelcomeMail($client, $emailData, true));
+                // El cuarto parámetro agrega el aviso de campos internos pendientes:
+                // esta copia es solo para el equipo, el cliente nunca la recibe.
+                Mail::to($internalEmails)->send(new ClientWelcomeMail($client->fresh(), $emailData, true, true));
             } catch (\Exception $e) {
                 \Log::error('Error enviando correo de bienvenida: ' . $e->getMessage());
             }

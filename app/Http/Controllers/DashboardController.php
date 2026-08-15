@@ -1911,50 +1911,75 @@ class DashboardController extends Controller
     private function calculateLeadTimeByClientType(string $startDate, string $endDate): array
     {
         try {
+            // Se cumple cuando el despacho real de Alexa NO es posterior a la fecha
+            // que comprometió planta (Marlon) en el parcial temporal de esa misma
+            // línea. Despachar antes cuenta como cumplido.
+            //
+            // Los dos promedios se calculan sobre EXACTAMENTE las mismas líneas —
+            // las que tienen ambas fechas — para que sean comparables. Antes se
+            // promediaba lo solicitado sobre todas las OCs y lo real solo sobre las
+            // despachadas, lo que hacía parecer que se entregaba con semanas de
+            // anticipación.
+            // La medición es POR PARCIAL, no por orden ni por línea: cada parcial
+            // temporal es un despacho que planta comprometió, y cada parcial real
+            // es el despacho que ocurrió. Medir por línea con MIN() escondía los
+            // atrasos de los envíos posteriores al primero.
+            //
+            // El rango de fechas se aplica sobre la fecha del DESPACHO REAL, no
+            // sobre la creación de la OC: así el indicador responde "de lo que
+            // despachamos en el período, cuánto salió a tiempo", queda completo al
+            // cerrar el mes y deja de moverse. Filtrando por creación, el mes en
+            // curso solo alcanzaba a ver las OCs tempranas — en agosto, 12 de 45.
+            //
+            // La tabla `partials` no tiene una columna que una el temporal con el
+            // real que lo cumple, así que se emparejan por posición dentro de la
+            // línea, ordenados por fecha. Los datos respaldan el criterio: el 98.4%
+            // de las líneas tiene la misma cantidad de parciales de cada tipo y el
+            // 97.8% de los pares coincide también en kilos.
             $rows = DB::select("
                 SELECT
                     c.client_type,
-                    COUNT(DISTINCT po.id)                                                          AS total_orders,
-                    COUNT(DISTINCT CASE WHEN p.first_dispatch IS NOT NULL THEN po.id END)          AS dispatched_orders,
-                    ROUND(AVG(CASE WHEN od.min_delivery IS NOT NULL
-                        THEN DATEDIFF(od.min_delivery, po.order_creation_date) END), 1)            AS avg_days_requested,
-                    ROUND(AVG(CASE WHEN p.first_dispatch IS NOT NULL
-                        THEN DATEDIFF(p.first_dispatch, po.order_creation_date) END), 1)           AS avg_days_real,
+                    COUNT(DISTINCT po.id)                                          AS total_orders,
+                    COUNT(*)                                                       AS evaluated_partials,
+                    ROUND(AVG(DATEDIFF(t.dispatch_date, po.order_creation_date)), 1) AS avg_days_committed,
+                    ROUND(AVG(DATEDIFF(r.dispatch_date, po.order_creation_date)), 1) AS avg_days_real,
+                    ROUND(AVG(DATEDIFF(r.dispatch_date, t.dispatch_date)), 1)        AS avg_deviation,
                     ROUND(
-                        100.0 * SUM(CASE WHEN p.first_dispatch IS NOT NULL
-                                          AND od.min_delivery IS NOT NULL
-                                          AND p.first_dispatch <= od.min_delivery THEN 1 ELSE 0 END)
-                        / NULLIF(COUNT(CASE WHEN p.first_dispatch IS NOT NULL
-                                            AND od.min_delivery IS NOT NULL THEN 1 END), 0)
-                    , 1)                                                                           AS on_time_pct
-                FROM purchase_orders po
-                JOIN clients c ON po.client_id = c.id
-                LEFT JOIN (
-                    SELECT order_id, MIN(dispatch_date) AS first_dispatch
+                        100.0 * SUM(CASE WHEN r.dispatch_date <= t.dispatch_date THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(*), 0)
+                    , 1)                                                           AS on_time_pct
+                FROM (
+                    SELECT product_order_id, dispatch_date,
+                           ROW_NUMBER() OVER (PARTITION BY product_order_id ORDER BY dispatch_date, id) rn
+                    FROM partials
+                    WHERE type = 'temporal' AND dispatch_date IS NOT NULL AND deleted_at IS NULL
+                ) t
+                JOIN (
+                    SELECT product_order_id, dispatch_date,
+                           ROW_NUMBER() OVER (PARTITION BY product_order_id ORDER BY dispatch_date, id) rn
                     FROM partials
                     WHERE type = 'real' AND dispatch_date IS NOT NULL AND deleted_at IS NULL
-                    GROUP BY order_id
-                ) p ON p.order_id = po.id
-                LEFT JOIN (
-                    SELECT purchase_order_id, MIN(delivery_date) AS min_delivery
-                    FROM purchase_order_product
-                    WHERE delivery_date IS NOT NULL
-                    GROUP BY purchase_order_id
-                ) od ON od.purchase_order_id = po.id
-                WHERE po.order_creation_date BETWEEN ? AND ?
+                ) r ON r.product_order_id = t.product_order_id AND r.rn = t.rn
+                JOIN purchase_order_product pop ON pop.id = t.product_order_id
+                JOIN purchase_orders po ON po.id = pop.purchase_order_id
+                JOIN clients c ON c.id = po.client_id
+                WHERE r.dispatch_date BETWEEN ? AND ?
                   AND c.client_type IN ('AA', 'A', 'B', 'C')
+                  AND po.status <> 'cancelled'
                   AND (po.is_muestra = 0 OR po.is_muestra IS NULL)
+                  AND pop.muestra = 0
                 GROUP BY c.client_type
                 ORDER BY FIELD(c.client_type, 'AA', 'A', 'B', 'C')
             ", [$startDate, $endDate]);
 
             return array_map(fn($r) => [
-                'client_type'       => $r->client_type,
-                'total_orders'      => (int) $r->total_orders,
-                'dispatched_orders' => (int) $r->dispatched_orders,
-                'avg_days_requested'=> $r->avg_days_requested !== null ? (float) $r->avg_days_requested : null,
-                'avg_days_real'     => $r->avg_days_real     !== null ? (float) $r->avg_days_real     : null,
-                'on_time_pct'       => $r->on_time_pct       !== null ? (float) $r->on_time_pct       : null,
+                'client_type'        => $r->client_type,
+                'total_orders'       => (int) $r->total_orders,
+                'evaluated_partials' => (int) $r->evaluated_partials,
+                'avg_days_committed' => $r->avg_days_committed !== null ? (float) $r->avg_days_committed : null,
+                'avg_days_real'      => $r->avg_days_real      !== null ? (float) $r->avg_days_real      : null,
+                'avg_deviation'      => $r->avg_deviation      !== null ? (float) $r->avg_deviation      : null,
+                'on_time_pct'        => $r->on_time_pct        !== null ? (float) $r->on_time_pct        : null,
             ], $rows);
         } catch (\Exception $e) {
             Log::error('Error calculating lead_time_by_client_type: ' . $e->getMessage());

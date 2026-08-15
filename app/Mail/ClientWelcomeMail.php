@@ -21,15 +21,30 @@ class ClientWelcomeMail extends Mailable implements ShouldQueue
     public $client;
     public $emailData;
     public $includeAttachments;
+    public $internalNotice;
 
     /**
-     * Create a new message instance.
+     * Campos que el cliente no ve en el formulario público porque son de manejo
+     * interno. Deben completarse desde la plataforma.
+     * Espejo de ClientController::CLIENT_INTERNAL_ONLY_FIELDS.
      */
-    public function __construct(Client $client, array $emailData = [], bool $includeAttachments = false)
+    private const CAMPOS_INTERNOS = [
+        'credit_term' => 'Plazo de crédito',
+        'client_type' => 'Tipo de cliente',
+        'lead_time'   => 'Lead time (días)',
+    ];
+
+    /**
+     * @param bool $internalNotice Agrega el aviso de campos internos pendientes.
+     *                             Solo para la copia que va al equipo de Finearom,
+     *                             nunca para el cliente.
+     */
+    public function __construct(Client $client, array $emailData = [], bool $includeAttachments = false, bool $internalNotice = false)
     {
         $this->client = $client;
         $this->emailData = $emailData;
         $this->includeAttachments = $includeAttachments;
+        $this->internalNotice = $internalNotice;
     }
 
     /**
@@ -56,10 +71,61 @@ class ClientWelcomeMail extends Mailable implements ShouldQueue
         $variables = $this->prepareVariables();
         $rendered = $service->renderTemplate('client_welcome', $variables);
 
+        if ($this->internalNotice) {
+            $rendered['footer_content'] = $this->buildInternalFieldsNotice()
+                . ($rendered['footer_content'] ?? '');
+        }
+
         return new Content(
             view: 'emails.template_centered',
             with: $rendered
         );
+    }
+
+    /**
+     * Aviso para el equipo de Finearom con los campos que el cliente no puede
+     * llenar. Muestra el valor actual de cada uno y marca los que faltan, para
+     * que se sepa qué hay que completar sin tener que entrar a revisar.
+     */
+    private function buildInternalFieldsNotice(): string
+    {
+        $filas = '';
+        $pendientes = 0;
+
+        foreach (self::CAMPOS_INTERNOS as $campo => $etiqueta) {
+            $valor = $this->client->{$campo};
+            $vacio = $valor === null || $valor === '' || $valor === 0;
+
+            if ($vacio) {
+                $pendientes++;
+                $celda = '<span style="color:#b45309;font-weight:bold;">Pendiente por completar</span>';
+            } else {
+                $celda = '<span style="color:#374151;">' . e((string) $valor) . '</span>';
+            }
+
+            $filas .= '<tr>'
+                . '<td style="padding:6px 12px;border:1px solid #d1d5db;font-size:13px;color:#374151;">' . e($etiqueta) . '</td>'
+                . '<td style="padding:6px 12px;border:1px solid #d1d5db;font-size:13px;text-align:right;">' . $celda . '</td>'
+                . '</tr>';
+        }
+
+        $encabezado = $pendientes > 0
+            ? 'Faltan ' . $pendientes . ' de ' . count(self::CAMPOS_INTERNOS) . ' campos internos por completar'
+            : 'Campos internos: ya están completos';
+
+        $base = rtrim((string) (config('app.frontend_url') ?? config('app.url')), '/');
+        $enlace = $base . '/clients/' . $this->client->id . '/edit';
+
+        return '<div style="margin:20px 0;padding:16px;border:1px solid #fcd34d;background:#fffbeb;border-radius:6px;font-family:Arial,sans-serif;">'
+            . '<p style="margin:0 0 6px 0;font-size:14px;font-weight:bold;color:#92400e;">' . $encabezado . '</p>'
+            . '<p style="margin:0 0 12px 0;font-size:13px;color:#78350f;">'
+            . 'El cliente no ve estos campos en el formulario porque son de manejo interno. '
+            . 'Hay que completarlos o corregirlos desde la plataforma.'
+            . '</p>'
+            . '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;">' . $filas . '</table>'
+            . '<a href="' . e($enlace) . '" style="display:inline-block;padding:9px 16px;background:#1F2345;color:#ffffff;'
+            . 'text-decoration:none;border-radius:4px;font-size:13px;font-weight:bold;">Completar en la plataforma</a>'
+            . '</div>';
     }
 
     /**
