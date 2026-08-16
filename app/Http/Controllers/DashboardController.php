@@ -2056,6 +2056,11 @@ class DashboardController extends Controller
                     'product_name'     => $r->product_name,
                     'product_code'     => $r->product_code,
                     'quantity'         => (float) $r->quantity,
+                    'fecha_ingreso'    => substr((string) $r->fecha_ingreso, 0, 10),
+                    // Hasta cuándo alcanzaba la política para esta orden.
+                    'fecha_limite'     => $tope === null
+                        ? null
+                        : $dias->addBusinessDays(substr((string) $r->fecha_ingreso, 0, 10), $tope),
                     'fecha_solicitada' => $r->fecha_solicitada,
                     'fecha_confirmada' => $r->fecha_confirmada,
                     'business_days'    => $habiles,

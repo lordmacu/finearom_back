@@ -73,6 +73,26 @@ class BusinessDaysService
         return $dias;
     }
 
+    /**
+     * Fecha resultante de sumar N días hábiles. Sirve para saber hasta cuándo
+     * alcanza la política: si la orden entra el 28-jul y el tope son 7 hábiles,
+     * el límite es el 6-ago.
+     */
+    public function addBusinessDays(string|Carbon $desde, int $dias): string
+    {
+        $cursor = $desde instanceof Carbon ? $desde->copy()->startOfDay() : Carbon::parse($desde)->startOfDay();
+        $sumados = 0;
+
+        while ($sumados < $dias) {
+            $cursor->addDay();
+            if ($this->esHabil($cursor)) {
+                $sumados++;
+            }
+        }
+
+        return $cursor->toDateString();
+    }
+
     public function esHabil(Carbon $fecha): bool
     {
         if (in_array($fecha->dayOfWeek, [Carbon::SATURDAY, Carbon::SUNDAY], true)) {
