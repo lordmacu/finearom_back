@@ -2038,6 +2038,12 @@ class DashboardController extends Controller
                 $fechaOk     = $r->fecha_confirmada <= $r->fecha_solicitada;
                 $politicaOk  = $tope === null || $habiles <= $tope;
 
+                // Días hábiles que se consumieron solo en comprometer la fecha.
+                // Si ya exceden la política, el incumplimiento nació al planear,
+                // no al despachar: son dos fallas distintas con dueños distintos.
+                $habilesCompromiso  = $dias->between($r->fecha_ingreso, $r->fecha_solicitada);
+                $compromisoFueraPol = $tope !== null && $habilesCompromiso > $tope;
+
                 $ordenes[$r->order_id] ??= [
                     'order_id'          => (int) $r->order_id,
                     'order_consecutive' => $r->order_consecutive,
@@ -2053,6 +2059,8 @@ class DashboardController extends Controller
                     'fecha_solicitada' => $r->fecha_solicitada,
                     'fecha_confirmada' => $r->fecha_confirmada,
                     'business_days'    => $habiles,
+                    'days_to_commit'   => $habilesCompromiso,
+                    'commit_out_of_policy' => $compromisoFueraPol,
                     'fecha_cumplida'   => $fechaOk,
                     'dentro_politica'  => $politicaOk,
                     'desfase_dias'     => (int) Carbon::parse($r->fecha_solicitada)
