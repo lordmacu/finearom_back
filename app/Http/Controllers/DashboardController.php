@@ -1974,6 +1974,118 @@ class DashboardController extends Controller
     }
 
     /**
+     * Detalle del cumplimiento de un tipo de cliente, parcial por parcial.
+     *
+     * Alimenta el popup que se abre al hacer clic en una fila de la tarjeta: la
+     * tarjeta muestra promedios y aquí se ve de dónde salen, para poder revisar
+     * caso por caso si el número está bien.
+     */
+    public function leadTimeDetail(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $request->validate([
+            'client_type' => ['required', 'string', 'in:AA,A,B,C'],
+            'start_date'  => ['nullable', 'date'],
+            'end_date'    => ['nullable', 'date'],
+        ]);
+
+        $now       = Carbon::now();
+        $clientType = $request->get('client_type');
+        $startDate = $request->get('start_date') ?? $now->copy()->startOfMonth()->format('Y-m-d');
+        $endDate   = $request->get('end_date')   ?? $now->copy()->endOfMonth()->format('Y-m-d');
+
+        try {
+            $rows = DB::select("
+                SELECT
+                    po.id                    AS order_id,
+                    po.order_consecutive     AS order_consecutive,
+                    cl.client_name           AS client_name,
+                    p.product_name           AS product_name,
+                    p.code                   AS product_code,
+                    pop.quantity             AS quantity,
+                    po.order_creation_date   AS fecha_ingreso,
+                    t.dispatch_date          AS fecha_solicitada,
+                    r.dispatch_date          AS fecha_confirmada
+                FROM (
+                    SELECT product_order_id, dispatch_date, id,
+                           ROW_NUMBER() OVER (PARTITION BY product_order_id ORDER BY dispatch_date, id) rn
+                    FROM partials
+                    WHERE type = 'temporal' AND dispatch_date IS NOT NULL AND deleted_at IS NULL
+                ) t
+                JOIN (
+                    SELECT product_order_id, dispatch_date,
+                           ROW_NUMBER() OVER (PARTITION BY product_order_id ORDER BY dispatch_date, id) rn
+                    FROM partials
+                    WHERE type = 'real' AND dispatch_date IS NOT NULL AND deleted_at IS NULL
+                ) r ON r.product_order_id = t.product_order_id AND r.rn = t.rn
+                JOIN purchase_order_product pop ON pop.id = t.product_order_id
+                JOIN products p  ON p.id  = pop.product_id
+                JOIN purchase_orders po ON po.id = pop.purchase_order_id
+                JOIN clients cl ON cl.id = po.client_id
+                WHERE r.dispatch_date BETWEEN ? AND ?
+                  AND cl.client_type = ?
+                  AND po.status <> 'cancelled'
+                  AND (po.is_muestra = 0 OR po.is_muestra IS NULL)
+                  AND pop.muestra = 0
+                ORDER BY po.order_consecutive, t.dispatch_date
+            ", [$startDate, $endDate, $clientType]);
+
+            $dias   = app(\App\Services\BusinessDaysService::class);
+            $tope   = self::POLITICA_DIAS_HABILES[$clientType] ?? null;
+            $ordenes = [];
+
+            foreach ($rows as $r) {
+                $habiles     = $dias->between($r->fecha_ingreso, $r->fecha_confirmada);
+                $fechaOk     = $r->fecha_confirmada <= $r->fecha_solicitada;
+                $politicaOk  = $tope === null || $habiles <= $tope;
+
+                $ordenes[$r->order_id] ??= [
+                    'order_id'          => (int) $r->order_id,
+                    'order_consecutive' => $r->order_consecutive,
+                    'client_name'       => $r->client_name,
+                    'fecha_ingreso'     => substr((string) $r->fecha_ingreso, 0, 10),
+                    'partials'          => [],
+                ];
+
+                $ordenes[$r->order_id]['partials'][] = [
+                    'product_name'     => $r->product_name,
+                    'product_code'     => $r->product_code,
+                    'quantity'         => (float) $r->quantity,
+                    'fecha_solicitada' => $r->fecha_solicitada,
+                    'fecha_confirmada' => $r->fecha_confirmada,
+                    'business_days'    => $habiles,
+                    'fecha_cumplida'   => $fechaOk,
+                    'dentro_politica'  => $politicaOk,
+                    'desfase_dias'     => (int) Carbon::parse($r->fecha_solicitada)
+                                              ->diffInDays(Carbon::parse($r->fecha_confirmada), false),
+                ];
+            }
+
+            // Los incumplimientos primero: es lo que se quiere revisar al abrir.
+            $ordenes = array_values($ordenes);
+            usort($ordenes, function ($a, $b) {
+                $fallasA = count(array_filter($a['partials'], fn($p) => ! $p['fecha_cumplida'] || ! $p['dentro_politica']));
+                $fallasB = count(array_filter($b['partials'], fn($p) => ! $p['fecha_cumplida'] || ! $p['dentro_politica']));
+
+                return $fallasB <=> $fallasA;
+            });
+
+            return response()->json([
+                'success' => true,
+                'data'    => [
+                    'client_type'  => $clientType,
+                    'policy_label' => self::POLITICA_ETIQUETA[$clientType] ?? '',
+                    'policy_days'  => $tope,
+                    'orders'       => $ordenes,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('leadTimeDetail error: ' . $e->getMessage());
+
+            return response()->json(['success' => false, 'message' => 'Error obteniendo el detalle'], 500);
+        }
+    }
+
+    /**
      * Política de despacho acordada con el cliente, en DÍAS HÁBILES desde que
      * ingresa la OC hasta que se despacha.
      */
