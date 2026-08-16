@@ -2141,8 +2141,10 @@ class DashboardController extends Controller
             $porTipo[$tipo] ??= [
                 'orders' => [], 'partials' => 0, 'habiles' => [],
                 'fecha_ok' => 0, 'politica_ok' => 0,
+                'commit_late' => 0, 'dispatch_late' => 0,
             ];
 
+            $tope    = self::POLITICA_DIAS_HABILES[$tipo] ?? PHP_INT_MAX;
             $habiles = $dias->between($r->fecha_ingreso, $r->fecha_confirmada);
 
             $porTipo[$tipo]['orders'][$r->order_id] = true;
@@ -2153,8 +2155,19 @@ class DashboardController extends Controller
                 $porTipo[$tipo]['fecha_ok']++;
             }
 
-            if ($habiles <= (self::POLITICA_DIAS_HABILES[$tipo] ?? PHP_INT_MAX)) {
+            if ($habiles <= $tope) {
                 $porTipo[$tipo]['politica_ok']++;
+            } else {
+                // Se incumplió la política. ¿Nació al comprometer una fecha que ya
+                // excedía el plazo, o al despachar después de un compromiso válido?
+                // Son fallas distintas: una es de planeación y otra de ejecución.
+                $habilesCompromiso = $dias->between($r->fecha_ingreso, $r->fecha_solicitada);
+
+                if ($habilesCompromiso > $tope) {
+                    $porTipo[$tipo]['commit_late']++;
+                } else {
+                    $porTipo[$tipo]['dispatch_late']++;
+                }
             }
         }
 
@@ -2176,6 +2189,8 @@ class DashboardController extends Controller
                 'evaluated_partials'=> $d['partials'],
                 'avg_business_days' => round(array_sum($d['habiles']) / $n, 1),
                 'within_policy_pct' => round(100 * $d['politica_ok'] / $n, 1),
+                'commit_late'       => $d['commit_late'],
+                'dispatch_late'     => $d['dispatch_late'],
                 'on_time_pct'       => round(100 * $d['fecha_ok'] / $n, 1),
             ];
         }
