@@ -1939,15 +1939,10 @@ class DashboardController extends Controller
             $rows = DB::select("
                 SELECT
                     c.client_type,
-                    COUNT(DISTINCT po.id)                                          AS total_orders,
-                    COUNT(*)                                                       AS evaluated_partials,
-                    ROUND(AVG(DATEDIFF(t.dispatch_date, po.order_creation_date)), 1) AS avg_days_committed,
-                    ROUND(AVG(DATEDIFF(r.dispatch_date, po.order_creation_date)), 1) AS avg_days_real,
-                    ROUND(AVG(DATEDIFF(r.dispatch_date, t.dispatch_date)), 1)        AS avg_deviation,
-                    ROUND(
-                        100.0 * SUM(CASE WHEN r.dispatch_date <= t.dispatch_date THEN 1 ELSE 0 END)
-                        / NULLIF(COUNT(*), 0)
-                    , 1)                                                           AS on_time_pct
+                    po.id                    AS order_id,
+                    po.order_creation_date   AS fecha_ingreso,
+                    t.dispatch_date          AS fecha_solicitada,
+                    r.dispatch_date          AS fecha_confirmada
                 FROM (
                     SELECT product_order_id, dispatch_date,
                            ROW_NUMBER() OVER (PARTITION BY product_order_id ORDER BY dispatch_date, id) rn
@@ -1968,22 +1963,98 @@ class DashboardController extends Controller
                   AND po.status <> 'cancelled'
                   AND (po.is_muestra = 0 OR po.is_muestra IS NULL)
                   AND pop.muestra = 0
-                GROUP BY c.client_type
                 ORDER BY FIELD(c.client_type, 'AA', 'A', 'B', 'C')
             ", [$startDate, $endDate]);
 
-            return array_map(fn($r) => [
-                'client_type'        => $r->client_type,
-                'total_orders'       => (int) $r->total_orders,
-                'evaluated_partials' => (int) $r->evaluated_partials,
-                'avg_days_committed' => $r->avg_days_committed !== null ? (float) $r->avg_days_committed : null,
-                'avg_days_real'      => $r->avg_days_real      !== null ? (float) $r->avg_days_real      : null,
-                'avg_deviation'      => $r->avg_deviation      !== null ? (float) $r->avg_deviation      : null,
-                'on_time_pct'        => $r->on_time_pct        !== null ? (float) $r->on_time_pct        : null,
-            ], $rows);
+            return $this->aggregateLeadTimeRows($rows);
         } catch (\Exception $e) {
             Log::error('Error calculating lead_time_by_client_type: ' . $e->getMessage());
             return [];
         }
+    }
+
+    /**
+     * Política de despacho acordada con el cliente, en DÍAS HÁBILES desde que
+     * ingresa la OC hasta que se despacha.
+     */
+    private const POLITICA_DIAS_HABILES = [
+        'AA' => 7,
+        'A'  => 7,
+        'B'  => 12,
+        'C'  => 12,
+    ];
+
+    /** Etiqueta de la política, para mostrarla en la tarjeta. */
+    private const POLITICA_ETIQUETA = [
+        'AA' => '7 hábiles',
+        'A'  => '7 hábiles',
+        'B'  => '8-12 hábiles',
+        'C'  => '8-12 hábiles',
+    ];
+
+    /**
+     * Agrupa por tipo de cliente y calcula las dos condiciones de la política:
+     *
+     *  1. Fecha confirmada por Alexa = fecha solicitada por planta. Despachar
+     *     antes también cumple: adelantarse no perjudica al cliente.
+     *  2. Días HÁBILES entre el ingreso de la OC y el despacho confirmado, dentro
+     *     del tope de la política del tipo de cliente.
+     *
+     * El conteo de hábiles se hace en PHP porque descuenta los festivos
+     * colombianos, que SQL no conoce.
+     *
+     * @param  array<int, object>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function aggregateLeadTimeRows(array $rows): array
+    {
+        $dias = app(\App\Services\BusinessDaysService::class);
+        $porTipo = [];
+
+        foreach ($rows as $r) {
+            $tipo = $r->client_type;
+            $porTipo[$tipo] ??= [
+                'orders' => [], 'partials' => 0, 'habiles' => [],
+                'fecha_ok' => 0, 'politica_ok' => 0,
+            ];
+
+            $habiles = $dias->between($r->fecha_ingreso, $r->fecha_confirmada);
+
+            $porTipo[$tipo]['orders'][$r->order_id] = true;
+            $porTipo[$tipo]['partials']++;
+            $porTipo[$tipo]['habiles'][] = $habiles;
+
+            if ($r->fecha_confirmada <= $r->fecha_solicitada) {
+                $porTipo[$tipo]['fecha_ok']++;
+            }
+
+            if ($habiles <= (self::POLITICA_DIAS_HABILES[$tipo] ?? PHP_INT_MAX)) {
+                $porTipo[$tipo]['politica_ok']++;
+            }
+        }
+
+        $resultado = [];
+
+        foreach (['AA', 'A', 'B', 'C'] as $tipo) {
+            if (! isset($porTipo[$tipo])) {
+                continue;
+            }
+
+            $d = $porTipo[$tipo];
+            $n = max($d['partials'], 1);
+
+            $resultado[] = [
+                'client_type'       => $tipo,
+                'policy_label'      => self::POLITICA_ETIQUETA[$tipo] ?? '',
+                'policy_days'       => self::POLITICA_DIAS_HABILES[$tipo] ?? null,
+                'total_orders'      => count($d['orders']),
+                'evaluated_partials'=> $d['partials'],
+                'avg_business_days' => round(array_sum($d['habiles']) / $n, 1),
+                'within_policy_pct' => round(100 * $d['politica_ok'] / $n, 1),
+                'on_time_pct'       => round(100 * $d['fecha_ok'] / $n, 1),
+            ];
+        }
+
+        return $resultado;
     }
 }
