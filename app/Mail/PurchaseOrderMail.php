@@ -137,25 +137,18 @@ class PurchaseOrderMail extends Mailable
         foreach ($this->forecastExceedances as $row) {
             $rows .= '<tr>'
                 . '<td style="' . $td . '">' . e($row['nombre']) . ' <span style="color:#9ca3af;font-size:11px;">(' . e($row['codigo']) . ')</span></td>'
-                . '<td style="' . $td . 'text-align:center;">' . e($row['mes'] ?? '') . '</td>'
-                . '<td style="' . $td . 'text-align:right;">' . number_format($row['pronostico'] ?? 0, 0, ',', '.') . ' kg</td>'
-                . '<td style="' . $td . 'text-align:right;">' . number_format($row['comprometido'] ?? 0, 0, ',', '.') . ' kg</td>'
                 . '<td style="' . $td . 'text-align:right;">' . number_format($row['cantidad'], 0, ',', '.') . ' kg</td>'
                 . '<td style="' . $td . 'text-align:right;font-weight:bold;color:#b45309;">' . number_format($row['excedente'], 0, ',', '.') . ' kg</td>'
                 . '</tr>';
         }
 
         return '<p style="font-family:Arial,sans-serif;font-size:13px;color:#1F2345;margin:16px 0 8px 0;">'
-            . 'Los siguientes productos podrían presentar novedades en la fecha de entrega: los kilos de este pedido, '
-            . 'sumados a los que ya están comprometidos para el mes de entrega, superan el pronóstico de ese mes.'
+            . 'Los siguientes productos podrían presentar novedades en la fecha de entrega debido a que la cantidad solicitada supera el pronóstico.'
             . '</p>'
             . '<table style="width:100%;border-collapse:collapse;margin:0 0 16px 0;font-family:Arial,sans-serif;">'
             . '<thead><tr>'
             . '<th style="' . $th . '">Referencia</th>'
-            . '<th style="' . $th . 'text-align:center;">Mes de entrega</th>'
-            . '<th style="' . $th . 'text-align:right;">Pronóstico del mes</th>'
-            . '<th style="' . $th . 'text-align:right;">Ya comprometido</th>'
-            . '<th style="' . $th . 'text-align:right;">Este pedido</th>'
+            . '<th style="' . $th . 'text-align:right;">Cantidad solicitada</th>'
             . '<th style="' . $th . 'text-align:right;">Excede en</th>'
             . '</tr></thead>'
             . '<tbody>' . $rows . '</tbody>'
