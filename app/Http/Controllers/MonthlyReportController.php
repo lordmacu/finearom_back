@@ -1045,6 +1045,11 @@ class MonthlyReportController extends Controller
             "     (b) Si una métrica NO va a mostrarse, esa CTE NO entra en 'claves' ni se le hace LEFT JOIN.\n" .
             "     ✗ CASO REAL (Bouquet, agosto 2026): se unió 'desp' a claves pero el SELECT solo mostraba pronosticado/pedido/pendiente. El código 6000 entró como fila con TODO en 0 — y en realidad había despachado 15 kg, que quedaron invisibles. Una fila en cero absoluto es peor que no tenerla: el usuario lee 'no pasó nada' cuando sí pasó.\n" .
             "     → Regla práctica: si el usuario pide 'lo despachado', muéstralo Y únelo. Si solo pide pedido y pendiente, no unas 'desp'. Nunca a medias.\n" .
+            "  ⚠⚠ NINGUNA FILA DEL DETALLE PUEDE SALIR CON TODAS LAS MÉTRICAS EN 0: es una llave aportada por una CTE que hizo match con valor 0 y no le dice nada al usuario.\n" .
+            "     ✗ CASO REAL: el código 6000 salió con pronosticado=0, pedido=0 y pendiente=0 porque su parcial temporal ya estaba despachado por completo → GREATEST(temporal-real,0)=0, pero la CTE igual aportó la llave.\n" .
+            "     ✓ Dos formas de evitarlo (usa cualquiera): cierra cada CTE con HAVING SUM(...) > 0, o filtra al final con\n" .
+            "         WHERE COALESCE(m1,0) + COALESCE(m2,0) + COALESCE(m3,0) > 0\n" .
+            "     ⚠ OJO: 'todas en 0' significa TODAS. Una referencia con pronosticado=80 y el resto en 0 SÍ debe mostrarse — ese 0% de cumplimiento es justo lo que hay que ver. Solo se descarta la fila cuando NINGUNA métrica tiene valor.\n" .
             "  ⚠⚠ LA COLUMNA 'referencia' ES OBLIGATORIA en cualquier informe por producto: el usuario pide el detalle POR REFERENCIA y un código suelto no le dice nada. Trae SIEMPRE COALESCE(p.product_name, k.codigo) AS referencia con LEFT JOIN products, y en la fila TOTAL pon 'TOTAL GENERAL' en esa posición.\n" .
             "  → Las referencias vendidas SIN pronóstico son un hallazgo de negocio, no ruido: muéstralas con pronosticado=0 y cumplimiento NULL/'sin pronóstico'.\n" .
             "  → Es la MISMA regla del FULL JOIN de más arriba. Si el informe compara dos lados, ninguno de los dos puede ser el FROM.\n" .
