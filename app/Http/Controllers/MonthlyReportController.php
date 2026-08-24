@@ -382,8 +382,11 @@ class MonthlyReportController extends Controller
             if ($session) {
                 foreach ($session->messages as $msg) {
                     if (!empty($msg['hidden'])) continue;
-                    $role = $msg['role'] === 'assistant' ? 'assistant' : 'user';
-                    $sessionMessages[] = ['role' => $role, 'content' => $msg['content']];
+                    $role    = $msg['role'] === 'assistant' ? 'assistant' : 'user';
+                    $content = $role === 'assistant'
+                        ? $this->normalizeAssistantHistory($msg['content'])
+                        : $msg['content'];
+                    $sessionMessages[] = ['role' => $role, 'content' => $content];
                 }
             }
 
@@ -495,6 +498,18 @@ class MonthlyReportController extends Controller
 
                 curl_exec($ch);
                 curl_close($ch);
+
+                // Red de seguridad: json_object puede degenerar en una respuesta de puros
+                // espacios. Sin esto el usuario ve una burbuja vacía y el turno inservible
+                // queda guardado en el historial, contaminando los siguientes.
+                if (trim($fullContent) === '') {
+                    Log::warning('[Chat][DeepSeek] Respuesta vacía/degenerada — no se guarda en historial.');
+                    $aviso = '<p>No pude construir la respuesta. Reformula la pregunta o intenta de nuevo.</p>';
+                    echo "data: " . json_encode(['token' => $aviso]) . "\n\n";
+                    echo "data: " . json_encode(['done' => true, 'content' => $aviso]) . "\n\n";
+                    flush();
+                    return;
+                }
 
                 // Guardar en sesión al terminar
                 if ($sessionRef && $fullContent) {
@@ -2499,6 +2514,42 @@ EOT;
      *   3. Detectar SQL plano (empieza con SELECT/WITH/--)
      *   4. Devolver el contenido tal cual
      */
+    /**
+     * Reescribe un turno del asistente al contrato JSON antes de reinyectarlo como historial.
+     *
+     * Las sesiones viejas guardaron HTML (turno 0) o markdown (turnos que ya habían
+     * derivado). Al reinyectarse tal cual, el modelo los lee como precedente de formato:
+     * con historial crudo deja de emitir JSON y —verificado contra deepseek-v4-flash—
+     * puede colapsar a 1.300 tokens de espacios en blanco. Normalizado, responde bien.
+     */
+    private function normalizeAssistantHistory(string $content): string
+    {
+        if (str_starts_with(ltrim($content), '{')) {
+            return $content; // ya cumple el contrato
+        }
+
+        $sql  = null;
+        $html = $content;
+
+        if (preg_match('/<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/i', $html, $m)) {
+            $sql  = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5));
+            $html = preg_replace('/<pre><code[^>]*>[\s\S]*?<\/code><\/pre>/i', '', $html);
+        } elseif (preg_match('/```(?:sql)?\s*\r?\n([\s\S]*?)\r?\n?```/i', $html, $m)) {
+            $sql  = trim($m[1]);
+            $html = preg_replace('/```(?:sql)?\s*\r?\n[\s\S]*?\r?\n?```/i', '', $html);
+        }
+
+        $html = trim($html);
+        if ($html !== '' && !str_starts_with($html, '<')) {
+            $html = '<p>' . $html . '</p>';
+        }
+
+        return json_encode(
+            ['html' => $html, 'sql' => $sql],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        );
+    }
+
     private function parseStructuredResponse(string $content): string
     {
         $json = trim($content);
