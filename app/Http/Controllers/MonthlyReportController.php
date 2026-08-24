@@ -1056,6 +1056,25 @@ class MonthlyReportController extends Controller
             "  ✓ REGLA: si necesitas el total general, NO uses ROLLUP. Devuelve solo el detalle y deja que el usuario/el front sume, o calcula el total con una CTE aparte y únelo con UNION ALL poniendo las métricas como agregados reales (SUM(...)), nunca como columnas del GROUP BY.\n" .
             "  ✓ Todo lo que sea métrica va SIEMPRE como agregado (SUM/COUNT/ROUND(SUM…)), JAMÁS dentro del GROUP BY. Si te ves obligado a meter una métrica en el GROUP BY, la consulta está mal armada: reescríbela.\n\n" .
 
+            "⚠⚠⚠ SI PIDEN UN TOTAL GENERAL, LA FILA TIENE QUE ESTAR EN EL RESULTADO:\n" .
+            "Cuando el usuario diga 'general', 'total del mes', 'cumplimiento general', 'en total' o 'consolidado', el SELECT DEBE devolver esa fila. NO basta el detalle por referencia esperando que el usuario sume: si la pidió, es porque no la quiere calcular a mano.\n" .
+            "  ✓ Añádela con UNION ALL y agregados reales sobre las MISMAS CTEs del detalle (nunca con ROLLUP):\n" .
+            "      SELECT k.codigo, … FROM claves k LEFT JOIN …            -- detalle\n" .
+            "      UNION ALL\n" .
+            "      SELECT 'TOTAL' AS codigo, 'TOTAL GENERAL' AS referencia,\n" .
+            "             SUM(COALESCE(pr.kilos_pronosticados,0)), SUM(COALESCE(pd.kilos_pedidos,0)), …,\n" .
+            "             ROUND(SUM(COALESCE(pd.kilos_pedidos,0)) / NULLIF(SUM(COALESCE(pr.kilos_pronosticados,0)),0) * 100, 2)\n" .
+            "      FROM claves k LEFT JOIN …                                -- mismos JOINs que el detalle\n" .
+            "  ⚠ El % del total se calcula sobre las SUMAS (SUM(a)/SUM(b)), NUNCA como promedio de los % por fila: da distinto y está mal.\n" .
+            "  ⚠ La fila TOTAL va SIEMPRE al final: ORDER BY (codigo = 'TOTAL') ASC, <criterio real> — o el equivalente con CASE WHEN.\n\n" .
+
+            "⚠⚠⚠ ORDEN DE LAS FILAS — NO ENTIERRES LO QUE TIENE MOVIMIENTO:\n" .
+            "En MariaDB `ORDER BY <metrica> DESC` manda los NULL al FINAL. En un informe pronóstico-vs-real las referencias vendidas SIN pronóstico tienen cumplimiento NULL, así que quedan debajo de las que tienen 0% — es decir, lo que SÍ pasó queda sepultado bajo lo que no pasó.\n" .
+            "  ✗ CASO REAL (Bouquet, agosto 2026): con ORDER BY cumplimiento_pct DESC, las 12 referencias que realmente se vendieron quedaron al fondo, debajo de 15 referencias con 0,00% y cero movimiento.\n" .
+            "  ✓ Ordena primero por si hubo actividad y después por el criterio pedido:\n" .
+            "      ORDER BY (COALESCE(kilos_pedidos,0) + COALESCE(kilos_pendientes,0)) DESC, cumplimiento_pct DESC\n" .
+            "    (o `ORDER BY cumplimiento_pct IS NULL, cumplimiento_pct DESC` si el usuario pidió explícitamente ordenar por cumplimiento).\n\n" .
+
             "FORMATO DE RESPUESTA — OBLIGATORIO:\n" .
             "Responde SIEMPRE con un objeto JSON válido, sin texto antes ni después, sin wrapper de backticks.\n" .
             "⚠ CRÍTICO PARA STREAMING: el campo \"html\" DEBE ser SIEMPRE el PRIMER campo del JSON — nunca muevas \"sql\" al inicio.\n" .
