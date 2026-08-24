@@ -1028,6 +1028,28 @@ class MonthlyReportController extends Controller
             "  → Cumplimiento debe manejar NULL en AMBOS lados: si no hay forecast, cumplimiento='sin presupuesto'; si no hay ventas, cumplimiento=0%.\n" .
             "  → Compara también valor USD si el usuario pide 'vs pronosticado' sin especificar kilos — incluye valor_pronosticado_usd = SUM(sf.cantidad_forecast * COALESCE(NULLIF(p.price,0), 0)) en la CTE pronosticado (join products por código con COLLATE).\n" .
             "  → Filtro SIEMPRE en 'creadas': AND po.status != 'cancelled' para no inflar con órdenes anuladas.\n\n" .
+
+            "⚠⚠⚠ PROHIBIDO ANCLAR UN INFORME PRONÓSTICO-vs-REAL EN sales_forecasts (CASO REAL VERIFICADO 2026-08-24):\n" .
+            "NUNCA escribas 'FROM sales_forecasts sf LEFT JOIN <ventas>'. Ese LEFT JOIN solo conserva las referencias que TIENEN pronóstico y borra en silencio todo lo que se vendió sin pronosticar.\n" .
+            "  ✗ CASO REAL (cliente Bouquet, agosto 2026): anclado en sales_forecasts el informe capturó 30 de 150 kg despachados — se perdió el 80% (120 kg en 9 referencias: FANTASMA 20, PINK MILK B 20, MAAHIR BLACK B 15, FLORAL FRESH 15…). Del lado de pedidos fue peor: 30 de 180 kg (17%).\n" .
+            "  ✓ SIEMPRE arma un CTE 'claves' con UNION de TODOS los lados que vayas a mostrar y haz LEFT JOIN a cada métrica:\n" .
+            "      WITH pron AS (...), ped AS (...), desp AS (...),\n" .
+            "           claves AS (SELECT codigo FROM pron UNION SELECT codigo FROM ped UNION SELECT codigo FROM desp)\n" .
+            "      SELECT k.codigo, COALESCE(pron.kilos,0), COALESCE(ped.kilos,0), COALESCE(desp.kilos,0)\n" .
+            "      FROM claves k LEFT JOIN pron ON … LEFT JOIN ped ON … LEFT JOIN desp ON …\n" .
+            "  → Las referencias vendidas SIN pronóstico son un hallazgo de negocio, no ruido: muéstralas con pronosticado=0 y cumplimiento NULL/'sin pronóstico'.\n" .
+            "  → Es la MISMA regla del FULL JOIN de más arriba. Si el informe compara dos lados, ninguno de los dos puede ser el FROM.\n\n" .
+
+            "⚠⚠⚠ 'KILOS PEDIDOS' Y 'KILOS DESPACHADOS' SON COLUMNAS DISTINTAS — NO SUSTITUYAS UNA POR OTRA:\n" .
+            "Si el usuario pide 'los kilos que entraron como pedido' / 'lo que se vendió porque entró como pedido' quiere SUM(pop.quantity) de las OCs creadas en el período. NO le entregues SUM(par.quantity) (despachado) en su lugar.\n" .
+            "Si pide ambos (pedido Y pendiente por salir, o pedido Y despachado), el SELECT DEBE traer una columna por cada uno. Verifica antes de responder que toda métrica nombrada en la pregunta tiene su propia columna.\n\n" .
+
+            "⚠⚠⚠ WITH ROLLUP — SOLO CON UNA COLUMNA AGRUPADA, Y NUNCA CON COLUMNAS NO AGREGADAS (CASO REAL VERIFICADO 2026-08-24):\n" .
+            "En la fila de super-agregado del ROLLUP TODAS las columnas del GROUP BY valen NULL. Si el SELECT muestra una columna del GROUP BY (típico: COALESCE(cte.metrica,0) donde 'metrica' está en el GROUP BY), en el total aparece 0.\n" .
+            "  ✗ CASO REAL: 'GROUP BY sf.codigo, p.product_name, r.kilos_reales, pe.kilos_pendientes WITH ROLLUP' devolvió la fila total con pronosticado=340 pero despachado=0, pendiente=0 y cumplimiento=0.00% — el cumplimiento general de verdad era 44,1%. Además generó 65 filas para 16 referencias (3 niveles de subtotales basura).\n" .
+            "  ✓ REGLA: si necesitas el total general, NO uses ROLLUP. Devuelve solo el detalle y deja que el usuario/el front sume, o calcula el total con una CTE aparte y únelo con UNION ALL poniendo las métricas como agregados reales (SUM(...)), nunca como columnas del GROUP BY.\n" .
+            "  ✓ Todo lo que sea métrica va SIEMPRE como agregado (SUM/COUNT/ROUND(SUM…)), JAMÁS dentro del GROUP BY. Si te ves obligado a meter una métrica en el GROUP BY, la consulta está mal armada: reescríbela.\n\n" .
+
             "FORMATO DE RESPUESTA — OBLIGATORIO:\n" .
             "Responde SIEMPRE con un objeto JSON válido, sin texto antes ni después, sin wrapper de backticks.\n" .
             "⚠ CRÍTICO PARA STREAMING: el campo \"html\" DEBE ser SIEMPRE el PRIMER campo del JSON — nunca muevas \"sql\" al inicio.\n" .
