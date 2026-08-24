@@ -1033,12 +1033,18 @@ class MonthlyReportController extends Controller
             "NUNCA escribas 'FROM sales_forecasts sf LEFT JOIN <ventas>'. Ese LEFT JOIN solo conserva las referencias que TIENEN pronóstico y borra en silencio todo lo que se vendió sin pronosticar.\n" .
             "  ✗ CASO REAL (cliente Bouquet, agosto 2026): anclado en sales_forecasts el informe capturó 30 de 150 kg despachados — se perdió el 80% (120 kg en 9 referencias: FANTASMA 20, PINK MILK B 20, MAAHIR BLACK B 15, FLORAL FRESH 15…). Del lado de pedidos fue peor: 30 de 180 kg (17%).\n" .
             "  ✓ SIEMPRE arma un CTE 'claves' con UNION de TODOS los lados que vayas a mostrar y haz LEFT JOIN a cada métrica:\n" .
-            "      WITH pron AS (...), ped AS (...), desp AS (...),\n" .
-            "           claves AS (SELECT codigo FROM pron UNION SELECT codigo FROM ped UNION SELECT codigo FROM desp)\n" .
-            "      SELECT k.codigo, COALESCE(pron.kilos,0), COALESCE(ped.kilos,0), COALESCE(desp.kilos,0)\n" .
-            "      FROM claves k LEFT JOIN pron ON … LEFT JOIN ped ON … LEFT JOIN desp ON …\n" .
+            "      WITH pron AS (...), ped AS (...), desp AS (...), pend AS (...),\n" .
+            "           claves AS (SELECT codigo FROM pron UNION SELECT codigo FROM ped UNION SELECT codigo FROM desp UNION SELECT codigo FROM pend)\n" .
+            "      SELECT k.codigo, COALESCE(pron.kilos,0), COALESCE(ped.kilos,0), COALESCE(desp.kilos,0), COALESCE(pend.kilos,0)\n" .
+            "      FROM claves k LEFT JOIN pron ON … LEFT JOIN ped ON … LEFT JOIN desp ON … LEFT JOIN pend ON …\n" .
+            "  ⚠ EL UNION DEBE INCLUIR **TODAS** LAS MÉTRICAS DEL SELECT, NO DOS. Unir solo pronóstico+pedidos y dejar despachos fuera vuelve a perder datos.\n" .
+            "    ✗ CASO REAL (Bouquet, agosto 2026): con 'claves = pron UNION ped' se perdió el código 6000 (FLORAL FRESH, 15 kg despachados en agosto de una OC creada en JULIO): no estaba en el pronóstico ni en las OCs del mes, pero SÍ se despachó. Reportó 135 de 150 kg.\n" .
+            "    → Un despacho de agosto puede venir de una OC de cualquier mes anterior. El lado 'despachos' NUNCA es redundante con el lado 'pedidos'.\n" .
             "  → Las referencias vendidas SIN pronóstico son un hallazgo de negocio, no ruido: muéstralas con pronosticado=0 y cumplimiento NULL/'sin pronóstico'.\n" .
-            "  → Es la MISMA regla del FULL JOIN de más arriba. Si el informe compara dos lados, ninguno de los dos puede ser el FROM.\n\n" .
+            "  → Es la MISMA regla del FULL JOIN de más arriba. Si el informe compara dos lados, ninguno de los dos puede ser el FROM.\n" .
+            "  ⚠⚠ NUNCA uses INNER JOIN products para traer el NOMBRE de la referencia en un CTE de pronóstico: hay códigos en sales_forecasts sin fila en products para ese cliente y el INNER JOIN los BORRA junto con sus kilos.\n" .
+            "    ✗ CASO REAL (Bouquet, agosto 2026): el código 14305 (10 kg pronosticados) no tiene fila en products para ese cliente; con INNER JOIN el pronóstico total bajó de 340 a 330 kg.\n" .
+            "    ✓ Usa SIEMPRE LEFT JOIN products y COALESCE(p.product_name, sf.codigo) AS referencia. El nombre es decorativo; los kilos no.\n\n" .
 
             "⚠⚠⚠ 'KILOS PEDIDOS' Y 'KILOS DESPACHADOS' SON COLUMNAS DISTINTAS — NO SUSTITUYAS UNA POR OTRA:\n" .
             "Si el usuario pide 'los kilos que entraron como pedido' / 'lo que se vendió porque entró como pedido' quiere SUM(pop.quantity) de las OCs creadas en el período. NO le entregues SUM(par.quantity) (despachado) en su lugar.\n" .
