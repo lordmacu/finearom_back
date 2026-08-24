@@ -239,7 +239,7 @@ class MonthlyReportController extends Controller
                 $result = $this->callDeepSeekApi([
                     ['role' => 'system', 'content' => $this->buildSystemPrompt()],
                     ['role' => 'user',   'content' => $periodContext],
-                ]);
+                ], jsonMode: true);
 
                 if (!$result['success']) {
                     return response()->json(['success' => false, 'message' => 'Error conectando con DeepSeek'], 500);
@@ -247,6 +247,9 @@ class MonthlyReportController extends Controller
 
                 $threadId   = (string) \Illuminate\Support\Str::uuid();
                 $welcomeMsg = $result['content'] ?: 'Listo, puedes hacerme preguntas sobre el período.';
+                // En el historial va el JSON crudo, no el HTML: el turno 1 lo lee como
+                // precedente del formato y debe ver el contrato, no su versión renderizada.
+                $historyMsg = $result['raw'] ?: $welcomeMsg;
                 $now        = now()->toDateTimeString();
 
                 $session = ChatSession::create([
@@ -256,7 +259,7 @@ class MonthlyReportController extends Controller
                     'period_start' => $startDate,
                     'period_end'   => $endDate,
                     'messages'     => [
-                        ['role' => 'assistant', 'content' => $welcomeMsg, 'time' => $now],
+                        ['role' => 'assistant', 'content' => $historyMsg, 'time' => $now],
                     ],
                 ]);
 
@@ -437,6 +440,10 @@ class MonthlyReportController extends Controller
                 'temperature' => 0.1,
                 'max_tokens'  => 3000,
                 'stream'      => true,
+                // Obliga el objeto {"html","sql","showing","available"}. Sin esto el modelo
+                // responde en markdown (```sql), el front no encuentra <pre><code
+                // class="language-sql"> y nunca ejecuta la query: el usuario ve el SQL crudo.
+                'response_format' => ['type' => 'json_object'],
             ]);
 
             return response()->stream(function () use ($key, $payload, $sessionRef, $userMessage) {
@@ -2286,22 +2293,30 @@ EOT;
      * @param  array<int, array{role: string, content: string}>  $messages
      * @return array{success: bool, content: string}
      */
-    private function callDeepSeekApi(array $messages): array
+    private function callDeepSeekApi(array $messages, bool $jsonMode = false): array
     {
         $key = config('custom.deepseek_api_key');
+
+        $payload = [
+            'model'       => 'deepseek-chat',
+            'messages'    => $messages,
+            'temperature' => 0.1,
+            'max_tokens'  => 3000,
+            'stream'      => false,
+        ];
+
+        // Modo JSON estricto: obliga al modelo a devolver el objeto {"html","sql",...}.
+        // NO se activa siempre — repairSqlOnce() espera SQL pelado, no JSON.
+        if ($jsonMode) {
+            $payload['response_format'] = ['type' => 'json_object'];
+        }
 
         $resp = Http::withHeaders([
                 'Authorization' => "Bearer {$key}",
                 'Content-Type'  => 'application/json',
             ])
             ->timeout(120)
-            ->post('https://api.deepseek.com/chat/completions', [
-                'model'       => 'deepseek-chat',
-                'messages'    => $messages,
-                'temperature' => 0.1,
-                'max_tokens'  => 3000,
-                'stream'      => false,
-            ]);
+            ->post('https://api.deepseek.com/chat/completions', $payload);
 
         if (!$resp->successful()) {
             Log::error('[Chat][DeepSeek] Error API: ' . $resp->body());
@@ -2316,9 +2331,15 @@ EOT;
             . ', cache_hit: ' . ($usage['prompt_cache_hit_tokens'] ?? 0)
             . ', cache_miss: ' . ($usage['prompt_cache_miss_tokens'] ?? 0));
 
+        $raw = trim($resp->json('choices.0.message.content', ''));
+
         return [
             'success' => true,
-            'content' => $this->parseStructuredResponse(trim($resp->json('choices.0.message.content', ''))),
+            'content' => $this->parseStructuredResponse($raw),
+            // Crudo (el JSON tal cual lo emitió el modelo). Es lo que debe guardarse en el
+            // historial: si se guarda el HTML ya parseado, el turno siguiente ve un ejemplo
+            // que contradice el contrato JSON del system y el modelo lo imita.
+            'raw'     => $raw,
         ];
     }
 

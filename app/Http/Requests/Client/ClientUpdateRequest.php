@@ -75,6 +75,7 @@ class ClientUpdateRequest extends FormRequest
             'credit_term' => ['nullable', 'integer'],
             'client_type' => ['nullable', 'string', 'max:10'],
             'lead_time' => ['nullable', 'integer'],
+            'requires_study' => ['nullable', 'boolean'],
             'first_dispatch_date' => ['nullable', 'date'],
             'estimated_launch_date' => ['nullable', 'date'],
             'first_dispatch_quantity' => ['nullable', 'numeric'],

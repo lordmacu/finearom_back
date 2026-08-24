@@ -67,6 +67,7 @@ class Client extends Model
         'cedula_representante_file',
         'declaracion_renta_file',
         'estados_financieros_file',
+        'requires_study',
         'drive_doc_links',
         'drive_folder_link',
         'user_id',
@@ -83,6 +84,7 @@ class Client extends Model
 
     protected $casts = [
         'drive_doc_links' => 'array',
+        'requires_study' => 'boolean',
     ];
 
     public function user()

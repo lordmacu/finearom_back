@@ -911,6 +911,13 @@ class ClientController extends Controller
      */
     private const CLIENT_INTERNAL_ONLY_FIELDS = ['credit_term', 'client_type', 'lead_time'];
 
+    /**
+     * Campos que el cliente sí ve en el formulario público porque condicionan
+     * lo que se le pide, pero que solo Finearom decide: se devuelven en
+     * `showByToken` y se descartan en `updateByToken`.
+     */
+    private const CLIENT_READ_ONLY_FIELDS = ['requires_study'];
+
     public function showByToken(string $token): JsonResponse
     {
         try {
@@ -950,7 +957,9 @@ class ClientController extends Controller
             // Los campos de manejo interno se descartan aunque vengan en la
             // petición: el formulario público no los envía, pero el endpoint es
             // público y no puede confiar en eso.
-            $data = collect($data)->except(self::CLIENT_INTERNAL_ONLY_FIELDS)->all();
+            $data = collect($data)
+                ->except(array_merge(self::CLIENT_INTERNAL_ONLY_FIELDS, self::CLIENT_READ_ONLY_FIELDS))
+                ->all();
 
             $client->update($data);
 
