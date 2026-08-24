@@ -1040,6 +1040,12 @@ class MonthlyReportController extends Controller
             "  ⚠ EL UNION DEBE INCLUIR **TODAS** LAS MÉTRICAS DEL SELECT, NO DOS. Unir solo pronóstico+pedidos y dejar despachos fuera vuelve a perder datos.\n" .
             "    ✗ CASO REAL (Bouquet, agosto 2026): con 'claves = pron UNION ped' se perdió el código 6000 (FLORAL FRESH, 15 kg despachados en agosto de una OC creada en JULIO): no estaba en el pronóstico ni en las OCs del mes, pero SÍ se despachó. Reportó 135 de 150 kg.\n" .
             "    → Un despacho de agosto puede venir de una OC de cualquier mes anterior. El lado 'despachos' NUNCA es redundante con el lado 'pedidos'.\n" .
+            "  ⚠⚠ EL CONJUNTO DEL UNION Y LAS COLUMNAS DEL SELECT DEBEN COINCIDIR EXACTAMENTE — regla de dos direcciones:\n" .
+            "     (a) Si una CTE entra en 'claves', su métrica TIENE que salir como columna del SELECT.\n" .
+            "     (b) Si una métrica NO va a mostrarse, esa CTE NO entra en 'claves' ni se le hace LEFT JOIN.\n" .
+            "     ✗ CASO REAL (Bouquet, agosto 2026): se unió 'desp' a claves pero el SELECT solo mostraba pronosticado/pedido/pendiente. El código 6000 entró como fila con TODO en 0 — y en realidad había despachado 15 kg, que quedaron invisibles. Una fila en cero absoluto es peor que no tenerla: el usuario lee 'no pasó nada' cuando sí pasó.\n" .
+            "     → Regla práctica: si el usuario pide 'lo despachado', muéstralo Y únelo. Si solo pide pedido y pendiente, no unas 'desp'. Nunca a medias.\n" .
+            "  ⚠⚠ LA COLUMNA 'referencia' ES OBLIGATORIA en cualquier informe por producto: el usuario pide el detalle POR REFERENCIA y un código suelto no le dice nada. Trae SIEMPRE COALESCE(p.product_name, k.codigo) AS referencia con LEFT JOIN products, y en la fila TOTAL pon 'TOTAL GENERAL' en esa posición.\n" .
             "  → Las referencias vendidas SIN pronóstico son un hallazgo de negocio, no ruido: muéstralas con pronosticado=0 y cumplimiento NULL/'sin pronóstico'.\n" .
             "  → Es la MISMA regla del FULL JOIN de más arriba. Si el informe compara dos lados, ninguno de los dos puede ser el FROM.\n" .
             "  ⚠⚠ NUNCA uses INNER JOIN products para traer el NOMBRE de la referencia en un CTE de pronóstico: hay códigos en sales_forecasts sin fila en products para ese cliente y el INNER JOIN los BORRA junto con sus kilos.\n" .
