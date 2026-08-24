@@ -1066,7 +1066,14 @@ class MonthlyReportController extends Controller
             "             ROUND(SUM(COALESCE(pd.kilos_pedidos,0)) / NULLIF(SUM(COALESCE(pr.kilos_pronosticados,0)),0) * 100, 2)\n" .
             "      FROM claves k LEFT JOIN …                                -- mismos JOINs que el detalle\n" .
             "  ⚠ El % del total se calcula sobre las SUMAS (SUM(a)/SUM(b)), NUNCA como promedio de los % por fila: da distinto y está mal.\n" .
-            "  ⚠ La fila TOTAL va SIEMPRE al final: ORDER BY (codigo = 'TOTAL') ASC, <criterio real> — o el equivalente con CASE WHEN.\n\n" .
+            "  ⚠ La fila TOTAL va SIEMPRE al final: ORDER BY (codigo = 'TOTAL') ASC, <criterio real> — o el equivalente con CASE WHEN.\n" .
+            "  ⚠⚠ EL ORDER BY DE UN UNION/UNION ALL SOLO ACEPTA NOMBRES DE COLUMNA DE SALIDA — NUNCA alias de tabla (error 1250, VERIFICADO):\n" .
+            "     ✗ ORDER BY (codigo='TOTAL') ASC, (COALESCE(pd.kilos_pedidos,0) + COALESCE(pe.kilos_pendientes,0)) DESC\n" .
+            "       → 1250 \"Table 'pd' from one of the SELECTs cannot be used in ORDER clause\". Las CTEs pr/pd/pe NO existen fuera de cada SELECT del UNION.\n" .
+            "     ✓ ORDER BY (codigo='TOTAL') ASC, (kilos_pedidos + kilos_pendientes) DESC\n" .
+            "       → usa los ALIAS del SELECT (kilos_pedidos, kilos_pendientes, cumplimiento_pct). Ahí ya vienen con COALESCE aplicado, no lo repitas.\n" .
+            "  ⚠ Al armar la fila TOTAL no PIERDAS columnas del detalle: ambos SELECT del UNION ALL deben tener la MISMA lista de columnas en el MISMO orden. Si el detalle trae 'referencia', el TOTAL lleva 'TOTAL GENERAL' AS referencia en esa posición.\n" .
+            "    → Y NO elimines la columna 'referencia' del informe para que cuadre el UNION: el usuario pidió el detalle POR REFERENCIA y un código sin nombre no le sirve. Mantén COALESCE(p.product_name, k.codigo) AS referencia.\n\n" .
 
             "⚠⚠⚠ ORDEN DE LAS FILAS — NO ENTIERRES LO QUE TIENE MOVIMIENTO:\n" .
             "En MariaDB `ORDER BY <metrica> DESC` manda los NULL al FINAL. En un informe pronóstico-vs-real las referencias vendidas SIN pronóstico tienen cumplimiento NULL, así que quedan debajo de las que tienen 0% — es decir, lo que SÍ pasó queda sepultado bajo lo que no pasó.\n" .
