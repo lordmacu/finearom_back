@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 class SendCampaignEmail implements ShouldQueue
@@ -51,12 +52,23 @@ class SendCampaignEmail implements ShouldQueue
                 throw new Exception('No se encontraron emails para enviar');
             }
 
+            $attachments = $campaign->attachments ?? [];
+            Log::info('📧 [JOB] Iniciando envío', [
+                'log_id'        => $this->logId,
+                'campaign_id'   => $campaign->id,
+                'to'            => array_values($emails),
+                'attachments'   => $attachments,
+                'attach_count'  => count($attachments),
+            ]);
+
             Mail::to($emails)->send(new CampaignMail(
                 $campaign->subject,
                 (string) $campaign->body,
-                $campaign->attachments ?? [],
+                $attachments,
                 $this->logId
             ));
+
+            Log::info('✅ [JOB] Mail::send() completado sin excepción', ['log_id' => $this->logId]);
 
             $log->status = 'sent';
             $log->error_message = null;

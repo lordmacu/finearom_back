@@ -40,23 +40,41 @@ class CampaignMail extends Mailable
         $email = $this->subject($this->mailSubject)
             ->view('emails.template', $rendered);
 
+        Log::info('📎 [MAIL] build() — paths recibidos', [
+            'log_id' => $this->logId,
+            'paths'  => $this->attachmentPaths,
+        ]);
+
         $attachedCount = 0;
-        $skippedCount = 0;
+        $skippedCount  = 0;
         foreach ($this->attachmentPaths as $filePath) {
             $absolute = storage_path('app/' . $filePath);
-            if (file_exists($absolute)) {
+            $exists   = file_exists($absolute);
+            $size     = $exists ? filesize($absolute) : null;
+
+            if ($exists) {
                 $email->attach($absolute);
                 $attachedCount++;
+                Log::info('📎 [MAIL] adjunto OK', [
+                    'log_id' => $this->logId,
+                    'file'   => $filePath,
+                    'bytes'  => $size,
+                ]);
             } else {
                 $skippedCount++;
-                Log::warning('CampaignMail: adjunto no encontrado', ['path' => $absolute, 'log_id' => $this->logId]);
+                Log::error('📎 [MAIL] adjunto FALTANTE — file_exists=false', [
+                    'log_id'   => $this->logId,
+                    'file'     => $filePath,
+                    'abs_path' => $absolute,
+                ]);
             }
         }
-        Log::info('CampaignMail: adjuntos procesados', [
-            'log_id' => $this->logId,
-            'total_paths' => count($this->attachmentPaths),
+
+        Log::info('📎 [MAIL] build() — resumen adjuntos', [
+            'log_id'   => $this->logId,
             'attached' => $attachedCount,
-            'skipped' => $skippedCount,
+            'skipped'  => $skippedCount,
+            'mailable_attachments_count' => count($this->attachments ?? []),
         ]);
 
         $email->withSymfonyMessage(function ($message) {
