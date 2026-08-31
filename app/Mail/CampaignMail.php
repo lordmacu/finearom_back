@@ -6,6 +6,7 @@ use App\Services\EmailTemplateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 class CampaignMail extends Mailable
 {
@@ -39,14 +40,24 @@ class CampaignMail extends Mailable
         $email = $this->subject($this->mailSubject)
             ->view('emails.template', $rendered);
 
-        if (! empty($this->attachmentPaths)) {
-            foreach ($this->attachmentPaths as $filePath) {
-                $absolute = storage_path('app/' . $filePath);
-                if (file_exists($absolute)) {
-                    $email->attach($absolute);
-                }
+        $attachedCount = 0;
+        $skippedCount = 0;
+        foreach ($this->attachmentPaths as $filePath) {
+            $absolute = storage_path('app/' . $filePath);
+            if (file_exists($absolute)) {
+                $email->attach($absolute);
+                $attachedCount++;
+            } else {
+                $skippedCount++;
+                Log::warning('CampaignMail: adjunto no encontrado', ['path' => $absolute, 'log_id' => $this->logId]);
             }
         }
+        Log::info('CampaignMail: adjuntos procesados', [
+            'log_id' => $this->logId,
+            'total_paths' => count($this->attachmentPaths),
+            'attached' => $attachedCount,
+            'skipped' => $skippedCount,
+        ]);
 
         $email->withSymfonyMessage(function ($message) {
             $message->getHeaders()->addTextHeader('X-Process-Type', 'email_campaign');
