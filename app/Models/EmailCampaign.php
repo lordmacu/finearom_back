@@ -25,6 +25,7 @@ class EmailCampaign extends Model
     ];
 
     protected $casts = [
+        'email_field_type' => 'array',
         'client_ids' => 'array',
         'custom_emails' => 'array',
         'attachments' => 'array',

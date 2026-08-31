@@ -16,7 +16,8 @@ class UpdateEmailCampaignRequest extends FormRequest
         return [
             'campaign_name' => ['required', 'string', 'max:255'],
             'subject' => ['required', 'string', 'max:255'],
-            'email_field_type' => ['required', 'string'],
+            'email_field_type' => ['required', 'array', 'min:1'],
+            'email_field_type.*' => ['required', 'string', 'in:email,executive_email,portfolio_contact_email,dispatch_confirmation_email,accounting_contact_email,compras_email,logistics_email'],
             'body' => ['required', 'string'],
             'client_ids' => ['required', 'array', 'min:1'],
             'client_ids.*' => ['integer', 'exists:clients,id'],

@@ -108,8 +108,6 @@ class EmailCampaignController extends Controller
 
     public function clients(Request $request): JsonResponse
     {
-        $emailField = (string) $request->get('email_field', 'email');
-
         $allowed = [
             'email',
             'executive_email',
@@ -120,32 +118,44 @@ class EmailCampaignController extends Controller
             'logistics_email',
         ];
 
-        if (! in_array($emailField, $allowed, true)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Campo de email inválido',
-            ], 422);
+        $emailFields = $request->input('email_fields', []);
+        if (! is_array($emailFields)) {
+            $emailFields = [$emailFields];
+        }
+        $emailFields = array_values(array_intersect($emailFields, $allowed));
+
+        if (empty($emailFields)) {
+            return response()->json(['success' => true, 'data' => []]);
         }
 
         $clients = Client::query()
-            ->select(['id', 'client_name', 'nit', $emailField])
-            ->whereNotNull($emailField)
-            ->where($emailField, '!=', '')
+            ->select(array_merge(['id', 'client_name', 'nit'], $emailFields))
+            ->where(function ($q) use ($emailFields) {
+                foreach ($emailFields as $field) {
+                    $q->orWhere(function ($inner) use ($field) {
+                        $inner->whereNotNull($field)->where($field, '!=', '');
+                    });
+                }
+            })
             ->orderBy('client_name')
             ->get()
-            ->map(function ($client) use ($emailField) {
-                $emailValue = $client->{$emailField};
-                $emails = [];
-                if (is_string($emailValue)) {
-                    $emails = array_filter(array_map('trim', explode(',', $emailValue)));
+            ->map(function ($client) use ($emailFields) {
+                $allEmails = [];
+                foreach ($emailFields as $field) {
+                    $val = $client->{$field};
+                    if (is_string($val) && $val !== '') {
+                        $emails = array_filter(array_map('trim', explode(',', $val)));
+                        $allEmails = array_merge($allEmails, $emails);
+                    }
                 }
+                $allEmails = array_values(array_unique(array_filter($allEmails)));
 
                 return [
                     'id' => $client->id,
                     'client_name' => $client->client_name,
                     'nit' => $client->nit,
-                    'emails' => implode(', ', $emails),
-                    'email_count' => count($emails),
+                    'emails' => implode(', ', $allEmails),
+                    'email_count' => count($allEmails),
                 ];
             })
             ->filter(fn ($c) => $c['email_count'] > 0)
@@ -344,30 +354,38 @@ class EmailCampaignController extends Controller
         $campaign->save();
 
         DB::transaction(function () use ($campaign, $clients) {
-            foreach ($clients as $client) {
-                $emailField = $campaign->email_field_type;
-                $emailValue = $client->{$emailField};
+            $emailFields = (array) $campaign->email_field_type;
+            $emailFieldUsed = implode(',', $emailFields);
 
-                if (empty($emailValue)) {
+            foreach ($clients as $client) {
+                $allEmails = [];
+                foreach ($emailFields as $field) {
+                    $val = $client->{$field};
+                    if (! empty($val)) {
+                        $emails = array_filter(array_map('trim', explode(',', (string) $val)));
+                        $allEmails = array_merge($allEmails, $emails);
+                    }
+                }
+                $allEmails = array_values(array_unique(array_filter($allEmails)));
+
+                if (empty($allEmails)) {
                     EmailCampaignLog::create([
                         'email_campaign_id' => $campaign->id,
                         'client_id' => $client->id,
-                        'email_field_used' => $emailField,
+                        'email_field_used' => $emailFieldUsed,
                         'email_sent_to' => '',
                         'status' => 'failed',
-                        'error_message' => 'No se encontró email en el campo especificado',
+                        'error_message' => 'No se encontró email en los campos especificados',
                     ]);
                     $campaign->increment('failed_count');
                     continue;
                 }
 
-                $emails = array_filter(array_map('trim', explode(',', (string) $emailValue)));
-
                 $log = EmailCampaignLog::create([
                     'email_campaign_id' => $campaign->id,
                     'client_id' => $client->id,
-                    'email_field_used' => $emailField,
-                    'email_sent_to' => implode(',', $emails),
+                    'email_field_used' => $emailFieldUsed,
+                    'email_sent_to' => implode(',', $allEmails),
                     'status' => 'pending',
                 ]);
 
