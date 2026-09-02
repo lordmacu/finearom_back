@@ -20,11 +20,18 @@ class ProjectTimeService
      * Calcula la fecha_calculada de un proyecto sumando días hábiles
      * desde fecha_creacion según las tablas de tiempos.
      *
-     * Retorna null si faltan datos mínimos (rango_min, rango_max o volumen).
+     * Usa `precio` como base del cálculo si está definido; si no, usa el
+     * promedio de `rango_min`/`rango_max` (legacy). Retorna null si faltan
+     * datos mínimos (precio o rango, y volumen).
      */
     public function calculate(Project $project): ?Carbon
     {
-        if (is_null($project->rango_min) || is_null($project->rango_max) || is_null($project->volumen)) {
+        $precioBase = $project->precio
+            ?? ((!is_null($project->rango_min) && !is_null($project->rango_max))
+                ? ((float) $project->rango_min + (float) $project->rango_max) / 2
+                : null);
+
+        if (is_null($precioBase) || is_null($project->volumen)) {
             return null;
         }
 
@@ -45,7 +52,7 @@ class ProjectTimeService
             return null;
         }
 
-        $potencial = ((float) $project->rango_min + (float) $project->rango_max) / 2 * (float) $project->volumen / 1000;
+        $potencial = (float) $precioBase * (float) $project->volumen / 1000;
         $grupo = $this->lookupGrupo($potencial, $tipoCliente);
 
         $dias = 0;

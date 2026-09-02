@@ -204,7 +204,7 @@ class ProjectController extends Controller
 
     public function update(ProjectUpdateRequest $request, Project $project): JsonResponse
     {
-        $recalculateFields = ['rango_min', 'rango_max', 'volumen', 'tipo', 'homologacion', 'product_id'];
+        $recalculateFields = ['precio', 'rango_min', 'rango_max', 'volumen', 'tipo', 'homologacion', 'product_id'];
 
         $project = DB::transaction(function () use ($request, $project, $recalculateFields) {
             $validated = $request->validated();
