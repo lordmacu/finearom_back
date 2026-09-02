@@ -341,6 +341,8 @@ class EmailCampaignController extends Controller
             ], 400);
         }
 
+        $previousStatus = $campaign->status;
+
         $campaign->status = 'sending';
         $campaign->save();
 
@@ -353,59 +355,66 @@ class EmailCampaignController extends Controller
         $campaign->total_recipients = $totalRecipients;
         $campaign->save();
 
-        DB::transaction(function () use ($campaign, $clients) {
-            $emailFields = (array) $campaign->email_field_type;
-            $emailFieldUsed = implode(',', $emailFields);
+        try {
+            DB::transaction(function () use ($campaign, $clients) {
+                $emailFields = (array) $campaign->email_field_type;
+                $emailFieldUsed = implode(',', $emailFields);
 
-            foreach ($clients as $client) {
-                $allEmails = [];
-                foreach ($emailFields as $field) {
-                    $val = $client->{$field};
-                    if (! empty($val)) {
-                        $emails = array_filter(array_map('trim', explode(',', (string) $val)));
-                        $allEmails = array_merge($allEmails, $emails);
+                foreach ($clients as $client) {
+                    $allEmails = [];
+                    foreach ($emailFields as $field) {
+                        $val = $client->{$field};
+                        if (! empty($val)) {
+                            $emails = array_filter(array_map('trim', explode(',', (string) $val)));
+                            $allEmails = array_merge($allEmails, $emails);
+                        }
                     }
-                }
-                $allEmails = array_values(array_unique(array_filter($allEmails)));
+                    $allEmails = array_values(array_unique(array_filter($allEmails)));
 
-                if (empty($allEmails)) {
-                    EmailCampaignLog::create([
+                    if (empty($allEmails)) {
+                        EmailCampaignLog::create([
+                            'email_campaign_id' => $campaign->id,
+                            'client_id' => $client->id,
+                            'email_field_used' => $emailFieldUsed,
+                            'email_sent_to' => '',
+                            'status' => 'failed',
+                            'error_message' => 'No se encontró email en los campos especificados',
+                        ]);
+                        $campaign->increment('failed_count');
+                        continue;
+                    }
+
+                    $log = EmailCampaignLog::create([
                         'email_campaign_id' => $campaign->id,
                         'client_id' => $client->id,
                         'email_field_used' => $emailFieldUsed,
-                        'email_sent_to' => '',
-                        'status' => 'failed',
-                        'error_message' => 'No se encontró email en los campos especificados',
-                    ]);
-                    $campaign->increment('failed_count');
-                    continue;
-                }
-
-                $log = EmailCampaignLog::create([
-                    'email_campaign_id' => $campaign->id,
-                    'client_id' => $client->id,
-                    'email_field_used' => $emailFieldUsed,
-                    'email_sent_to' => implode(',', $allEmails),
-                    'status' => 'pending',
-                ]);
-
-                SendCampaignEmail::dispatch($campaign->id, $log->id);
-            }
-
-            if (! empty($campaign->custom_emails)) {
-                foreach ($campaign->custom_emails as $customEmail) {
-                    $log = EmailCampaignLog::create([
-                        'email_campaign_id' => $campaign->id,
-                        'client_id' => null,
-                        'email_field_used' => 'custom',
-                        'email_sent_to' => $customEmail,
+                        'email_sent_to' => implode(',', $allEmails),
                         'status' => 'pending',
                     ]);
 
                     SendCampaignEmail::dispatch($campaign->id, $log->id);
                 }
-            }
-        });
+
+                if (! empty($campaign->custom_emails)) {
+                    foreach ($campaign->custom_emails as $customEmail) {
+                        $log = EmailCampaignLog::create([
+                            'email_campaign_id' => $campaign->id,
+                            'client_id' => null,
+                            'email_field_used' => 'custom',
+                            'email_sent_to' => $customEmail,
+                            'status' => 'pending',
+                        ]);
+
+                        SendCampaignEmail::dispatch($campaign->id, $log->id);
+                    }
+                }
+            });
+        } catch (\Throwable $e) {
+            $campaign->status = $previousStatus;
+            $campaign->save();
+
+            throw $e;
+        }
 
         return response()->json([
             'success' => true,
