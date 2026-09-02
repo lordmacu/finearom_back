@@ -27,20 +27,12 @@ class ProjectMarketing extends Model
         'benchmark_links',
         'descripcion_detallada',
         'fecha_entrega_marketing',
-        'cert_alergenos',
-        'cert_biodegradabilidad',
-        'cert_animal_testing',
-        'cert_coa',
     ];
 
     protected $casts = [
         'marketing'               => 'array',
         'calidad'                 => 'array',
         'fecha_entrega_marketing' => 'date',
-        'cert_alergenos'          => 'boolean',
-        'cert_biodegradabilidad'  => 'boolean',
-        'cert_animal_testing'     => 'boolean',
-        'cert_coa'                => 'boolean',
     ];
 
     public function project(): BelongsTo

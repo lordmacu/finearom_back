@@ -29,10 +29,6 @@ class ProjectMarketingRequest extends FormRequest
             'benchmark_links'         => ['nullable', 'string', 'max:5000'],
             'descripcion_detallada'   => ['nullable', 'string', 'max:5000'],
             'fecha_entrega_marketing' => ['nullable', 'date'],
-            'cert_alergenos'          => ['nullable', 'boolean'],
-            'cert_biodegradabilidad'  => ['nullable', 'boolean'],
-            'cert_animal_testing'     => ['nullable', 'boolean'],
-            'cert_coa'                => ['nullable', 'boolean'],
         ];
     }
 }
