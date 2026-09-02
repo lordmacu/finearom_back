@@ -15,11 +15,13 @@ class ProjectApplication extends Model
     protected $fillable = [
         'project_id',
         'dosis',
+        'cantidad_aplicacion',
         'observaciones',
     ];
 
     protected $casts = [
         'dosis' => 'decimal:2',
+        'cantidad_aplicacion' => 'integer',
     ];
 
     public function project(): BelongsTo

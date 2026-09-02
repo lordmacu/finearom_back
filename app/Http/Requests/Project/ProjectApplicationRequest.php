@@ -14,8 +14,9 @@ class ProjectApplicationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'dosis'         => ['nullable', 'string', 'max:500'],
-            'observaciones' => ['nullable', 'string', 'max:2000'],
+            'dosis'               => ['nullable', 'string', 'max:500'],
+            'cantidad_aplicacion' => ['nullable', 'integer', 'min:0'],
+            'observaciones'       => ['nullable', 'string', 'max:2000'],
         ];
     }
 }

@@ -39,6 +39,8 @@ class ProjectStoreRequest extends FormRequest
             'factor'                       => 'nullable|numeric|min:0',
             'costo_perfumacion_especifico' => 'nullable|numeric|min:0',
             'costo_perfumacion_tonelada'   => 'nullable|numeric|min:0',
+            'tipo_etiquetado'              => 'nullable|in:Estandar,SGA',
+            'envelope_type_id'            => 'nullable|integer|exists:envelope_types,id',
             'max_variantes'                => 'nullable|integer|min:1|max:50',
             'base_cliente'    => 'nullable|boolean',
             'proactivo'       => 'nullable|boolean',

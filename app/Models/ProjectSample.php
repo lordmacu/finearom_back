@@ -15,11 +15,13 @@ class ProjectSample extends Model
     protected $fillable = [
         'project_id',
         'cantidad',
+        'cantidad_copias',
         'observaciones',
     ];
 
     protected $casts = [
         'cantidad' => 'decimal:2',
+        'cantidad_copias' => 'integer',
     ];
 
     public function project(): BelongsTo

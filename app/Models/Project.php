@@ -42,6 +42,8 @@ class Project extends Model
         'factor',
         'costo_perfumacion_especifico',
         'costo_perfumacion_tonelada',
+        'tipo_etiquetado',
+        'envelope_type_id',
         'max_variantes',
         'homologacion',
         'internacional',
@@ -129,6 +131,11 @@ class Project extends Model
     public function productCategory(): BelongsTo
     {
         return $this->belongsTo(ProductCategory::class, 'product_category_id');
+    }
+
+    public function envelopeType(): BelongsTo
+    {
+        return $this->belongsTo(EnvelopeType::class, 'envelope_type_id');
     }
 
     public function prospect(): BelongsTo
