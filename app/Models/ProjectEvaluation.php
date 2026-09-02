@@ -18,6 +18,8 @@ class ProjectEvaluation extends Model
         'benchmark_reference_id',
         'metodologia',
         'observacion',
+        'bench_text',
+        'bench_image',
     ];
 
     protected $casts = [

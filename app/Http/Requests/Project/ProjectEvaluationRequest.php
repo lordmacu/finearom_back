@@ -19,6 +19,9 @@ class ProjectEvaluationRequest extends FormRequest
             'benchmark_reference_id' => ['nullable', 'integer', 'exists:finearom_references,id'],
             'metodologia'            => ['nullable', 'in:olfativa,instrumental,mixta'],
             'observacion'            => ['nullable', 'string', 'max:2000'],
+            'bench_text'             => ['nullable', 'string', 'max:2000'],
+            'bench_image'            => ['nullable', 'file', 'max:10240', 'mimes:jpg,jpeg,png,webp'],
+            'remove_bench_image'     => ['nullable', 'boolean'],
         ];
     }
 }

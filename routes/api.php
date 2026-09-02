@@ -347,6 +347,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/projects/{project}/sample', [ProjectDetailController::class, 'updateSample']);
     Route::put('/projects/{project}/application', [ProjectDetailController::class, 'updateApplication']);
     Route::put('/projects/{project}/evaluation', [ProjectDetailController::class, 'updateEvaluation']);
+    Route::get('/projects/{project}/evaluation/bench-image', [ProjectDetailController::class, 'evaluationBenchImage']);
     Route::put('/projects/{project}/marketing', [ProjectDetailController::class, 'updateMarketing']);
 
     // Observaciones departamentales

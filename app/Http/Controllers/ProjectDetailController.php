@@ -13,6 +13,10 @@ use App\Models\ProjectProposal;
 use App\Models\ProjectRequest as ProjectRequestModel;
 use App\Models\ProjectVariant;
 use App\Models\FinearomReference;
+use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -49,12 +53,52 @@ class ProjectDetailController extends Controller
     // ─── Evaluación ───────────────────────────────────────────────────────────
     public function updateEvaluation(ProjectEvaluationRequest $request, Project $project): JsonResponse
     {
+        $data = $request->validated();
+
+        // Manejo de bench_image: subida nueva o eliminación
+        if ($request->hasFile('bench_image')) {
+            $file = $request->file('bench_image');
+            $nombreStorage = \Illuminate\Support\Str::uuid() . '.' . $file->getClientOriginalExtension();
+            $path = \Illuminate\Support\Facades\Storage::disk('local')->putFileAs(
+                "evaluation-bench/{$project->id}",
+                $file,
+                $nombreStorage
+            );
+            // Borrar imagen anterior si existe
+            $existing = $project->evaluation;
+            if ($existing && $existing->bench_image) {
+                \Illuminate\Support\Facades\Storage::disk('local')->delete($existing->bench_image);
+            }
+            $data['bench_image'] = $path;
+        } elseif ($request->boolean('remove_bench_image')) {
+            $existing = $project->evaluation;
+            if ($existing && $existing->bench_image) {
+                \Illuminate\Support\Facades\Storage::disk('local')->delete($existing->bench_image);
+            }
+            $data['bench_image'] = null;
+        } else {
+            unset($data['bench_image']);
+        }
+
+        unset($data['remove_bench_image']);
+
         $evaluation = $project->evaluation()->updateOrCreate(
             ['project_id' => $project->id],
-            $request->validated()
+            $data
         );
 
         return response()->json(['success' => true, 'data' => $evaluation, 'message' => 'Evaluación actualizada']);
+    }
+
+    public function evaluationBenchImage(Project $project): BinaryFileResponse
+    {
+        $evaluation = $project->evaluation;
+        abort_if(! $evaluation || ! $evaluation->bench_image, 404, 'No hay imagen de bench');
+
+        $absolutePath = Storage::disk('local')->path($evaluation->bench_image);
+        abort_if(! file_exists($absolutePath), 404, 'Archivo no encontrado en el servidor');
+
+        return response()->download($absolutePath, basename($absolutePath));
     }
 
     // ─── Marketing y Calidad ──────────────────────────────────────────────────
