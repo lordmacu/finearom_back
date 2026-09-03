@@ -25,6 +25,10 @@ class ProjectMarketing extends Model
         'packaging',
         'claims',
         'benchmark_links',
+        'benchmark_examples',
+        'catalog_etiquetas',
+        'catalog_piramides',
+        'lista_presentaciones',
         'descripcion_detallada',
         'fecha_entrega_marketing',
     ];
@@ -32,6 +36,10 @@ class ProjectMarketing extends Model
     protected $casts = [
         'marketing'               => 'array',
         'calidad'                 => 'array',
+        'benchmark_examples'      => 'array',
+        'catalog_etiquetas'       => 'array',
+        'catalog_piramides'        => 'array',
+        'lista_presentaciones'    => 'array',
         'fecha_entrega_marketing' => 'date',
     ];
 

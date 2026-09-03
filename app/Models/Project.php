@@ -168,9 +168,14 @@ class Project extends Model
         return $this->hasOne(ProjectEvaluation::class, 'project_id');
     }
 
-    public function marketingYCalidad(): HasOne
+public function marketingYCalidad(): HasOne
     {
-        return $this->hasOne(ProjectMarketing::class, 'project_id');
+        return $this->hasOne(ProjectMarketing::class);
+    }
+
+    public function marketingVariants(): HasMany
+    {
+        return $this->hasMany(ProjectMarketingVariant::class);
     }
 
     public function variants(): HasMany

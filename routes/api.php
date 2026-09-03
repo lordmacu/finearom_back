@@ -11,6 +11,8 @@ use App\Http\Controllers\EmailCampaignController;
 use App\Http\Controllers\EmailTemplateController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\EnvelopeTypeController;
+use App\Http\Controllers\ProjectMarketingUploadController;
+use App\Http\Controllers\ProjectMarketingVariantController;
 use App\Http\Controllers\FinearomEvaluationController;
 use App\Http\Controllers\FinearomReferenceController;
 use App\Http\Controllers\FineFragranceController;
@@ -350,6 +352,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/projects/{project}/evaluation', [ProjectDetailController::class, 'updateEvaluation']);
     Route::get('/projects/{project}/evaluation/bench-image', [ProjectDetailController::class, 'evaluationBenchImage']);
     Route::put('/projects/{project}/marketing', [ProjectDetailController::class, 'updateMarketing']);
+    Route::get('/projects/{project}/marketing-variants', [ProjectMarketingVariantController::class, 'index']);
+    Route::post('/projects/{project}/marketing-variants', [ProjectMarketingVariantController::class, 'store']);
+    Route::put('/projects/{project}/marketing-variants/{variant}', [ProjectMarketingVariantController::class, 'update']);
+    Route::delete('/projects/{project}/marketing-variants/{variant}', [ProjectMarketingVariantController::class, 'destroy']);
+    Route::post('/projects/{project}/marketing-upload', [ProjectMarketingUploadController::class, 'upload']);
+    Route::delete('/projects/{project}/marketing-upload', [ProjectMarketingUploadController::class, 'destroy']);
+    Route::get('/projects/{project}/marketing-upload/{field}/{filename}', [ProjectMarketingUploadController::class, 'show']);
 
     // Observaciones departamentales
     Route::patch('/projects/{project}/observaciones', [ProjectDetailController::class, 'updateObservaciones']);
