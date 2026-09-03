@@ -81,7 +81,7 @@ class CarteraEstadoQuery
                 $emailsBalance = array_merge(
                     $clientEmails,
                     $executiveEmail ? [$executiveEmail] : [],
-                    ['monica.castano@finearom.com', 'coordinadora.comercial@finearom.com'],
+                    ['monica.castano@finearom.com', 'coordinadora.comercial@finearom.com', 'facturacion@finearom.com'],
                     $portfolioEmails,
                 );
                 $emailsBalance = $this->cleanEmailArray($emailsBalance);
