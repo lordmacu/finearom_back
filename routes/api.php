@@ -10,6 +10,7 @@ use App\Http\Controllers\CarteraEstadoController;
 use App\Http\Controllers\EmailCampaignController;
 use App\Http\Controllers\EmailTemplateController;
 use App\Http\Controllers\ClientController;
+use App\Http\Controllers\EnvelopeTypeAdminController;
 use App\Http\Controllers\EnvelopeTypeController;
 use App\Http\Controllers\ProjectMarketingUploadController;
 use App\Http\Controllers\ProjectMarketingVariantController;
@@ -464,6 +465,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/project-catalogs/finearom-references/{finearomReference}/price-history', [ProjectCatalogController::class, 'finearomPriceHistory']);
 
     Route::get('/envelope-types', [EnvelopeTypeController::class, 'index']);
+
+    // Admin CRUD para envelope types
+    Route::post('/admin/envelope-types', [EnvelopeTypeAdminController::class, 'store']);
+    Route::put('/admin/envelope-types/{envelopeType}', [EnvelopeTypeAdminController::class, 'update']);
+    Route::delete('/admin/envelope-types/{envelopeType}', [EnvelopeTypeAdminController::class, 'destroy']);
 
     // Notificaciones internas de proyectos
     Route::get('/project-notifications', [ProjectNotificationController::class, 'index']);

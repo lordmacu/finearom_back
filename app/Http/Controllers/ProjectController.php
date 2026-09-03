@@ -272,8 +272,10 @@ class ProjectController extends Controller
     {
         $newProject = DB::transaction(function () use ($project) {
             $attrs = $project->only([
-                'nombre', 'client_id', 'product_id', 'tipo',
-                'rango_min', 'rango_max', 'volumen', 'trm', 'factor',
+                'nombre', 'client_id', 'product_id', 'product_category_id',
+                'tipo', 'rango_min', 'rango_max', 'volumen', 'precio', 'dosis',
+                'trm', 'factor', 'costo_perfumacion_especifico', 'costo_perfumacion_tonelada',
+                'tipo_etiquetado', 'envelope_type_id', 'max_variantes',
                 'base_cliente', 'proactivo', 'homologacion', 'internacional',
                 'tipo_producto', 'fecha_requerida',
             ]);

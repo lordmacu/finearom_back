@@ -118,6 +118,7 @@ class DatabaseSeeder extends Seeder
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         $this->call(ProjectTimesSeeder::class);
+        $this->call(EnvelopeTypeSeeder::class);
 
         // \App\Models\User::factory(10)->create();
 

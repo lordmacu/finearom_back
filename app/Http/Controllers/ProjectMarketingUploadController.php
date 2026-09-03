@@ -56,7 +56,7 @@ class ProjectMarketingUploadController extends Controller
     {
         $request->validate([
             'field'  => 'required|in:benchmark_examples,catalog_etiquetas,catalog_piramides,lista_presentaciones',
-            'path'   => 'required|string',
+            'path'   => ['required', 'string', 'regex:/^marketing-(benchmark_examples|catalog_etiquetas|catalog_piramides|lista_presentaciones)\/' . $project->id . '\//'],
         ]);
 
         $marketing = $project->marketingYCalidad()->firstOrCreate(['project_id' => $project->id]);
