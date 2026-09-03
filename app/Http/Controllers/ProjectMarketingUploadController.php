@@ -11,16 +11,25 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ProjectMarketingUploadController extends Controller
 {
+    /** Campos de project_marketing que administra este controller. */
+    private const FIELDS = [
+        'benchmark_examples',
+        'catalog_etiquetas',
+        'catalog_piramides',
+        'lista_presentaciones',
+    ];
+
     public function __construct()
     {
-        $this->middleware('can:project edit');
+        $this->middleware('can:project edit')->only(['upload', 'destroy']);
+        $this->middleware('can:project list')->only(['show']);
     }
 
     public function upload(Request $request, Project $project): JsonResponse
     {
         $request->validate([
             'file' => 'required|file|max:10240|mimes:jpg,jpeg,png,webp,pdf',
-            'field' => 'required|in:benchmark_examples,catalog_etiquetas,catalog_piramides,lista_presentaciones',
+            'field' => ['required', 'in:' . implode(',', self::FIELDS)],
         ]);
 
         $file = $request->file('file');
@@ -42,7 +51,7 @@ class ProjectMarketingUploadController extends Controller
             'success' => true,
             'data'    => [
                 'path'       => $path,
-                'url'        => url("/projects/{$project->id}/marketing-upload/{$field}/" . basename($path)),
+                'url'        => url("/api/projects/{$project->id}/marketing-upload/{$field}/" . basename($path)),
                 'field'      => $field,
                 'nombre'     => $file->getClientOriginalName(),
                 'mime_type'  => $file->getMimeType(),
@@ -55,8 +64,8 @@ class ProjectMarketingUploadController extends Controller
     public function destroy(Request $request, Project $project): JsonResponse
     {
         $request->validate([
-            'field'  => 'required|in:benchmark_examples,catalog_etiquetas,catalog_piramides,lista_presentaciones',
-            'path'   => ['required', 'string', 'regex:/^marketing-(benchmark_examples|catalog_etiquetas|catalog_piramides|lista_presentaciones)\/' . $project->id . '\//'],
+            'field'  => ['required', 'in:' . implode(',', self::FIELDS)],
+            'path'   => ['required', 'string', 'regex:/^marketing-(' . implode('|', self::FIELDS) . ')\/' . $project->id . '\//'],
         ]);
 
         $marketing = $project->marketingYCalidad()->firstOrCreate(['project_id' => $project->id]);
@@ -78,6 +87,8 @@ class ProjectMarketingUploadController extends Controller
 
     public function show(Project $project, string $field, string $filename): BinaryFileResponse
     {
+        abort_unless(in_array($field, self::FIELDS, true), 404, 'Campo no válido');
+
         $path = "marketing-{$field}/{$project->id}/{$filename}";
         abort_if(! Storage::disk('local')->exists($path), 404, 'Archivo no encontrado');
 

@@ -11,6 +11,12 @@ class ProjectMarketingRequest extends FormRequest
         return true;
     }
 
+    /**
+     * Los arrays de archivos (benchmark_examples, catalog_etiquetas,
+     * catalog_piramides, lista_presentaciones) NO se validan aquí a propósito:
+     * los administra ProjectMarketingUploadController. Si el formulario los
+     * mandara, una copia vieja en memoria borraría los archivos ya subidos.
+     */
     public function rules(): array
     {
         return [
@@ -27,14 +33,6 @@ class ProjectMarketingRequest extends FormRequest
             'packaging'               => ['nullable', 'string', 'max:255'],
             'claims'                  => ['nullable', 'string', 'max:2000'],
             'benchmark_links'         => ['nullable', 'string', 'max:5000'],
-            'benchmark_examples'      => ['nullable', 'array'],
-            'benchmark_examples.*'    => ['nullable', 'string'],
-            'catalog_etiquetas'       => ['nullable', 'array'],
-            'catalog_etiquetas.*'     => ['nullable', 'string'],
-            'catalog_piramides'        => ['nullable', 'array'],
-            'catalog_piramides.*'     => ['nullable', 'string'],
-            'lista_presentaciones'    => ['nullable', 'array'],
-            'lista_presentaciones.*'  => ['nullable', 'string'],
             'descripcion_detallada'   => ['nullable', 'string', 'max:5000'],
             'fecha_entrega_marketing' => ['nullable', 'date'],
         ];

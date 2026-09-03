@@ -17,14 +17,13 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 
 class ProjectDetailController extends Controller
 {
     public function __construct()
     {
-        $this->middleware('can:project edit');
+        $this->middleware('can:project edit')->except(['evaluationBenchImage']);
+        $this->middleware('can:project list')->only(['evaluationBenchImage']);
         $this->middleware('can:project factor edit')->only(['updateFactor']);
     }
 

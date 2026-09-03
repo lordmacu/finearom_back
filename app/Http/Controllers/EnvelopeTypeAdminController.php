@@ -13,7 +13,7 @@ class EnvelopeTypeAdminController extends Controller
 {
     public function __construct()
     {
-        $this->middleware('can:settings edit');
+        $this->middleware('can:config edit');
     }
 
     public function index(): JsonResponse

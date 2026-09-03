@@ -14,7 +14,9 @@ class ProjectApplicationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'dosis'               => ['nullable', 'string', 'max:500'],
+            // project_applications.dosis es decimal(10,2): validarla como
+            // string dejaba pasar texto que después revienta en el insert.
+            'dosis'               => ['nullable', 'numeric', 'min:0'],
             'cantidad_aplicacion' => ['nullable', 'integer', 'min:0'],
             'observaciones'       => ['nullable', 'string', 'max:2000'],
         ];

@@ -465,8 +465,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/project-catalogs/finearom-references/{finearomReference}/price-history', [ProjectCatalogController::class, 'finearomPriceHistory']);
 
     Route::get('/envelope-types', [EnvelopeTypeController::class, 'index']);
+    Route::get('/envelope-types/{envelopeType}/photo', [EnvelopeTypeController::class, 'photo']);
 
     // Admin CRUD para envelope types
+    Route::get('/admin/envelope-types', [EnvelopeTypeAdminController::class, 'index']);
     Route::post('/admin/envelope-types', [EnvelopeTypeAdminController::class, 'store']);
     Route::put('/admin/envelope-types/{envelopeType}', [EnvelopeTypeAdminController::class, 'update']);
     Route::delete('/admin/envelope-types/{envelopeType}', [EnvelopeTypeAdminController::class, 'destroy']);

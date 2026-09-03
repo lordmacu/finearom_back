@@ -26,15 +26,19 @@ return new class extends Migration
                     return $item;
                 }, $calidad);
 
-                $addIfMissing = function (&$arr, $val) {
-                    if ($val && !in_array($val, $arr, true)) {
-                        $arr[] = $val;
+                // Cada booleano sólo agrega su item si venía en true.
+                $certs = [
+                    'cert_alergenos'           => 'Certificados Alergenos',
+                    'cert_biodegradabilidad'   => 'Biodegradabilidad',
+                    'cert_animal_testing'      => 'Libre crueldad animal',
+                    'cert_coa'                 => 'Certificado de análisis',
+                ];
+
+                foreach ($certs as $columna => $item) {
+                    if ($row->{$columna} && !in_array($item, $calidad, true)) {
+                        $calidad[] = $item;
                     }
-                };
-                $addIfMissing($calidad, 'Certificados Alergenos');
-                $addIfMissing($calidad, 'Biodegradabilidad');
-                $addIfMissing($calidad, 'Libre crueldad animal');
-                $addIfMissing($calidad, 'Certificado de análisis');
+                }
 
                 $calidad = array_values(array_unique($calidad));
 
