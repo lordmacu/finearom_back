@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Project;
 
+use App\Rules\ProductTypeBelongsToCategory;
 use Illuminate\Foundation\Http\FormRequest;
 
 class ProjectStoreRequest extends FormRequest
@@ -27,7 +28,10 @@ class ProjectStoreRequest extends FormRequest
             'client_id'         => 'nullable|integer|exists:clients,id',
             'nombre_prospecto'  => 'nullable|string|max:300',
             'email_prospecto'   => 'nullable|email|max:200',
-            'product_id'          => 'nullable|integer|exists:project_product_types,id',
+            'product_id'          => [
+                'nullable', 'integer', 'exists:project_product_types,id',
+                new ProductTypeBelongsToCategory($this->integer('product_category_id') ?: null),
+            ],
             'product_category_id' => 'nullable|integer|exists:product_categories,id',
             'tipo'            => 'required|in:Colección,Desarrollo,Fine Fragances',
             'rango_min'       => 'nullable|numeric|min:0',

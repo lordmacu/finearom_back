@@ -66,9 +66,10 @@ class MarketingFormTest extends ProjectFieldsTestCase
         $project = $this->project();
 
         $create = $this->postJson("/api/projects/{$project->id}/marketing-variants", [
-            'referencia' => 'REF-1',
-            'codigo'     => 'C-1',
-            'dosis'      => 1.5,
+            'nombre'      => 'Variante 1',
+            'referencias' => [
+                ['referencia' => 'REF-1', 'codigo' => 'C-1', 'dosis' => 1.5],
+            ],
         ])->assertStatus(201);
 
         $variantId = $create->json('data.id');
@@ -78,8 +79,9 @@ class MarketingFormTest extends ProjectFieldsTestCase
             ->assertJsonCount(1, 'data');
 
         $this->putJson("/api/projects/{$project->id}/marketing-variants/{$variantId}", [
-            'referencia' => 'REF-2',
-        ])->assertOk()->assertJsonPath('data.referencia', 'REF-2');
+            'nombre'      => 'Variante 1 bis',
+            'referencias' => [['referencia' => 'REF-2']],
+        ])->assertOk()->assertJsonPath('data.references.0.referencia', 'REF-2');
 
         $this->deleteJson("/api/projects/{$project->id}/marketing-variants/{$variantId}")->assertOk();
 
@@ -94,18 +96,23 @@ class MarketingFormTest extends ProjectFieldsTestCase
         $b = $this->project();
 
         $variantId = $this->postJson("/api/projects/{$a->id}/marketing-variants", [
-            'referencia' => 'REF-A',
+            'nombre'      => 'Variante A',
+            'referencias' => [['referencia' => 'REF-A']],
         ])->json('data.id');
 
         $this->putJson("/api/projects/{$b->id}/marketing-variants/{$variantId}", [
-            'referencia' => 'HACK',
+            'nombre'      => 'HACK',
+            'referencias' => [['referencia' => 'HACK']],
         ])->assertStatus(404);
     }
 
     public function test_el_proyecto_expone_las_relaciones_nuevas(): void
     {
         $project = $this->project();
-        $this->postJson("/api/projects/{$project->id}/marketing-variants", ['referencia' => 'REF-1']);
+        $this->postJson("/api/projects/{$project->id}/marketing-variants", [
+            'nombre'      => 'Variante 1',
+            'referencias' => [['referencia' => 'REF-1']],
+        ]);
 
         $project->load(['marketingVariants', 'envelopeType']);
 

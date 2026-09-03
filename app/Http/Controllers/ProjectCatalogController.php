@@ -311,7 +311,15 @@ class ProjectCatalogController extends Controller
         if ($search = $request->query('search')) {
             $query->where('nombre', 'like', "%{$search}%");
         }
-        $result = $query->orderBy('nombre')->paginate($this->perPage($request, 50));
+
+        // Con category_id la respuesta alimenta el select de un proyecto: sólo
+        // los tipos de esa categoría y sólo los activos. Sin filtro es la
+        // pantalla de catálogos, que necesita ver también los inactivos.
+        if ($categoryId = $request->query('category_id')) {
+            $query->where('product_category_id', $categoryId)->where('active', true);
+        }
+
+        $result = $query->orderBy('grupo')->orderBy('nombre')->paginate($this->perPage($request, 50));
         return response()->json([
             'success' => true,
             'data'    => $result->items(),
@@ -322,8 +330,13 @@ class ProjectCatalogController extends Controller
     public function storeProductType(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'nombre'    => 'required|string|max:200',
-            'categoria' => 'nullable|string|max:100',
+            'nombre'              => 'required|string|max:200',
+            // `categoria` es la taxonomía entera del legacy; la que manda para
+            // el select de proyectos es product_category_id.
+            'categoria'           => 'nullable|integer',
+            'product_category_id' => 'nullable|integer|exists:product_categories,id',
+            'grupo'               => 'nullable|string|max:60',
+            'active'              => 'nullable|boolean',
         ]);
         $pt = ProjectProductType::create($data);
         return response()->json(['success' => true, 'data' => $pt, 'message' => 'Tipo de producto creado'], 201);
@@ -332,8 +345,13 @@ class ProjectCatalogController extends Controller
     public function updateProductType(Request $request, ProjectProductType $projectProductType): JsonResponse
     {
         $data = $request->validate([
-            'nombre'    => 'nullable|string|max:200',
-            'categoria' => 'nullable|string|max:100',
+            'nombre'              => 'nullable|string|max:200',
+            // `categoria` es la taxonomía entera del legacy; la que manda para
+            // el select de proyectos es product_category_id.
+            'categoria'           => 'nullable|integer',
+            'product_category_id' => 'nullable|integer|exists:product_categories,id',
+            'grupo'               => 'nullable|string|max:60',
+            'active'              => 'nullable|boolean',
         ]);
         $projectProductType->update($data);
         return response()->json(['success' => true, 'data' => $projectProductType->fresh(), 'message' => 'Tipo actualizado']);

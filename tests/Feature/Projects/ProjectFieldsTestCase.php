@@ -113,6 +113,24 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->timestamps();
         });
 
+        Schema::create('product_categories', function (Blueprint $t) {
+            $t->id();
+            $t->string('name');
+            $t->string('slug')->unique();
+            $t->boolean('active')->default(true);
+            $t->timestamps();
+        });
+
+        Schema::create('project_product_types', function (Blueprint $t) {
+            $t->id();
+            $t->string('nombre');
+            $t->integer('categoria')->nullable();
+            $t->unsignedBigInteger('product_category_id')->nullable();
+            $t->string('grupo')->nullable();
+            $t->boolean('active')->default(true);
+            $t->timestamps();
+        });
+
         Schema::create('projects', function (Blueprint $t) {
             $t->id();
             $t->string('nombre');
@@ -206,15 +224,45 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->timestamps();
         });
 
+        // Relaciones que ProjectTimeService y las respuestas del controller
+        // cargan aunque el test no las use.
+        Schema::create('clients', function (Blueprint $t) {
+            $t->id();
+            $t->string('client_name')->nullable();
+            $t->string('client_type')->nullable();
+            $t->timestamps();
+        });
+
+        Schema::create('project_variants', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('project_id');
+            $t->timestamps();
+        });
+
+        Schema::create('project_fragrances', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('project_id');
+            $t->timestamps();
+        });
+
         Schema::create('project_marketing_variants', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('project_id');
+            $t->string('nombre', 200)->nullable();
+            $t->integer('orden')->default(0);
+            $t->timestamps();
+        });
+
+        Schema::create('project_marketing_variant_references', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('variant_id');
             $t->string('referencia', 200)->nullable();
             $t->string('codigo', 100)->nullable();
             $t->string('aplicacion', 200)->nullable();
             $t->decimal('dosis', 8, 2)->nullable();
             $t->string('color_etiqueta', 50)->nullable();
             $t->text('claims')->nullable();
+            $t->integer('orden')->default(0);
             $t->timestamps();
         });
     }
