@@ -71,6 +71,12 @@ class ProjectController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('nombre', 'like', '%' . $search . '%')
                   ->orWhere('nombre_prospecto', 'like', '%' . $search . '%')
+                  ->orWhere('tipo_producto', 'like', '%' . $search . '%')
+                  ->orWhere('tipo', 'like', '%' . $search . '%')
+                  ->orWhere('estado_externo', 'like', '%' . $search . '%')
+                  ->orWhere('estado_interno', 'like', '%' . $search . '%')
+                  ->orWhere('ejecutivo', 'like', '%' . $search . '%')
+                  ->orWhere('id', (string) (int) $search)
                   ->orWhereHas('client', fn($cq) => $cq->where('client_name', 'like', '%' . $search . '%'))
                   ->orWhereHas('prospect', fn($cq) => $cq->where('nombre', 'like', '%' . $search . '%'));
             });

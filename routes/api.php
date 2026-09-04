@@ -361,6 +361,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/projects/{project}/marketing-upload', [ProjectMarketingUploadController::class, 'destroy']);
     Route::get('/projects/{project}/marketing-upload/{field}/{filename}', [ProjectMarketingUploadController::class, 'show']);
 
+    // Etiquetas (legacy /etiquetas/* — vistas imprimibles)
+    Route::get('/projects/{project}/labels/aplicacion', [ProjectLabelController::class, 'aplicacion']);
+    Route::get('/projects/{project}/labels/cliente',    [ProjectLabelController::class, 'cliente']);
+    Route::get('/projects/{project}/labels/muestra',    [ProjectLabelController::class, 'muestra']);
+
     // Observaciones departamentales
     Route::patch('/projects/{project}/observaciones', [ProjectDetailController::class, 'updateObservaciones']);
 
