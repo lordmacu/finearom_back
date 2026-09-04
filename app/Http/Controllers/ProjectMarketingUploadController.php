@@ -13,6 +13,7 @@ class ProjectMarketingUploadController extends Controller
 {
     /** Campos de project_marketing que administra este controller. */
     private const FIELDS = [
+        'logo_marca',
         'benchmark_examples',
         'catalog_etiquetas',
         'catalog_piramides',

@@ -12,7 +12,7 @@ class ProjectMarketingRequest extends FormRequest
     }
 
     /**
-     * Los arrays de archivos (benchmark_examples, catalog_etiquetas,
+     * Los arrays de archivos (logo_marca, benchmark_examples, catalog_etiquetas,
      * catalog_piramides, lista_presentaciones) NO se validan aquí a propósito:
      * los administra ProjectMarketingUploadController. Si el formulario los
      * mandara, una copia vieja en memoria borraría los archivos ya subidos.
@@ -27,12 +27,7 @@ class ProjectMarketingRequest extends FormRequest
             'obs_marketing'           => ['nullable', 'string', 'max:2000'],
             'obs_calidad'             => ['nullable', 'string', 'max:2000'],
             'marca'                   => ['nullable', 'string', 'max:255'],
-            'variante'                => ['nullable', 'string', 'max:255'],
-            'tipo_aplicacion'         => ['nullable', 'string', 'max:255'],
             'tipo_envase'             => ['nullable', 'string', 'max:255'],
-            'packaging'               => ['nullable', 'string', 'max:255'],
-            'claims'                  => ['nullable', 'string', 'max:2000'],
-            'benchmark_links'         => ['nullable', 'string', 'max:5000'],
             'descripcion_detallada'   => ['nullable', 'string', 'max:5000'],
             'fecha_entrega_marketing' => ['nullable', 'date'],
         ];

@@ -84,7 +84,8 @@ class ProjectController extends Controller
         $validDepts = ['desarrollo', 'laboratorio', 'mercadeo', 'calidad', 'especiales', 'evaluaciones'];
         if ($departamento = $request->query('departamento')) {
             if (in_array($departamento, $validDepts)) {
-                $query->where("estado_{$departamento}", false);
+                $query->where("estado_{$departamento}", false)
+                      ->where('estado_interno', 'En proceso');
             }
         }
 

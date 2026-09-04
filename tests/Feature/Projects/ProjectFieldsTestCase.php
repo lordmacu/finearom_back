@@ -209,6 +209,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->text('obs_marketing')->nullable();
             $t->text('obs_calidad')->nullable();
             $t->string('marca')->nullable();
+            $t->json('logo_marca')->nullable();
             $t->string('variante')->nullable();
             $t->string('tipo_aplicacion')->nullable();
             $t->string('tipo_envase')->nullable();
