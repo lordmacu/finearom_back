@@ -37,6 +37,7 @@ use App\Http\Controllers\IaForecastController;
 use App\Http\Controllers\SalesHistoryController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectFileController;
+use App\Http\Controllers\ProjectLabelController;
 use App\Http\Controllers\ProjectWorkflowController;
 use App\Http\Controllers\ProjectCatalogController;
 use App\Http\Controllers\ProjectDetailController;
