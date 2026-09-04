@@ -104,7 +104,7 @@ class ProjectWorkflowService
      * Marca un departamento como entregado y evalúa si el proyecto
      * debe pasar a estado_interno = 'Entregado'.
      *
-     * $department: 'desarrollo' | 'laboratorio' | 'mercadeo' | 'calidad' | 'especiales'
+     * $department: 'desarrollo' | 'laboratorio' | 'mercadeo' | 'calidad' | 'especiales' | 'evaluaciones'
      */
     public function deliver(Project $project, string $department, string $executive): void
     {
@@ -114,11 +114,12 @@ class ProjectWorkflowService
         $project->save();
 
         $labels = [
-            'desarrollo'  => 'Desarrollo',
-            'laboratorio' => 'Laboratorio',
-            'mercadeo'    => 'Mercadeo',
-            'calidad'     => 'Calidad',
-            'especiales'  => 'P. Especiales',
+            'desarrollo'   => 'Desarrollo',
+            'laboratorio'  => 'Aplicaciones',
+            'mercadeo'     => 'Marketing',
+            'calidad'      => 'Regulatoria',
+            'especiales'   => 'P. Especiales',
+            'evaluaciones' => 'Evaluaciones',
         ];
         ProjectStatusHistory::create([
             'project_id'  => $project->id,
@@ -160,7 +161,7 @@ class ProjectWorkflowService
         $project->fecha_externo     = null;
         $project->ejecutivo_externo = null;
         $project->razon_perdida     = null;
-        foreach (['desarrollo', 'laboratorio', 'mercadeo', 'calidad', 'especiales'] as $dept) {
+        foreach (['desarrollo', 'laboratorio', 'mercadeo', 'calidad', 'especiales', 'evaluaciones'] as $dept) {
             $project->{"estado_{$dept}"}    = false;
             $project->{"fecha_{$dept}"}     = null;
             $project->{"ejecutivo_{$dept}"} = null;
@@ -183,22 +184,38 @@ class ProjectWorkflowService
      */
     public function checkAndUpdateInternalStatus(Project $project): void
     {
-        $cumplido = match ($project->tipo) {
-            'Colección'      => $project->estado_laboratorio
-                             && $project->estado_mercadeo
-                             && $project->estado_calidad,
+        // Área del workflow → sección del detalle que la contiene. Solo se
+        // exigen las áreas cuya sección esté visible en el proyecto.
+        $areaSection = [
+            'desarrollo'   => 'desarrollo',
+            'laboratorio'  => 'desarrollo',
+            'especiales'   => 'desarrollo',
+            'evaluaciones' => 'evaluaciones',
+            'mercadeo'     => 'marketing',
+            'calidad'      => 'regulatoria',
+        ];
 
-            'Desarrollo'     => $project->estado_desarrollo
-                             && $project->estado_laboratorio
-                             && $project->estado_mercadeo
-                             && $project->estado_calidad,
+        $areasPorTipo = [
+            'Colección'      => ['laboratorio', 'mercadeo', 'calidad'],
+            'Desarrollo'     => ['desarrollo', 'laboratorio', 'mercadeo', 'calidad'],
+            'Fine Fragances' => ['especiales', 'mercadeo', 'calidad'],
+        ];
 
-            'Fine Fragances' => $project->estado_especiales
-                             && $project->estado_mercadeo
-                             && $project->estado_calidad,
+        $secciones = $project->secciones_visibles
+            ?: ['desarrollo', 'evaluaciones', 'regulatoria', 'marketing', 'comercial'];
 
-            default => false,
-        };
+        $requeridas = array_filter(
+            array_merge($areasPorTipo[$project->tipo] ?? [], ['evaluaciones']),
+            fn ($area) => in_array($areaSection[$area], $secciones)
+        );
+
+        $cumplido = count($requeridas) > 0;
+        foreach ($requeridas as $area) {
+            if (!$project->{"estado_{$area}"}) {
+                $cumplido = false;
+                break;
+            }
+        }
 
         if ($cumplido) {
             $project->estado_interno  = 'Entregado';

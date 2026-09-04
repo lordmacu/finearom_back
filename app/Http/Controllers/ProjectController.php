@@ -81,7 +81,7 @@ class ProjectController extends Controller
                   ->orWhereHas('prospect', fn($cq) => $cq->where('nombre', 'like', '%' . $search . '%'));
             });
         }
-        $validDepts = ['desarrollo', 'laboratorio', 'mercadeo', 'calidad', 'especiales'];
+        $validDepts = ['desarrollo', 'laboratorio', 'mercadeo', 'calidad', 'especiales', 'evaluaciones'];
         if ($departamento = $request->query('departamento')) {
             if (in_array($departamento, $validDepts)) {
                 $query->where("estado_{$departamento}", false);

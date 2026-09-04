@@ -14,7 +14,7 @@ class ProjectDeliverRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'department' => 'required|in:desarrollo,laboratorio,mercadeo,calidad,especiales',
+            'department' => 'required|in:desarrollo,laboratorio,mercadeo,calidad,especiales,evaluaciones',
         ];
     }
 }
