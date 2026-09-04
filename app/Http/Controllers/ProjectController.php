@@ -96,6 +96,11 @@ class ProjectController extends Controller
         $project = DB::transaction(function () use ($request) {
             $data = $request->validated();
 
+            // Secciones visibles en el detalle: default todas si no se envió
+            if (!isset($data['secciones_visibles'])) {
+                $data['secciones_visibles'] = ['desarrollo', 'evaluaciones', 'regulatoria', 'marketing', 'comercial'];
+            }
+
             // Si viene ejecutivo_id, resolver el nombre del usuario
             if (!empty($data['ejecutivo_id'])) {
                 $user = User::find($data['ejecutivo_id']);

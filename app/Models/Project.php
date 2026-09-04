@@ -84,9 +84,11 @@ class Project extends Model
         'potencial_anual_kg',
         'probabilidad_cierre',
         'frecuencia_compra_estimada',
+        'secciones_visibles',
     ];
 
     protected $casts = [
+        'secciones_visibles' => 'array',
         'base_cliente' => 'boolean',
         'proactivo' => 'boolean',
         'homologacion' => 'boolean',

@@ -34,6 +34,8 @@ class ProjectStoreRequest extends FormRequest
             ],
             'product_category_id' => 'nullable|integer|exists:product_categories,id',
             'tipo'            => 'required|in:Colección,Desarrollo,Fine Fragances',
+            'secciones_visibles'   => 'nullable|array',
+            'secciones_visibles.*' => 'in:desarrollo,evaluaciones,regulatoria,marketing,comercial',
             'rango_min'       => 'nullable|numeric|min:0',
             'rango_max'       => 'nullable|numeric|min:0|gte:rango_min',
             'volumen'         => 'nullable|numeric|min:0',
