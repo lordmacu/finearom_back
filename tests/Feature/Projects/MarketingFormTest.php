@@ -78,10 +78,12 @@ class MarketingFormTest extends ProjectFieldsTestCase
             ->assertOk()
             ->assertJsonCount(1, 'data');
 
+        // Desde el Task 2, el endpoint de variante ignora "referencias": ese
+        // payload lo maneja el endpoint de referencias (Task 3).
         $this->putJson("/api/projects/{$project->id}/marketing-variants/{$variantId}", [
             'nombre'      => 'Variante 1 bis',
             'referencias' => [['referencia' => 'REF-2']],
-        ])->assertOk()->assertJsonPath('data.references.0.referencia', 'REF-2');
+        ])->assertOk()->assertJsonPath('data.nombre', 'Variante 1 bis')->assertJsonPath('data.references', []);
 
         $this->deleteJson("/api/projects/{$project->id}/marketing-variants/{$variantId}")->assertOk();
 

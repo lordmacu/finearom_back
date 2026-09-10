@@ -61,6 +61,8 @@ class DatabaseSeeder extends Seeder
             'project deliver',
             'project factor edit',
             'project catalog manage',
+            'project variant commercial',
+            'project variant technical',
             'client visit list',
             'client visit create',
             'client visit edit',

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Projects;
 
 use App\Models\User;
+use App\Support\MarketingVariantPermissions;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 use Illuminate\Support\Facades\Schema;
@@ -40,7 +41,11 @@ abstract class ProjectFieldsTestCase extends TestCase
             'password' => bcrypt('secret'),
         ]);
 
-        $this->givePermissions(['project list', 'project edit', 'project create', 'config edit']);
+        $this->givePermissions([
+            'project list', 'project edit', 'project create', 'config edit',
+            MarketingVariantPermissions::COMMERCIAL,
+            MarketingVariantPermissions::TECHNICAL,
+        ]);
         $this->actingAs($this->user, 'sanctum');
     }
 
@@ -50,6 +55,10 @@ abstract class ProjectFieldsTestCase extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         $this->user->permissions()->detach();
+        // El detach crudo no limpia la relación "permissions" ya cacheada en el
+        // modelo: sin este unset, el próximo givePermissionTo() calcula su diff
+        // contra esa caché vieja y puede no re-adjuntar un permiso que ya estaba.
+        $this->user->unsetRelation('permissions');
 
         foreach ($names as $name) {
             $permission = Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
@@ -250,6 +259,8 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->id();
             $t->unsignedBigInteger('project_id');
             $t->string('nombre', 200)->nullable();
+            $t->text('claims')->nullable();
+            $t->string('color_etiqueta', 50)->nullable();
             $t->integer('orden')->default(0);
             $t->timestamps();
         });
@@ -261,8 +272,6 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->string('codigo', 100)->nullable();
             $t->string('aplicacion', 200)->nullable();
             $t->decimal('dosis', 8, 2)->nullable();
-            $t->string('color_etiqueta', 50)->nullable();
-            $t->text('claims')->nullable();
             $t->integer('orden')->default(0);
             $t->timestamps();
         });

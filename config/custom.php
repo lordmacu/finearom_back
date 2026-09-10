@@ -28,6 +28,14 @@ return [
     'coordinadora_client_secret' => env('COORDINADORA_CLIENT_SECRET', ''),
     'coordinadora_auth_url'      => env('COORDINADORA_AUTH_URL', 'https://api.coordinadora.tech'),
     'coordinadora_guias_url'     => env('COORDINADORA_GUIAS_URL', 'https://guias-service.coordinadora.com'),
+    // NIT con el que Finearom quedó registrado en la API Suite de Coordinadora.
+    'coordinadora_nit'           => env('COORDINADORA_NIT', ''),
+
+    // idProceso + divisionCliente según cómo paga el envío el destinatario.
+    'coordinadora_id_proceso_credito'       => env('COORDINADORA_ID_PROCESO_CREDITO', ''),
+    'coordinadora_division_credito'         => env('COORDINADORA_DIVISION_CREDITO', '01'),
+    'coordinadora_id_proceso_contraentrega' => env('COORDINADORA_ID_PROCESO_CONTRAENTREGA', ''),
+    'coordinadora_division_contraentrega'   => env('COORDINADORA_DIVISION_CONTRAENTREGA', '00'),
 
     // Coordinadora empuja sus notificaciones sin autenticación propia: este
     // token viaja como segmento de la URL (/webhooks/coordinadora/{token}/...)

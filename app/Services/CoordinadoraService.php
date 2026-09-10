@@ -11,6 +11,7 @@ class CoordinadoraService
     private string $guiasUrl;
     private string $clientId;
     private string $clientSecret;
+    private string $nit;
     private ?string $cachedToken = null;
     private ?int $tokenExpiresAt = null;
 
@@ -20,6 +21,7 @@ class CoordinadoraService
         $this->guiasUrl     = rtrim(config('custom.coordinadora_guias_url', 'https://guias-service.coordinadora.com'), '/');
         $this->clientId     = config('custom.coordinadora_client_id', '');
         $this->clientSecret = config('custom.coordinadora_client_secret', '');
+        $this->nit          = config('custom.coordinadora_nit', '');
     }
 
     /**
@@ -105,6 +107,119 @@ class CoordinadoraService
             return ['success' => true, 'data' => $data];
         } catch (\Throwable $e) {
             Log::error('[Coordinadora] Exception rastreo ' . $trackingNumber . ': ' . $e->getMessage());
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Genera una guía en la API Suite de Coordinadora.
+     * POST /suite/guias
+     *
+     * $overrides permite pisar cualquier campo del body (p.ej. referenciaGuia,
+     * datosDestinatario) sin tener que repetir el resto de valores por defecto.
+     */
+    public function generarGuia(array $overrides = []): array
+    {
+        try {
+            $token = $this->getToken();
+
+            if (!$token) {
+                return [
+                    'success' => false,
+                    'message' => 'Credenciales de Coordinadora no configuradas. Agregar COORDINADORA_CLIENT_ID y COORDINADORA_CLIENT_SECRET al .env',
+                ];
+            }
+
+            $esCredito = ($overrides['divisionCliente'] ?? config('custom.coordinadora_division_credito', '01'))
+                === config('custom.coordinadora_division_credito', '01');
+
+            $idProcesoDefault = (int) ($esCredito
+                ? config('custom.coordinadora_id_proceso_credito', '')
+                : config('custom.coordinadora_id_proceso_contraentrega', ''));
+
+            $body = array_replace_recursive([
+                'identificacion'   => $this->nit,
+                'idProceso'        => $idProcesoDefault,
+                'divisionCliente'  => config('custom.coordinadora_division_credito', '01'),
+                'codigoPais'       => 170,
+                'valoracion'       => '50000',
+                'tipoCuenta'       => 1,
+                'contenido'        => 'Mercancia de prueba',
+                'nivelServicio'    => 1,
+                'valorRecaudar'    => null,
+                'referenciaRecaudo' => '',
+                'detalle'          => [
+                    [
+                        'pesoReal'       => '1',
+                        'largo'          => '20',
+                        'ancho'          => '20',
+                        'alto'           => '20',
+                        'unidades'       => 1,
+                        'ubl'            => 0,
+                        'referencia'     => '',
+                        'valorDeclarado' => null,
+                    ],
+                ],
+                'datosRemitente' => [
+                    'identificacionRemitente' => $this->nit,
+                    'tipoDocumentoRemitente'  => '31',
+                    'detalleRemitente'        => '',
+                    'viaRemitente'            => '43',
+                    'tipoViaRemitente'        => '3',
+                    'numeroRemitente'         => '23',
+                    'codigoCiudadRemitente'   => '11001000',
+                    'descripcionTipoViaRemitente' => 'Calle',
+                    'direccionRemitente'      => 'Calle 43 # 23-45',
+                    'nombreRemitente'         => 'Finearom S.A.S',
+                    'indicativoRemitente'     => '57',
+                    'celularRemitente'        => '3000000000',
+                    'correoRemitente'         => 'coordinadora.comercial@finearom.com',
+                    'otraDireccionRemitente'  => '',
+                ],
+                'datosDestinatario' => [
+                    'identificacionDestinatario' => '0',
+                    'tipoDocumentoDestinatario'  => '13',
+                    'detalleDestinatario'        => '',
+                    'tipoViaDestinatario'        => '3',
+                    'viaDestinatario'            => '40',
+                    'numeroDestinatario'         => '20-40',
+                    'descripcionTipoViaDestinatario' => 'Calle',
+                    'direccionDestinatario'      => 'Calle 40 # 20-40',
+                    'codigoCiudadDestinatario'   => '11001000',
+                    'nombreDestinatario'         => 'Cliente de prueba',
+                    'indicativoDestinatario'     => '57',
+                    'celularDestinatario'        => '3000000001',
+                    'correoDestinatario'         => 'pruebas@finearom.com',
+                    'otraDireccionDestinatario'  => '',
+                ],
+                'tipoGuia'        => 1,
+                'referenciaGuia'  => '',
+                'usuario'         => 'coordinadora.comercial@finearom.com',
+                'fuente'          => 'envios',
+                'observaciones'   => 'Guia de prueba - integracion Finearom',
+                'tipoProducto'    => '4',
+                'quienPagaEnvio'  => '1',
+                'tipoEnvioEspecial' => false,
+            ], $overrides);
+
+            $response = Http::withToken($token)
+                ->withHeaders(['Accept' => 'application/json'])
+                ->timeout(15)
+                ->post("{$this->guiasUrl}/suite/guias", $body);
+
+            if ($response->status() === 401 || $response->status() === 403) {
+                $this->cachedToken = null;
+                return ['success' => false, 'message' => 'Token expirado o inválido. Reintentar.', 'http_status' => $response->status(), 'body' => $response->json()];
+            }
+
+            if (!$response->successful()) {
+                Log::error('[Coordinadora] Error generarGuia — HTTP ' . $response->status() . ': ' . $response->body());
+                return ['success' => false, 'message' => 'Error HTTP ' . $response->status(), 'http_status' => $response->status(), 'body' => $response->json()];
+            }
+
+            return ['success' => true, 'data' => $response->json()];
+        } catch (\Throwable $e) {
+            Log::error('[Coordinadora] Exception generarGuia: ' . $e->getMessage());
             return ['success' => false, 'message' => $e->getMessage()];
         }
     }

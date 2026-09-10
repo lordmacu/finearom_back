@@ -19,6 +19,8 @@ class ProjectMarketingVariant extends Model
     protected $fillable = [
         'project_id',
         'nombre',
+        'claims',
+        'color_etiqueta',
         'orden',
     ];
 

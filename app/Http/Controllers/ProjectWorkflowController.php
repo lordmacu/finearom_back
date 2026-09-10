@@ -89,10 +89,14 @@ class ProjectWorkflowController extends Controller
             'ejecutivo'  => auth()->user()->name,
         ]);
 
-        $pdf = Pdf::loadView('pdf.project-quotation', [
+        // Se renderiza UNA sola vez: llamar output() dos veces sobre la misma
+        // instancia de Dompdf corrompe el stream /CIDToGIDMap de las fuentes
+        // (Cpdf::o_fontGIDtoCIDMap hace base64_decode destructivo) y el PDF
+        // sale con todos los glifos corridos.
+        $pdfContent = Pdf::loadView('pdf.project-quotation', [
             'project' => $project,
             'items'   => $items,
-        ])->setPaper('a4', 'portrait');
+        ])->setPaper('a4', 'portrait')->output();
 
         $filename = "cotizacion_{$project->id}_v{$version}.pdf";
 
@@ -105,7 +109,7 @@ class ProjectWorkflowController extends Controller
                 if ($folder) {
                     $this->driveService->uploadFile(
                         $userId,
-                        $pdf->output(),
+                        $pdfContent,
                         $filename,
                         $folder,
                         'application/pdf'
@@ -116,7 +120,11 @@ class ProjectWorkflowController extends Controller
             Log::warning("GoogleDrive: fallo al subir cotización de proyecto {$project->id}: " . $e->getMessage());
         }
 
-        return $pdf->download($filename);
+        return response($pdfContent, 200, [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Content-Length'      => strlen($pdfContent),
+        ]);
     }
 
     public function sendQuotationEmail(Request $request, Project $project): JsonResponse

@@ -18,8 +18,6 @@ class ProjectMarketingVariantReference extends Model
         'codigo',
         'aplicacion',
         'dosis',
-        'color_etiqueta',
-        'claims',
         'orden',
     ];
 
