@@ -30,6 +30,17 @@ class ProjectMarketingVariantReferenceController extends Controller
     ): JsonResponse {
         abort_if($variant->project_id !== $project->id, 404);
 
+        // Un ingeniero (rol Desarrollo, no admin) solo crea referencias en
+        // proyectos donde está asignado — misma regla que deliver()
+        $user = auth()->user();
+        if ($user->hasRole('Desarrollo') && !$user->hasRole(['admin', 'super-admin', 'Administrador'])
+            && (int) $project->desarrollador_id !== (int) $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Solo puedes crear referencias en proyectos asignados a ti.',
+            ], 403);
+        }
+
         DB::transaction(function () use ($request, $variant) {
             $variant->references()->delete();
 

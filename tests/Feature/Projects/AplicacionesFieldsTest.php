@@ -70,14 +70,14 @@ class AplicacionesFieldsTest extends ProjectFieldsTestCase
         $envase  = EnvelopeType::create(['name' => 'Frasco 30ml', 'category' => 'Vidrio']);
 
         $this->putJson("/api/projects/{$project->id}", [
-            'nombre'           => $project->nombre,
-            'tipo_etiquetado'  => 'SGA',
-            'envelope_type_id' => $envase->id,
+            'nombre'            => $project->nombre,
+            'tipo_etiquetado'   => 'SGA',
+            'envelope_type_ids' => [$envase->id],
         ])->assertOk();
 
         $project->refresh();
         $this->assertSame('SGA', $project->tipo_etiquetado);
-        $this->assertSame($envase->id, $project->envelope_type_id);
+        $this->assertSame([$envase->id], $project->envelopeTypes()->pluck('envelope_types.id')->all());
     }
 
     public function test_rechaza_tipo_etiquetado_fuera_del_enum(): void

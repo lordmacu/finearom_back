@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Settings;
 
+use App\Models\Process;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateProcessesRequest extends FormRequest
 {
@@ -17,7 +19,7 @@ class UpdateProcessesRequest extends FormRequest
             'rows' => ['required', 'array'],
             'rows.*.name' => ['required', 'string', 'max:255'],
             'rows.*.email' => ['required', 'email', 'max:255'],
-            'rows.*.process_type' => ['required', 'string', 'in:orden_de_compra,confirmacion_despacho,pedido'],
+            'rows.*.process_type' => ['required', 'string', Rule::in(Process::TYPES)],
         ];
     }
 }

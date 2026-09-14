@@ -42,6 +42,7 @@ use App\Http\Controllers\ProjectLabelController;
 use App\Http\Controllers\ProjectWorkflowController;
 use App\Http\Controllers\ProjectCatalogController;
 use App\Http\Controllers\ProjectDetailController;
+use App\Http\Controllers\ProjectAreaDeliveryController;
 use App\Http\Controllers\ProjectNotificationController;
 use App\Http\Controllers\ProjectTimesController;
 use App\Http\Controllers\GoogleAuthController;
@@ -322,8 +323,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // ============================================================================
     Route::get('/projects/export', [ProjectController::class, 'export']);
     Route::get('/projects/dashboard', [ProjectController::class, 'dashboard']);
+    Route::get('/projects/dashboard-clientes', [ProjectController::class, 'dashboardClientes']);
     Route::get('/projects/kpi-stats', [ProjectController::class, 'kpiStats']);
     Route::get('/projects/ejecutivos', [ProjectController::class, 'ejecutivos']);
+    Route::get('/projects/ejecutivos-filtro', [ProjectController::class, 'ejecutivosFiltro']);
+    Route::get('/projects/desarrolladores', [ProjectController::class, 'desarrolladores']);
     Route::get('/projects', [ProjectController::class, 'index']);
     Route::post('/projects', [ProjectController::class, 'store']);
     Route::get('/projects/{project}', [ProjectController::class, 'show']);
@@ -331,6 +335,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/projects/{project}', [ProjectController::class, 'destroy']);
 
     Route::post('/projects/{project}/duplicate', [ProjectController::class, 'duplicate']);
+    Route::post('/projects/{project}/send-creation', [ProjectController::class, 'sendCreation']);
+    Route::post('/projects/{project}/send-update', [ProjectController::class, 'sendUpdate']);
     Route::patch('/projects/{project}/link-client', [ProjectController::class, 'linkClient']);
     Route::patch('/projects/{project}/estado-externo', [ProjectWorkflowController::class, 'setExternalStatus']);
     Route::patch('/projects/{project}/entregar', [ProjectWorkflowController::class, 'deliver']);
@@ -354,6 +360,18 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/projects/{project}/application', [ProjectDetailController::class, 'updateApplication']);
     Route::put('/projects/{project}/evaluation', [ProjectDetailController::class, 'updateEvaluation']);
     Route::get('/projects/{project}/evaluation/bench-image', [ProjectDetailController::class, 'evaluationBenchImage']);
+    // Entrega de Aplicaciones, Evaluaciones, Marketing, Regulatoria y P. Especiales:
+    // modal con notas + adjuntos (van en el correo del hilo)
+    Route::get('/projects/{project}/aplicaciones/entrega', [ProjectAreaDeliveryController::class, 'showAplicaciones']);
+    Route::post('/projects/{project}/aplicaciones/entregar', [ProjectAreaDeliveryController::class, 'deliverAplicaciones']);
+    Route::get('/projects/{project}/evaluaciones/entrega', [ProjectAreaDeliveryController::class, 'showEvaluaciones']);
+    Route::post('/projects/{project}/evaluaciones/entregar', [ProjectAreaDeliveryController::class, 'deliverEvaluaciones']);
+    Route::get('/projects/{project}/marketing/entrega', [ProjectAreaDeliveryController::class, 'showMarketing']);
+    Route::post('/projects/{project}/marketing/entregar', [ProjectAreaDeliveryController::class, 'deliverMarketing']);
+    Route::get('/projects/{project}/regulatoria/entrega', [ProjectAreaDeliveryController::class, 'showRegulatoria']);
+    Route::post('/projects/{project}/regulatoria/entregar', [ProjectAreaDeliveryController::class, 'deliverRegulatoria']);
+    Route::get('/projects/{project}/especiales/entrega', [ProjectAreaDeliveryController::class, 'showEspeciales']);
+    Route::post('/projects/{project}/especiales/entregar', [ProjectAreaDeliveryController::class, 'deliverEspeciales']);
     Route::put('/projects/{project}/marketing', [ProjectDetailController::class, 'updateMarketing']);
     // Variantes de Marketing: la variante es de Comercial, sus referencias de Desarrollo
     Route::get('/projects/{project}/marketing-variants', [ProjectMarketingVariantController::class, 'index']);

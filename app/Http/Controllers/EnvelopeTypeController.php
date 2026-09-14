@@ -4,21 +4,35 @@ namespace App\Http\Controllers;
 
 use App\Models\EnvelopeType;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class EnvelopeTypeController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $types = EnvelopeType::where('active', true)
-            ->orderBy('category')
-            ->orderBy('name')
-            ->get();
+        $query = EnvelopeType::where('active', true);
+
+        if ($search = $request->query('search')) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('category', 'like', "%{$search}%");
+            });
+        }
+
+        $perPage = max(1, min(100, (int) $request->query('per_page', 10)));
+        $types = $query->orderBy('category')->orderBy('name')->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data'    => $types,
+            'data'    => $types->items(),
+            'meta'    => [
+                'current_page' => $types->currentPage(),
+                'last_page'    => $types->lastPage(),
+                'per_page'     => $types->perPage(),
+                'total'        => $types->total(),
+            ],
         ]);
     }
 

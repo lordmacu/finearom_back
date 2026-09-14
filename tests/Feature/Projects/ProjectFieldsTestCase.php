@@ -42,7 +42,7 @@ abstract class ProjectFieldsTestCase extends TestCase
         ]);
 
         $this->givePermissions([
-            'project list', 'project edit', 'project create', 'config edit',
+            'project list', 'project edit', 'project create', 'project send creation', 'config edit',
             MarketingVariantPermissions::COMMERCIAL,
             MarketingVariantPermissions::TECHNICAL,
         ]);
@@ -122,6 +122,13 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->timestamps();
         });
 
+        Schema::create('project_envelope_type', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('project_id');
+            $t->unsignedBigInteger('envelope_type_id');
+            $t->timestamps();
+        });
+
         Schema::create('product_categories', function (Blueprint $t) {
             $t->id();
             $t->string('name');
@@ -158,7 +165,6 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->decimal('costo_perfumacion_especifico', 12, 2)->nullable();
             $t->decimal('costo_perfumacion_tonelada', 12, 2)->nullable();
             $t->string('tipo_etiquetado')->nullable();
-            $t->unsignedBigInteger('envelope_type_id')->nullable();
             $t->integer('max_variantes')->nullable();
             $t->boolean('base_cliente')->default(false);
             $t->boolean('proactivo')->default(false);
@@ -173,8 +179,28 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->date('fecha_entrega')->nullable();
             $t->string('ejecutivo')->nullable();
             $t->unsignedBigInteger('ejecutivo_id')->nullable();
+            $t->unsignedBigInteger('desarrollador_id')->nullable();
             $t->string('estado_externo')->nullable();
             $t->string('estado_interno')->nullable();
+            $t->boolean('estado_desarrollo')->default(false);
+            $t->date('fecha_desarrollo')->nullable();
+            $t->string('ejecutivo_desarrollo')->nullable();
+            $t->boolean('estado_laboratorio')->default(false);
+            $t->date('fecha_laboratorio')->nullable();
+            $t->string('ejecutivo_laboratorio')->nullable();
+            $t->boolean('estado_mercadeo')->default(false);
+            $t->date('fecha_mercadeo')->nullable();
+            $t->string('ejecutivo_mercadeo')->nullable();
+            $t->boolean('estado_calidad')->default(false);
+            $t->date('fecha_calidad')->nullable();
+            $t->string('ejecutivo_calidad')->nullable();
+            $t->boolean('estado_especiales')->default(false);
+            $t->date('fecha_especiales')->nullable();
+            $t->string('ejecutivo_especiales')->nullable();
+            $t->boolean('estado_evaluaciones')->default(false);
+            $t->date('fecha_evaluaciones')->nullable();
+            $t->string('ejecutivo_evaluaciones')->nullable();
+            $t->integer('dias_diferencia')->nullable();
             $t->timestamps();
             $t->softDeletes();
         });
@@ -192,6 +218,7 @@ abstract class ProjectFieldsTestCase extends TestCase
         Schema::create('project_applications', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('project_id');
+            $t->text('notas_entrega')->nullable();
             $t->decimal('dosis', 10, 2)->nullable();
             $t->integer('cantidad_aplicacion')->nullable();
             $t->text('observaciones')->nullable();
@@ -205,6 +232,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->unsignedBigInteger('benchmark_reference_id')->nullable();
             $t->string('metodologia')->nullable();
             $t->text('observacion')->nullable();
+            $t->text('notas_entrega')->nullable();
             $t->text('bench_text')->nullable();
             $t->string('bench_image')->nullable();
             $t->timestamps();
@@ -213,6 +241,7 @@ abstract class ProjectFieldsTestCase extends TestCase
         Schema::create('project_marketing', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('project_id');
+            $t->text('notas_entrega')->nullable();
             $t->json('marketing')->nullable();
             $t->json('calidad')->nullable();
             $t->text('obs_marketing')->nullable();
@@ -255,6 +284,26 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->timestamps();
         });
 
+        // La cargan las relaciones de ProjectController::show aunque el test no las use.
+        Schema::create('project_requests', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('project_id');
+            $t->timestamps();
+        });
+
+        // La escribe ProjectWorkflowService::deliver al notificar la entrega.
+        Schema::create('project_notifications', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('user_id');
+            $t->unsignedBigInteger('project_id')->nullable();
+            $t->string('tipo', 50);
+            $t->string('titulo');
+            $t->text('mensaje')->nullable();
+            $t->json('data')->nullable();
+            $t->timestamp('leida_at')->nullable();
+            $t->timestamps();
+        });
+
         Schema::create('project_marketing_variants', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('project_id');
@@ -273,6 +322,27 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->string('aplicacion', 200)->nullable();
             $t->decimal('dosis', 8, 2)->nullable();
             $t->integer('orden')->default(0);
+            $t->timestamps();
+        });
+
+        Schema::create('project_files', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('project_id');
+            $t->string('nombre_original');
+            $t->string('nombre_storage');
+            $t->string('path');
+            $t->string('mime_type');
+            $t->bigInteger('size');
+            $t->string('categoria')->nullable();
+            $t->string('ejecutivo');
+            $t->timestamps();
+        });
+
+        Schema::create('project_area_deliveries', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('project_id');
+            $t->string('area', 30);
+            $t->text('notas_entrega')->nullable();
             $t->timestamps();
         });
     }

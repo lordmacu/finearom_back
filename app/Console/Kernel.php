@@ -124,6 +124,13 @@ class Kernel extends ConsoleKernel
             ->dailyAt('08:00')
             ->timezone('America/Bogota');
 
+        // Recordatorio diario: proyectos con más de 24 h sin ingeniero de desarrollo asignado - 8:15 AM
+        $schedule->command('projects:engineer-reminders')
+            ->dailyAt('08:15')
+            ->timezone('America/Bogota')
+            ->onSuccess(fn () => \Log::info('Recordatorios de asignación de ingeniero enviados'))
+            ->onFailure(fn () => \Log::error('Error al enviar recordatorios de asignación de ingeniero'));
+
         // Alertas de proyectos urgentes (≤ 2 días hábiles a fecha_requerida) - 7:30 AM
         // $schedule->command('projects:urgency-alerts')
         //     ->dailyAt('07:30')

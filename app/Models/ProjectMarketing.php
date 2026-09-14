@@ -23,6 +23,7 @@ class ProjectMarketing extends Model
         'tipo_envase',
         'descripcion_detallada',
         'fecha_entrega_marketing',
+        'notas_entrega',
     ];
 
     protected $casts = [

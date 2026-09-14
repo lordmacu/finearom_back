@@ -47,9 +47,10 @@ return [
         ],
         'google_alt' => [
             'transport' => 'smtp',
-            'host' => 'smtp.gmail.com',
-            'port' => 587,
-            'encryption' => 'tls',
+            // Configurable para poder desviarlo a Mailpit en desarrollo; los defaults son los de producción.
+            'host' => env('MAIL_HOST_FACTURACION', 'smtp.gmail.com'),
+            'port' => env('MAIL_PORT_FACTURACION', 587),
+            'encryption' => env('MAIL_ENCRYPTION_FACTURACION', 'tls'),
             'username' => env('MAIL_USERNAME_FACTURACION', 'facturacion@finearom.com'),
             'password' => env('MAIL_PASSWORD_FACTURACION')
         ],

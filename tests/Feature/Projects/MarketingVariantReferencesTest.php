@@ -175,4 +175,51 @@ class MarketingVariantReferencesTest extends ProjectFieldsTestCase
 
         $this->assertSame('De Desarrollo', $data['references'][0]['referencia']);
     }
+
+    public function test_desarrollo_no_asignado_no_puede_sincronizar_referencias(): void
+    {
+        $project = $this->project();
+        $id      = $this->variante($project);
+
+        $ingeniero = $this->ingenieroDesarrollo();
+
+        $this->actingAs($ingeniero, 'sanctum')
+            ->putJson("/api/projects/{$project->id}/marketing-variants/{$id}/references", [
+                'referencias' => [$this->referencia()],
+            ])->assertForbidden();
+
+        $this->assertSame(0, DB::table('project_marketing_variant_references')->count());
+    }
+
+    public function test_desarrollo_asignado_si_puede_sincronizar_referencias(): void
+    {
+        $project = $this->project();
+        $id      = $this->variante($project);
+
+        $ingeniero = $this->ingenieroDesarrollo();
+        $project->update(['desarrollador_id' => $ingeniero->id]);
+
+        $data = $this->actingAs($ingeniero, 'sanctum')
+            ->putJson("/api/projects/{$project->id}/marketing-variants/{$id}/references", [
+                'referencias' => [$this->referencia(['referencia' => 'Del Asignado'])],
+            ])->assertOk()->json('data');
+
+        $this->assertSame('Del Asignado', $data['references'][0]['referencia']);
+    }
+
+    private function ingenieroDesarrollo(): \App\Models\User
+    {
+        $role = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Desarrollo', 'guard_name' => 'web']);
+        $role->givePermissionTo(\Spatie\Permission\Models\Permission::firstOrCreate(
+            ['name' => MarketingVariantPermissions::TECHNICAL, 'guard_name' => 'web']
+        ));
+
+        $user = \App\Models\User::create([
+            'name' => 'Ing. Referencias', 'email' => 'ing.refs@finearom.co', 'password' => bcrypt('x'),
+        ]);
+        $user->assignRole($role);
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+
+        return $user;
+    }
 }

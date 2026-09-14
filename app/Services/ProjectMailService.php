@@ -1,0 +1,771 @@
+<?php
+
+namespace App\Services;
+
+use App\Mail\ProjectThreadMail;
+use App\Models\Process;
+use App\Models\Project;
+use App\Models\User;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
+
+/**
+ * Correos internos de un proyecto, todos en un mismo hilo.
+ *
+ * Convención por acción: template `project_{accion}` y destinatarios en
+ * `processes` con process_type `project_{accion}`; el ejecutivo del proyecto
+ * siempre se suma, y una vez asignado, el ingeniero de desarrollo también
+ * recibe todos los correos siguientes del hilo. El primer correo exitoso
+ * abre el hilo (se guardan su Message-ID y asunto); los siguientes van como
+ * respuesta.
+ *
+ * Tras cada envío exitoso se guarda en `email_snapshot` el resumen por áreas
+ * tal como se comunicó: el correo de modificación (sendUpdate) se arma con el
+ * diff entre el estado actual y ese snapshot.
+ */
+class ProjectMailService
+{
+    public function __construct(
+        private readonly EmailTemplateService $templates,
+    ) {}
+
+    /**
+     * Envía el correo de una acción del proyecto. Nunca lanza: un fallo de
+     * correo no debe romper la acción que lo disparó.
+     *
+     * @return bool true si el correo salió; false si no había destinatarios o falló
+     */
+    public function send(Project $project, string $action, array $extra = []): bool
+    {
+        $recipients = $this->recipients($project, "project_{$action}", $action);
+
+        if (empty($recipients)) {
+            Log::info('Correo de proyecto omitido: sin destinatarios', [
+                'project_id' => $project->id,
+                'action'     => $action,
+            ]);
+            return false;
+        }
+
+        return $this->sendMessage($project, $action, $recipients, $extra);
+    }
+
+    /**
+     * Correo de asignación del ingeniero de desarrollo: va al ingeniero (TO)
+     * y a la ejecutiva del proyecto (CC), dentro del hilo si ya existe.
+     */
+    public function sendEngineerAssigned(Project $project, User $engineer): bool
+    {
+        $recipients = collect([$engineer->email, $this->executiveEmail($project)])
+            ->map(fn ($email) => strtolower(trim((string) $email)))
+            ->filter(fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL))
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($recipients)) {
+            Log::info('Correo de asignación omitido: ingeniero sin email válido', [
+                'project_id' => $project->id,
+                'engineer_id' => $engineer->id,
+            ]);
+            return false;
+        }
+
+        return $this->sendMessage($project, 'engineer_assigned', $recipients, [
+            'engineer_name' => $engineer->name,
+        ]);
+    }
+
+    /**
+     * Recordatorio diario del cron: el proyecto lleva más de 24 h sin ingeniero
+     * de desarrollo asignado. Va a la ejecutiva del proyecto.
+     */
+    public function sendEngineerReminder(Project $project): bool
+    {
+        $recipients = collect([$this->executiveEmail($project)])
+            ->map(fn ($email) => strtolower(trim((string) $email)))
+            ->filter(fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL))
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($recipients)) {
+            Log::info('Recordatorio de ingeniero omitido: ejecutivo sin email válido', [
+                'project_id' => $project->id,
+            ]);
+            return false;
+        }
+
+        return $this->sendMessage($project, 'engineer_reminder', $recipients, [
+            'created_date' => $project->fecha_creacion?->format('d/m/Y') ?? '—',
+        ]);
+    }
+
+    /**
+     * Correo de entrega del flujo de desarrollo (botón "Entregado" del
+     * ingeniero): lista las variantes de marketing con sus referencias.
+     * Destinatarios: lista `project_development_delivered` (fallback a
+     * `project_created`) + ejecutiva + ingeniero asignado.
+     *
+     * Si el área ya estaba entregada ($isUpdate), el correo sale con el
+     * template `project_development_updated`: avisa si cambiaron las
+     * referencias desde el último correo y trae la tabla completa de
+     * variantes y referencias como quedaron.
+     */
+    public function sendDevelopmentDelivered(Project $project, User $engineer, bool $isUpdate = false): bool
+    {
+        $action = $isUpdate ? 'development_updated' : 'development_delivered';
+
+        $recipients = $this->recipients($project, 'project_development_delivered', $action);
+
+        if (empty($recipients)) {
+            Log::info('Correo de entrega de desarrollo omitido: sin destinatarios', [
+                'project_id' => $project->id,
+            ]);
+            return false;
+        }
+
+        $extra = [
+            'engineer_name'  => $engineer->name,
+            'variants_table' => $this->variantsDeliveredTable($project),
+        ];
+
+        if ($isUpdate) {
+            $extra['changes_table'] = $this->referencesChangedNotice($project);
+        }
+
+        return $this->sendMessage($project, $action, $recipients, $extra);
+    }
+
+    /**
+     * Aviso de si las variantes o las referencias cambiaron desde el último
+     * correo (correo de actualización de desarrollo). No repite los valores:
+     * la lista completa como quedó va justo debajo, en |variants_table|.
+     */
+    private function referencesChangedNotice(Project $project): string
+    {
+        $antes   = $project->email_snapshot['Marketing']['Variantes de marketing'] ?? null;
+        $despues = $this->sections($project)['Marketing']['Variantes de marketing'] ?? null;
+
+        if ($antes === $despues) {
+            return '<p style="font-size:13px;color:#6b7280;">Sin cambios en las variantes ni las referencias desde el último correo.</p>';
+        }
+
+        return '<p style="font-size:13px;color:#6b7280;">Cambiaron las variantes o las referencias; abajo está la lista completa como quedó.</p>';
+    }
+
+    /**
+     * Correo de entrega de un área externa (Aplicaciones, Evaluaciones,
+     * Marketing, Regulatoria o P. Especiales): las notas del modal viajan en
+     * el cuerpo (HTML del editor) y los adjuntos del área van adjuntos al
+     * correo. Destinatarios: lista propia (`project_{área}_delivered`,
+     * fallback `project_created`) + ejecutiva + ingeniero asignado.
+     *
+     * El correo se atribuye al ÁREA, no a la persona que oprimió el botón
+     * (`delivered_by` = "Regulatoria", "P. Especiales"…): a quien lo recibe le
+     * importa qué área entregó, no quién de ese equipo lo hizo.
+     *
+     * Re-entrega ($isUpdate): template de actualización que solo avisa si las
+     * notas cambiaron — el correo trae las notas vigentes, nunca el valor
+     * anterior (ese quedó en el correo previo del mismo hilo).
+     */
+    public function sendAreaDelivered(Project $project, string $area, bool $isUpdate = false, ?string $notasAntes = null): bool
+    {
+        $cfg = match ($area) {
+            'marketing' => [
+                'delivered' => 'marketing_delivered',
+                'updated'   => 'marketing_updated',
+                'process'   => 'project_marketing_delivered',
+                'categoria' => 'marketing',
+                'label'     => 'Marketing',
+            ],
+            'aplicaciones' => [
+                'delivered' => 'applications_ready',
+                'updated'   => 'applications_updated',
+                'process'   => 'project_applications_ready',
+                'categoria' => 'aplicaciones',
+                'label'     => 'Aplicaciones',
+            ],
+            'regulatoria' => [
+                'delivered' => 'regulatoria_delivered',
+                'updated'   => 'regulatoria_updated',
+                'process'   => 'project_regulatoria_delivered',
+                'categoria' => 'regulatoria',
+                'label'     => 'Regulatoria',
+            ],
+            'especiales' => [
+                'delivered' => 'especiales_delivered',
+                'updated'   => 'especiales_updated',
+                'process'   => 'project_especiales_delivered',
+                'categoria' => 'especiales',
+                'label'     => 'P. Especiales',
+            ],
+            default => [
+                'delivered' => 'evaluation_delivered',
+                'updated'   => 'evaluation_updated',
+                'process'   => 'project_evaluation_delivered',
+                'categoria' => 'evaluaciones',
+                'label'     => 'Evaluaciones',
+            ],
+        };
+
+        $action = $isUpdate ? $cfg['updated'] : $cfg['delivered'];
+
+        $recipients = $this->recipients($project, $cfg['process'], $action);
+
+        if (empty($recipients)) {
+            Log::info('Correo de entrega de área omitido: sin destinatarios', [
+                'project_id' => $project->id,
+                'area'       => $area,
+            ]);
+            return false;
+        }
+
+        $notas = $project->notasEntrega($area);
+
+        // Las notas son HTML del editor enriquecido (CkEditor) — van crudas al correo
+        $extra = [
+            'delivered_by'  => $cfg['label'],
+            'notas_entrega' => ($notas && trim(strip_tags($notas)) !== '') ? $notas : null,
+        ];
+
+        // Solo se avisa QUE cambiaron: las notas como quedaron van completas
+        // más abajo en el mismo correo (|notas_entrega|), y las anteriores
+        // siguen visibles en el correo previo del hilo.
+        if ($isUpdate && $notasAntes !== $notas) {
+            $extra['changes_table'] = '<p style="font-size:13px;color:#6b7280;">Se actualizaron las notas de entrega; abajo están como quedaron.</p>';
+        } elseif ($isUpdate) {
+            $extra['changes_table'] = '<p style="font-size:13px;color:#6b7280;">Las notas no cambiaron; se actualizaron los adjuntos.</p>';
+        }
+
+        $attachments = $project->files()
+            ->where('categoria', $cfg['categoria'])
+            ->get(['path', 'nombre_original'])
+            ->map(fn ($f) => ['path' => $f->path, 'name' => $f->nombre_original])
+            ->all();
+
+        return $this->sendMessage($project, $action, $recipients, $extra, $attachments);
+    }
+
+    /** Variantes de marketing con sus referencias, en HTML (correo de entrega). */
+    private function variantsDeliveredTable(Project $project): string
+    {
+        $project->loadMissing('marketingVariants.references');
+
+        $td    = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;vertical-align:top;"';
+        $tdKey = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;background-color:#f8f8f8;font-weight:bold;color:#1F2345;white-space:nowrap;vertical-align:top;"';
+
+        $number = fn ($value) => number_format((float) $value, 2, ',', '.');
+
+        $html = '';
+        foreach ($project->marketingVariants as $variant) {
+            $refs = $variant->references
+                ->map(fn ($r) => collect([
+                    $r->referencia,
+                    $r->codigo ? "({$r->codigo})" : null,
+                    $r->aplicacion,
+                    $r->dosis !== null ? $number($r->dosis) . '%' : null,
+                ])->filter()->implode(' '))
+                ->filter()
+                ->map('e')
+                ->implode('<br>');
+
+            $label = collect([$variant->nombre, $variant->claims])->filter()->implode(' — ');
+
+            $html .= '<tr><td ' . $tdKey . '>' . e($label) . '</td><td ' . $td . '>'
+                . ($refs ?: '—')
+                . '</td></tr>';
+        }
+
+        if ($html === '') {
+            return '<p style="font-size:13px;color:#6b7280;">El proyecto no tiene variantes de marketing con referencias.</p>';
+        }
+
+        return '<table style="width:100%;border-collapse:collapse;margin:16px 0;"><tbody>' . $html . '</tbody></table>';
+    }
+
+    /**
+     * Núcleo de envío: renderiza el template `project_{accion}`, lo manda al
+     * primero de $recipients (TO) con el resto en CC, mantiene el hilo y
+     * actualiza el snapshot. Nunca lanza.
+     *
+     * @param string[] $recipients
+     * @param array<int, array{path: string, name: string}> $attachments
+     */
+    private function sendMessage(Project $project, string $action, array $recipients, array $extra = [], array $attachments = []): bool
+    {
+        $key = "project_{$action}";
+
+        try {
+            $sections = $this->sections($project);
+            $rendered = $this->templates->renderTemplate($key, array_merge($this->variables($project, $sections), $extra));
+
+            $threadId = $project->email_thread_message_id;
+            $subject  = $threadId ? 'Re: ' . $project->email_thread_subject : $rendered['subject'];
+
+            // Los correos de NOTIFICACIÓN puntual (asignación del ingeniero,
+            // recordatorio del cron) nunca abren el hilo: si salen antes que
+            // el de creación (p. ej. ingeniero elegido en el formulario de
+            // creación), van standalone con su propio asunto y no le roban
+            // la raíz ni el asunto al hilo del proyecto.
+            $opensThread = !$threadId && !in_array($action, ['engineer_assigned', 'engineer_reminder'], true);
+
+            // Al abrir el hilo fijamos nosotros el Message-ID: getMessageId()
+            // del SentMessage queda sobreescrito por el id de cola del servidor
+            // SMTP (SmtpTransport::parseMessageId) y las respuestas quedarían
+            // apuntando a un id que no es el header del correo raíz
+            $newThreadId = $opensThread ? $this->newThreadMessageId($project) : null;
+
+            $to   = array_shift($recipients);
+            $sent = Mail::to($to)->cc($recipients)->send(new ProjectThreadMail(
+                rendered: $rendered,
+                threadSubject: $subject,
+                inReplyTo: $threadId,
+                processType: $key,
+                trackingMetadata: ['project_id' => $project->id],
+                mailAttachments: $attachments,
+                threadMessageId: $newThreadId,
+            ));
+
+            if ($sent) {
+                $fill = ['email_snapshot' => $sections];
+                if ($opensThread) {
+                    $fill['email_thread_message_id'] = $newThreadId;
+                    $fill['email_thread_subject']    = $subject;
+                }
+                $project->forceFill($fill)->save();
+            }
+
+            return $sent !== null;
+        } catch (\Throwable $e) {
+            Log::error('Error enviando correo de proyecto', [
+                'project_id' => $project->id,
+                'action'     => $action,
+                'error'      => $e->getMessage(),
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Correo de modificación: diff entre el estado actual del proyecto y el
+     * snapshot del último correo enviado, dentro del mismo hilo. Nunca lanza.
+     *
+     * @return array{sent: bool, reason: ?string} reason: sin_hilo | sin_cambios | fallo
+     */
+    public function sendUpdate(Project $project): array
+    {
+        if (!$project->email_thread_message_id) {
+            return ['sent' => false, 'reason' => 'sin_hilo'];
+        }
+
+        $current = $this->sections($project);
+        // Proyectos con hilo de antes del snapshot: todo aparece como "nuevo"
+        $changes = $this->diffSections($project->email_snapshot ?? [], $current);
+
+        if (empty($changes)) {
+            return ['sent' => false, 'reason' => 'sin_cambios'];
+        }
+
+        $sent = $this->send($project, 'updated', ['changes_table' => $this->renderChanges($changes)]);
+
+        return ['sent' => $sent, 'reason' => $sent ? null : 'fallo'];
+    }
+
+    /**
+     * Emails del proceso (se aceptan varios separados por coma) + ejecutivo
+     * + ingeniero de desarrollo asignado (si lo hay: desde su asignación
+     * recibe todos los correos del hilo).
+     * Primero = TO, resto = CC. Sin inválidos ni duplicados.
+     * Si la acción no tiene lista propia (y no es la creación), se usan los
+     * destinatarios de `project_created`: las novedades van a las mismas partes.
+     *
+     * @return string[]
+     */
+    private function recipients(Project $project, string $processType, string $action): array
+    {
+        $emails = Process::where('process_type', $processType)->pluck('email');
+
+        if ($emails->isEmpty() && $action !== 'created') {
+            Log::info('Correo de proyecto: destinatarios tomados de project_created (fallback)', [
+                'project_id' => $project->id,
+                'action'     => $action,
+            ]);
+            $emails = Process::where('process_type', 'project_created')->pluck('email');
+        }
+
+        return $emails
+            ->flatMap(fn ($value) => explode(',', (string) $value))
+            ->push($this->executiveEmail($project))
+            ->push($this->engineerEmail($project))
+            ->map(fn ($email) => strtolower(trim((string) $email)))
+            ->filter(fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function engineerEmail(Project $project): ?string
+    {
+        return $project->desarrollador_id
+            ? $project->desarrollador?->email
+            : null;
+    }
+
+    private function executiveEmail(Project $project): ?string
+    {
+        if ($project->ejecutivo_id) {
+            return $project->ejecutivoUser?->email;
+        }
+
+        // Proyectos duplicados o legacy solo traen el nombre del ejecutivo
+        return $project->ejecutivo
+            ? User::where('name', $project->ejecutivo)->value('email')
+            : null;
+    }
+
+    /**
+     * Variables base disponibles para todos los templates de proyecto.
+     * Los valores vacíos se muestran como "—".
+     */
+    private function variables(Project $project, ?array $sections = null): array
+    {
+        $project->loadMissing(['client', 'prospect']);
+
+        $number = fn ($value) => ($value === null || $value === '')
+            ? null
+            : number_format((float) $value, 2, ',', '.');
+
+        $range = ($project->rango_min !== null || $project->rango_max !== null)
+            ? ($number($project->rango_min) ?? '—') . ' – ' . ($number($project->rango_max) ?? '—')
+            : null;
+
+        $vars = [
+            'project_id'      => (string) $project->id,
+            'project_name'    => $project->nombre,
+            'client_name'     => $project->client?->client_name
+                ?? $project->prospect?->nombre
+                ?? $project->nombre_prospecto
+                ?? 'Sin cliente',
+            'project_type'    => $project->tipo,
+            'product_type'    => $project->tipo_producto,
+            'executive'       => $project->ejecutivo,
+            'created_by'      => auth()->user()?->name,
+            'required_date'   => $project->fecha_requerida?->format('d/m/Y'),
+            'calculated_date' => $project->fecha_calculada?->format('d/m/Y'),
+            'volume'          => $number($project->volumen),
+            'range'           => $range,
+            'project_url'     => rtrim((string) config('app.frontend_url'), '/') . '/projects/' . $project->id,
+        ];
+
+        $table = $this->renderSections($sections ?? $this->sections($project));
+
+        $vars = array_map(fn ($value) => ($value === null || $value === '') ? '—' : $value, $vars);
+        $vars['project_table'] = $table;
+
+        return $vars;
+    }
+
+    /**
+     * Ficha completa del proyecto agrupada por las áreas del formulario
+     * (Información general, Desarrollo, Evaluaciones, Regulatoria, Marketing,
+     * Estado comercial): área => [etiqueta => valor listo para mostrar].
+     * Cubre todos los campos del formulario; omite filas sin dato y áreas no
+     * marcadas en `secciones_visibles` (general y comercial van siempre).
+     * Es la fuente única del correo de creación, del `email_snapshot`
+     * y del diff del correo de modificación.
+     */
+    private function sections(Project $project): array
+    {
+        $project->loadMissing([
+            'client', 'prospect', 'product', 'productCategory', 'envelopeTypes',
+            'sample', 'application', 'evaluation', 'evaluation.benchmarkReference',
+            'marketingYCalidad', 'marketingVariants.references',
+            'variants.benchmarkReference', 'variants.proposals.finearomReference',
+            'fragrances.fineFragrance', 'desarrollador',
+        ]);
+
+        $number = fn ($value) => ($value === null || $value === '')
+            ? null
+            : number_format((float) $value, 2, ',', '.');
+
+        $visible = $project->secciones_visibles
+            ?? ['desarrollo', 'evaluaciones', 'regulatoria', 'marketing', 'comercial'];
+
+        $origen = $project->homologacion
+            ? 'Homologación'
+            : ($project->proactivo ? 'Proactivo' : 'Reactivo');
+
+        $range = ($project->rango_min !== null || $project->rango_max !== null)
+            ? ($number($project->rango_min) ?? '—') . ' – ' . ($number($project->rango_max) ?? '—')
+            : null;
+
+        $filled = fn ($rows) => array_filter($rows, fn ($value) => $value !== null && $value !== '');
+
+        $sections = [];
+
+        $sections['Información general'] = $filled([
+            'Proyecto'            => $project->nombre,
+            'Cliente'             => $project->client?->client_name
+                ?? $project->prospect?->nombre
+                ?? $project->nombre_prospecto
+                ?? 'Sin cliente',
+            'Tipo'                => $project->tipo,
+            'Ejecutivo'           => $project->ejecutivo,
+            'Ingeniero de desarrollo' => $project->desarrollador?->name,
+            'Categoría'           => $project->productCategory?->name,
+            'Tipo de producto'    => $project->product?->nombre ?? $project->tipo_producto,
+            'Origen'              => $origen,
+            'Base del cliente'    => $project->base_cliente ? 'Sí' : null,
+            'Internacional'       => $project->internacional ? 'Sí' : null,
+            'Fecha de creación'   => $project->fecha_creacion?->format('d/m/Y'),
+            'Fecha requerida'     => $project->fecha_requerida?->format('d/m/Y'),
+            'Fecha calculada'     => $project->fecha_calculada?->format('d/m/Y'),
+            'Volumen (Kg/año)'    => $number($project->volumen),
+            'Rango'               => $range,
+            'Precio (USD)'        => $number($project->precio),
+            'TRM'                 => $number($project->trm),
+            'Factor'              => $project->factor !== null ? (string) $project->factor : null,
+            'Dosis (%)'           => $number($project->dosis),
+            'Fecha de entrega'    => $project->fecha_entrega?->format('d/m/Y'),
+            'Costo perfumación (USD/ton)' => $number($project->costo_perfumacion_tonelada),
+            'Costo perfumación específico (USD)' => $number($project->costo_perfumacion_especifico),
+            'Máx. variantes permitidas' => $project->max_variantes !== null ? (string) $project->max_variantes : null,
+        ]);
+
+        if (in_array('desarrollo', $visible, true)) {
+            $sample = $project->sample;
+            $application = $project->application;
+
+            $muestra = $sample?->cantidad !== null
+                ? 'Cantidad: ' . $number($sample->cantidad)
+                    . ($sample->cantidad_copias ? ' · Copias: ' . $sample->cantidad_copias : '')
+                : null;
+
+            $aplicacion = $application?->dosis !== null
+                ? 'Dosis: ' . $number($application->dosis)
+                    . ($application->cantidad_aplicacion ? ' · Cantidad: ' . $application->cantidad_aplicacion : '')
+                : null;
+
+            $refName = fn ($ref) => $ref ? trim(($ref->codigo ?? '') . ' ' . ($ref->nombre ?? '')) : null;
+
+            $variantes = $project->variants
+                ->map(function ($v) use ($number, $refName) {
+                    $line = collect([
+                        $v->nombre,
+                        $v->categoria,
+                        $v->descripcion,
+                        $v->observaciones,
+                        $v->benchmarkReference ? 'Bench: ' . $refName($v->benchmarkReference) : null,
+                    ])->filter()->implode(' — ');
+
+                    $proposals = $v->proposals
+                        ->map(fn ($p) => '↳ Propuesta' . ($p->definitiva ? ' (definitiva)' : '') . ': '
+                            . collect([
+                                $refName($p->finearomReference),
+                                $p->total_propuesta !== null ? 'USD ' . $number($p->total_propuesta) : null,
+                                $p->total_propuesta_cop !== null ? 'COP ' . $number($p->total_propuesta_cop) : null,
+                            ])->filter()->implode(' — '))
+                        ->filter()
+                        ->implode('<br>');
+
+                    return collect([$line ?: null, $proposals ?: null])->filter()->implode('<br>');
+                })
+                ->filter()
+                ->implode('<br>');
+
+            $fragancias = $project->fragrances
+                ->map(fn ($f) => collect([
+                    $f->fineFragrance?->nombre,
+                    $f->gramos !== null ? $number($f->gramos) . ' g' : null,
+                    $f->margen !== null ? 'Margen: ' . $number($f->margen) . '%' : null,
+                    $f->precio_calculado !== null ? 'Precio: USD ' . $number($f->precio_calculado) : null,
+                    $f->notas,
+                ])->filter()->implode(' — '))
+                ->filter()
+                ->implode('<br>');
+
+            $sections['Desarrollo'] = $filled([
+                'Envase'                 => $project->envelopeTypes->pluck('name')->implode(', ') ?: null,
+                'Tipo de etiquetado'     => $project->tipo_etiquetado,
+                'Muestra aceite'         => $muestra,
+                'Observaciones muestra'  => $sample?->observaciones,
+                'Aplicación'             => $aplicacion,
+                'Observaciones aplicación' => $application?->observaciones,
+                'Variantes'              => $variantes ?: null,
+                'Fragancias finas'       => $fragancias ?: null,
+            ]);
+        }
+
+        if (in_array('evaluaciones', $visible, true)) {
+            $evaluation = $project->evaluation;
+
+            $sections['Evaluaciones'] = $filled([
+                'Tipos de evaluación' => !empty($evaluation?->tipos) ? implode(', ', $evaluation->tipos) : null,
+                'Metodología'         => $evaluation?->metodologia,
+                'Benchmark'           => $evaluation?->bench_text,
+                'Referencia benchmark' => $evaluation?->benchmarkReference
+                    ? trim(($evaluation->benchmarkReference->codigo ?? '') . ' ' . ($evaluation->benchmarkReference->nombre ?? ''))
+                    : null,
+                'Observación'         => $evaluation?->observacion,
+            ]);
+        }
+
+        if (in_array('regulatoria', $visible, true)) {
+            $sections['Regulatoria'] = $filled([
+                'Entregables'  => !empty($project->marketingYCalidad?->calidad) ? implode(', ', $project->marketingYCalidad->calidad) : null,
+                'Observaciones' => $project->marketingYCalidad?->obs_calidad,
+            ]);
+        }
+
+        if (in_array('marketing', $visible, true)) {
+            $marketing = $project->marketingYCalidad;
+
+            $variantesMarketing = $project->marketingVariants
+                ->map(function ($v) use ($number) {
+                    $line = collect([
+                        $v->nombre,
+                        $v->claims,
+                        $v->color_etiqueta ? 'Color: ' . $v->color_etiqueta : null,
+                    ])->filter()->implode(' — ');
+
+                    $refs = $v->references
+                        ->map(fn ($r) => '↳ ' . collect([
+                            $r->referencia,
+                            $r->codigo,
+                            $r->aplicacion,
+                            $r->dosis !== null ? $number($r->dosis) . '%' : null,
+                        ])->filter()->implode(' — '))
+                        ->filter()
+                        ->implode('<br>');
+
+                    return collect([$line ?: null, $refs ?: null])->filter()->implode('<br>');
+                })
+                ->filter()
+                ->implode('<br>');
+
+            $sections['Marketing'] = $filled([
+                'Entregables'          => !empty($marketing?->marketing) ? implode(', ', $marketing->marketing) : null,
+                'Marca'                => $marketing?->marca,
+                'Tipo de envase'       => $marketing?->tipo_envase,
+                'Descripción detallada' => $marketing?->descripcion_detallada,
+                'Fecha entrega marketing' => $marketing?->fecha_entrega_marketing?->format('d/m/Y'),
+                'Observaciones'        => $marketing?->obs_marketing,
+                'Variantes de marketing' => $variantesMarketing ?: null,
+            ]);
+        }
+
+        $sections['Estado comercial'] = $filled([
+            'Estado externo'    => $project->estado_externo,
+            'Estado interno'    => $project->estado_interno,
+            'Ejecutivo externo' => $project->ejecutivo_externo,
+            'Fecha estado externo' => $project->fecha_externo?->format('d/m/Y'),
+            'Razón de pérdida'  => $project->razon_perdida,
+        ]);
+
+        return $sections;
+    }
+
+    /** Resumen por áreas en HTML (variable |project_table|). */
+    private function renderSections(array $sections): string
+    {
+        $td    = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;"';
+        $tdKey = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;background-color:#f8f8f8;font-weight:bold;color:#1F2345;white-space:nowrap;vertical-align:top;"';
+        $h3    = 'style="margin:20px 0 6px;font-size:14px;color:#1F2345;border-bottom:2px solid #1F2345;padding-bottom:4px;"';
+
+        $html = '';
+        foreach ($sections as $title => $rows) {
+            if (empty($rows)) {
+                continue;
+            }
+            $html .= '<h3 ' . $h3 . '>' . e($title) . '</h3>';
+            $html .= '<table style="width:100%;border-collapse:collapse;margin:0 0 8px;"><tbody>';
+            foreach ($rows as $label => $value) {
+                $html .= '<tr><td ' . $tdKey . '>' . e($label) . '</td><td ' . $td . '>' . $this->cellValue($value) . '</td></tr>';
+            }
+            $html .= '</tbody></table>';
+        }
+
+        return $html;
+    }
+
+    /**
+     * Diff entre dos snapshots de secciones:
+     * área => [ ['campo' =>, 'valor' =>], ... ] — `valor` es cómo quedó el
+     * campo (null = sin dato). El valor anterior solo sirve para detectar el
+     * cambio: no viaja al correo, queda en el correo previo del hilo.
+     */
+    private function diffSections(array $before, array $current): array
+    {
+        $changes = [];
+
+        $areas = array_unique(array_merge(array_keys($before), array_keys($current)));
+        foreach ($areas as $area) {
+            $oldRows = $before[$area] ?? [];
+            $newRows = $current[$area] ?? [];
+
+            $labels = array_unique(array_merge(array_keys($oldRows), array_keys($newRows)));
+            foreach ($labels as $label) {
+                $old = $oldRows[$label] ?? null;
+                $new = $newRows[$label] ?? null;
+                if ($old === $new) {
+                    continue;
+                }
+                $changes[$area][] = ['campo' => $label, 'valor' => $new];
+            }
+        }
+
+        return $changes;
+    }
+
+    /** Cambios en HTML por área: Campo / Cómo quedó (variable |changes_table|). */
+    private function renderChanges(array $changes): string
+    {
+        $td    = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;vertical-align:top;"';
+        $tdKey = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:13px;background-color:#f8f8f8;font-weight:bold;color:#1F2345;white-space:nowrap;vertical-align:top;"';
+        $th    = 'style="border:1px solid #dddddd;padding:8px 12px;text-align:left;font-size:12px;background-color:#1F2345;color:#ffffff;"';
+        $h3    = 'style="margin:20px 0 6px;font-size:14px;color:#1F2345;border-bottom:2px solid #1F2345;padding-bottom:4px;"';
+
+        $html = '';
+        foreach ($changes as $area => $rows) {
+            $html .= '<h3 ' . $h3 . '>' . e($area) . '</h3>';
+            $html .= '<table style="width:100%;border-collapse:collapse;margin:0 0 8px;"><thead><tr>'
+                . '<th ' . $th . '>Campo</th><th ' . $th . '>Cómo quedó</th>'
+                . '</tr></thead><tbody>';
+            foreach ($rows as $row) {
+                $html .= '<tr>'
+                    . '<td ' . $tdKey . '>' . e($row['campo']) . '</td>'
+                    . '<td ' . $td . '>' . $this->cellValue($row['valor']) . '</td>'
+                    . '</tr>';
+            }
+            $html .= '</tbody></table>';
+        }
+
+        return $html;
+    }
+
+    /**
+     * Message-ID propio para el correo que abre el hilo (único y reconocible
+     * por proyecto). Se guarda en email_thread_message_id y las respuestas lo
+     * referencian en In-Reply-To / References.
+     */
+    private function newThreadMessageId(Project $project): string
+    {
+        $host = parse_url((string) config('app.url'), PHP_URL_HOST) ?: 'finearom.com';
+
+        return 'project-' . $project->id . '-' . Str::lower((string) Str::ulid()) . '@' . $host;
+    }
+
+    /** Celda HTML segura: las listas con <br> se escapan por línea; null = "—". */
+    private function cellValue(?string $value): string
+    {
+        if ($value === null || $value === '') {
+            return '—';
+        }
+
+        return str_contains($value, '<br>')
+            ? implode('<br>', array_map('e', explode('<br>', $value)))
+            : e($value);
+    }
+}

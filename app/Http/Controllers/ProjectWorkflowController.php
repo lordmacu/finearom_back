@@ -9,6 +9,7 @@ use App\Models\Project;
 use App\Models\ProjectQuotationLog;
 use App\Models\PurchaseOrder;
 use App\Services\GoogleDriveService;
+use App\Services\ProjectMailService;
 use App\Services\ProjectWorkflowService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -22,6 +23,7 @@ class ProjectWorkflowController extends Controller
     public function __construct(
         private readonly ProjectWorkflowService $workflowService,
         private readonly GoogleDriveService $driveService,
+        private readonly ProjectMailService $projectMailService,
     ) {
         $this->middleware('can:project external status')->only(['setExternalStatus']);
         $this->middleware('can:project deliver')->only(['deliver']);
@@ -42,7 +44,29 @@ class ProjectWorkflowController extends Controller
 
     public function deliver(ProjectDeliverRequest $request, Project $project): JsonResponse
     {
-        $this->workflowService->deliver($project, $request->department, auth()->user()->name);
+        $user = auth()->user();
+
+        // Un ingeniero (rol Desarrollo, no admin) solo entrega el área de
+        // desarrollo y solo en proyectos donde está asignado
+        if ($user->hasRole('Desarrollo') && !$user->hasRole(['admin', 'super-admin', 'Administrador'])) {
+            if ($request->department !== 'desarrollo'
+                || (int) $project->desarrollador_id !== (int) $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Solo puedes entregar el área de desarrollo en proyectos asignados a ti.',
+                ], 403);
+            }
+        }
+
+        // Re-entrega de desarrollo: el correo sale como "actualización"
+        $wasDelivered = $request->department === 'desarrollo' && (bool) $project->estado_desarrollo;
+
+        $this->workflowService->deliver($project, $request->department, $user->name);
+
+        // Al entregar desarrollo, correo con las referencias creadas (silencioso)
+        if ($request->department === 'desarrollo') {
+            $this->projectMailService->sendDevelopmentDelivered($project->fresh(), $user, $wasDelivered);
+        }
 
         return response()->json([
             'success' => true,

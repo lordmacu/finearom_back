@@ -18,6 +18,7 @@ class ProjectEvaluation extends Model
         'benchmark_reference_id',
         'metodologia',
         'observacion',
+        'notas_entrega',
         'bench_text',
         'bench_image',
     ];

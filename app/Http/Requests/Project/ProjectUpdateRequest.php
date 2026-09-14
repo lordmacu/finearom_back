@@ -3,13 +3,15 @@
 namespace App\Http\Requests\Project;
 
 use App\Rules\ProductTypeBelongsToCategory;
+use App\Support\ProjectOwnership;
 use Illuminate\Foundation\Http\FormRequest;
 
 class ProjectUpdateRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        // Regla de dueño: una comercial solo edita proyectos donde es la ejecutiva
+        return ProjectOwnership::canManage($this->user(), $this->route('project'));
     }
 
     public function rules(): array
@@ -37,7 +39,8 @@ class ProjectUpdateRequest extends FormRequest
             'costo_perfumacion_especifico' => 'nullable|numeric|min:0',
             'costo_perfumacion_tonelada'   => 'nullable|numeric|min:0',
             'tipo_etiquetado'              => 'nullable|in:Estandar,SGA',
-            'envelope_type_id'            => 'nullable|integer|exists:envelope_types,id',
+            'envelope_type_ids'            => 'nullable|array',
+            'envelope_type_ids.*'          => 'integer|exists:envelope_types,id',
             'max_variantes'                => 'nullable|integer|min:1|max:50',
             'base_cliente'    => 'nullable|boolean',
             'proactivo'       => 'nullable|boolean',
@@ -45,8 +48,10 @@ class ProjectUpdateRequest extends FormRequest
             'internacional'   => 'nullable|boolean',
             'fecha_requerida' => 'nullable|date',
             'fecha_creacion'  => 'nullable|date',
+            'fecha_entrega'   => 'nullable|date',
             'tipo_producto'   => 'nullable|string|max:200',
             'ejecutivo_id'    => 'nullable|integer|exists:users,id',
+            'desarrollador_id' => 'nullable|integer|exists:users,id',
             'ejecutivo'       => 'nullable|string|max:200',
             'obs_lab'         => 'nullable|string',
             'obs_des'         => 'nullable|string',

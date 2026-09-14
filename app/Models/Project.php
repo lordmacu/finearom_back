@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -43,12 +44,12 @@ class Project extends Model
         'costo_perfumacion_especifico',
         'costo_perfumacion_tonelada',
         'tipo_etiquetado',
-        'envelope_type_id',
         'max_variantes',
         'homologacion',
         'internacional',
         'ejecutivo',
         'ejecutivo_id',
+        'desarrollador_id',
         'estado_externo',
         'fecha_externo',
         'ejecutivo_externo',
@@ -92,6 +93,7 @@ class Project extends Model
 
     protected $casts = [
         'secciones_visibles' => 'array',
+        'email_snapshot' => 'array',
         'base_cliente' => 'boolean',
         'proactivo' => 'boolean',
         'homologacion' => 'boolean',
@@ -139,9 +141,10 @@ class Project extends Model
         return $this->belongsTo(ProductCategory::class, 'product_category_id');
     }
 
-    public function envelopeType(): BelongsTo
+    public function envelopeTypes(): BelongsToMany
     {
-        return $this->belongsTo(EnvelopeType::class, 'envelope_type_id');
+        return $this->belongsToMany(EnvelopeType::class, 'project_envelope_type')
+            ->withTimestamps();
     }
 
     public function prospect(): BelongsTo
@@ -152,6 +155,11 @@ class Project extends Model
     public function ejecutivoUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'ejecutivo_id');
+    }
+
+    public function desarrollador(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'desarrollador_id');
     }
 
     public function product(): BelongsTo
@@ -172,6 +180,23 @@ class Project extends Model
     public function evaluation(): HasOne
     {
         return $this->hasOne(ProjectEvaluation::class, 'project_id');
+    }
+
+    // Notas de entrega de las áreas sin subentidad propia (regulatoria, especiales)
+    public function areaDeliveries(): HasMany
+    {
+        return $this->hasMany(ProjectAreaDelivery::class, 'project_id');
+    }
+
+    /** Notas de entrega del área (las 3 con subentidad + las genéricas). */
+    public function notasEntrega(string $area): ?string
+    {
+        return match ($area) {
+            'aplicaciones' => $this->application?->notas_entrega,
+            'evaluaciones' => $this->evaluation?->notas_entrega,
+            'marketing'    => $this->marketingYCalidad?->notas_entrega,
+            default        => $this->areaDeliveries->firstWhere('area', $area)?->notas_entrega,
+        };
     }
 
 public function marketingYCalidad(): HasOne

@@ -14,7 +14,9 @@ use App\Models\ProjectSample;
 use App\Models\ProjectStatusHistory;
 use App\Models\ProjectGoogleTaskConfig;
 use App\Services\GoogleTaskService;
+use App\Services\ProjectMailService;
 use App\Services\ProjectTimeService;
+use App\Support\ProjectOwnership;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -25,11 +27,14 @@ class ProjectController extends Controller
     public function __construct(
         private readonly ProjectTimeService $timeService,
         private readonly GoogleTaskService $googleTaskService,
+        private readonly ProjectMailService $projectMailService,
+        private readonly \App\Services\TrmService $trmService,
     ) {
-        $this->middleware('can:project list')->only(['index', 'show', 'export', 'dashboard', 'ejecutivos', 'byClient', 'kpiStats']);
+        $this->middleware('can:project list')->only(['index', 'show', 'export', 'dashboard', 'dashboardClientes', 'ejecutivos', 'ejecutivosFiltro', 'desarrolladores', 'byClient', 'kpiStats']);
         $this->middleware('can:project create')->only(['store', 'duplicate']);
         $this->middleware('can:project edit')->only(['update', 'linkClient']);
         $this->middleware('can:project delete')->only(['destroy']);
+        $this->middleware('can:project send creation')->only(['sendCreation', 'sendUpdate']);
     }
 
     public function index(Request $request): JsonResponse
@@ -89,6 +94,16 @@ class ProjectController extends Controller
             }
         }
 
+        // Filtro "Estado por área": estado_{dept}:1 (entregado) o estado_{dept}:0 (pendiente).
+        // Independiente del tab "departamento" de arriba (ese siempre es pendiente + en proceso).
+        $validAreaFields = array_map(fn($d) => "estado_{$d}", $validDepts);
+        if ($areaEstado = $request->query('area_estado')) {
+            [$field, $entregado] = array_pad(explode(':', $areaEstado, 2), 2, null);
+            if (in_array($field, $validAreaFields, true) && in_array($entregado, ['0', '1'], true)) {
+                $query->where($field, $entregado === '1');
+            }
+        }
+
         return $query;
     }
 
@@ -96,6 +111,8 @@ class ProjectController extends Controller
     {
         $project = DB::transaction(function () use ($request) {
             $data = $request->validated();
+            $envelopeTypeIds = $data['envelope_type_ids'] ?? null;
+            unset($data['envelope_type_ids']);
 
             // Secciones visibles en el detalle: default todas si no se envió
             if (!isset($data['secciones_visibles'])) {
@@ -127,6 +144,10 @@ class ProjectController extends Controller
                     'estado_interno' => 'En proceso',
                 ]
             ));
+
+            if (!empty($envelopeTypeIds)) {
+                $project->envelopeTypes()->sync($envelopeTypeIds);
+            }
 
             ProjectSample::create(['project_id' => $project->id]);
             ProjectApplication::create(['project_id' => $project->id]);
@@ -187,9 +208,17 @@ class ProjectController extends Controller
             // Silencioso — Google Tasks no debe bloquear la creación del proyecto
         }
 
+        // El correo de creación no sale al crear: lo dispara el botón
+        // "Enviar creación de proyecto" (sendCreation), que abre el hilo.
+
+        // Si la comercial asignó el ingeniero en la creación, avisarle (silencioso)
+        if ($project->desarrollador_id && ($engineer = User::find($project->desarrollador_id))) {
+            $this->projectMailService->sendEngineerAssigned($project, $engineer);
+        }
+
         return response()->json([
             'success' => true,
-            'data'    => $project->load(['client', 'product', 'sample', 'application', 'evaluation', 'marketingYCalidad']),
+            'data'    => $project->load(['client', 'product', 'sample', 'application', 'evaluation', 'marketingYCalidad', 'envelopeTypes']),
             'message' => 'Proyecto creado',
         ], 201);
     }
@@ -201,7 +230,7 @@ class ProjectController extends Controller
             'prospect',
             'product',
             'productCategory',
-            'envelopeType',
+            'envelopeTypes',
             'sample',
             'application',
             'evaluation',
@@ -212,17 +241,25 @@ class ProjectController extends Controller
             'variants.benchmarkReference',
             'requests.fragrance',
             'fragrances.fineFragrance',
+            'desarrollador',
         ]);
 
-        return response()->json(['success' => true, 'data' => $project]);
+        return response()->json([
+            'success'    => true,
+            'data'       => $project,
+            'can_manage' => ProjectOwnership::canManage(auth()->user(), $project),
+        ]);
     }
 
     public function update(ProjectUpdateRequest $request, Project $project): JsonResponse
     {
         $recalculateFields = ['precio', 'rango_min', 'rango_max', 'volumen', 'tipo', 'homologacion', 'product_id'];
+        $desarrolladorAntes = $project->desarrollador_id;
 
         $project = DB::transaction(function () use ($request, $project, $recalculateFields) {
             $validated = $request->validated();
+            $envelopeTypeIds = array_key_exists('envelope_type_ids', $validated) ? $validated['envelope_type_ids'] : null;
+            unset($validated['envelope_type_ids']);
 
             // Si viene ejecutivo_id, resolver el nombre del usuario
             if (!empty($validated['ejecutivo_id'])) {
@@ -231,6 +268,10 @@ class ProjectController extends Controller
             }
 
             $project->update($validated);
+
+            if ($envelopeTypeIds !== null) {
+                $project->envelopeTypes()->sync($envelopeTypeIds);
+            }
 
             $needsRecalculation = false;
             foreach ($recalculateFields as $field) {
@@ -253,9 +294,16 @@ class ProjectController extends Controller
             return $project;
         });
 
+        // Asignación o cambio de ingeniero: correo aparte al nuevo ingeniero (silencioso)
+        if ($project->desarrollador_id
+            && (int) $project->desarrollador_id !== (int) $desarrolladorAntes
+            && ($engineer = User::find($project->desarrollador_id))) {
+            $this->projectMailService->sendEngineerAssigned($project, $engineer);
+        }
+
         return response()->json([
             'success' => true,
-            'data'    => $project->fresh(),
+            'data'    => $project->fresh()->load('envelopeTypes'),
             'message' => 'Proyecto actualizado',
         ]);
     }
@@ -280,6 +328,35 @@ class ProjectController extends Controller
         return response()->json(['success' => true, 'data' => $ejecutivos]);
     }
 
+    /**
+     * Ejecutivos para FILTRAR el listado (no para asignar): a diferencia de
+     * ejecutivos(), esto sale directo de projects.ejecutivo, incluyendo
+     * nombres de proyectos importados de la otra plataforma que no tienen
+     * usuario ni registro en `executives` — si no, el filtro no los alcanza.
+     */
+    public function ejecutivosFiltro(): JsonResponse
+    {
+        $ejecutivos = Project::query()
+            ->whereNotNull('ejecutivo')
+            ->where('ejecutivo', '!=', '')
+            ->distinct()
+            ->orderBy('ejecutivo')
+            ->pluck('ejecutivo');
+
+        return response()->json(['success' => true, 'data' => $ejecutivos]);
+    }
+
+    /** Usuarios con rol Desarrollo (para asignar el ingeniero del proyecto). */
+    public function desarrolladores(): JsonResponse
+    {
+        $desarrolladores = User::role('Desarrollo')
+            ->select('id', 'name', 'email')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json(['success' => true, 'data' => $desarrolladores]);
+    }
+
     public function duplicate(Project $project): JsonResponse
     {
         $newProject = DB::transaction(function () use ($project) {
@@ -287,7 +364,7 @@ class ProjectController extends Controller
                 'nombre', 'client_id', 'product_id', 'product_category_id',
                 'tipo', 'rango_min', 'rango_max', 'volumen', 'precio', 'dosis',
                 'trm', 'factor', 'costo_perfumacion_especifico', 'costo_perfumacion_tonelada',
-                'tipo_etiquetado', 'envelope_type_id', 'max_variantes',
+                'tipo_etiquetado', 'max_variantes',
                 'base_cliente', 'proactivo', 'homologacion', 'internacional',
                 'tipo_producto', 'fecha_requerida',
             ]);
@@ -299,6 +376,11 @@ class ProjectController extends Controller
             $attrs['estado_interno'] = 'En proceso';
 
             $newProject = Project::create($attrs);
+
+            $envelopeTypeIds = $project->envelopeTypes()->pluck('envelope_types.id');
+            if ($envelopeTypeIds->isNotEmpty()) {
+                $newProject->envelopeTypes()->sync($envelopeTypeIds);
+            }
 
             ProjectSample::create(['project_id' => $newProject->id]);
             ProjectApplication::create(['project_id' => $newProject->id]);
@@ -315,11 +397,73 @@ class ProjectController extends Controller
             return $newProject;
         });
 
+        // El duplicado tampoco envía correo solo: el hilo lo abre el botón
+        // "Enviar creación de proyecto" en el detalle de la copia.
+
         return response()->json([
             'success' => true,
-            'data'    => $newProject->load(['client', 'product']),
+            'data'    => $newProject->load(['client', 'product', 'envelopeTypes']),
             'message' => 'Proyecto duplicado',
         ], 201);
+    }
+
+    /**
+     * Botón "Enviar creación de proyecto": envía el correo project_created
+     * (resumen por áreas). El primero abre el hilo; los siguientes van como Re:.
+     */
+    public function sendCreation(Project $project): JsonResponse
+    {
+        if (!ProjectOwnership::canManage(auth()->user(), $project)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Solo la ejecutiva del proyecto puede enviar sus correos.',
+            ], 403);
+        }
+
+        $sent = $this->projectMailService->send($project, 'created');
+
+        if (!$sent) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No se envió: no hay destinatarios configurados para "Proyecto: creación" o el correo falló (ver log).',
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Correo de creación enviado',
+        ], 200);
+    }
+
+    /**
+     * Botón "Enviar modificación": envía el correo project_updated con el diff
+     * (qué cambió desde el último correo) dentro del mismo hilo del proyecto.
+     */
+    public function sendUpdate(Project $project): JsonResponse
+    {
+        if (!ProjectOwnership::canManage(auth()->user(), $project)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Solo la ejecutiva del proyecto puede enviar sus correos.',
+            ], 403);
+        }
+
+        $result = $this->projectMailService->sendUpdate($project);
+
+        if (!$result['sent']) {
+            $message = match ($result['reason']) {
+                'sin_hilo'    => 'Primero envía el correo de creación del proyecto.',
+                'sin_cambios' => 'No hay cambios desde el último correo enviado.',
+                default       => 'No se envió: no hay destinatarios configurados o el correo falló (ver log).',
+            };
+
+            return response()->json(['success' => false, 'message' => $message], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Correo de modificación enviado',
+        ], 200);
     }
 
     public function export(Request $request): StreamedResponse
@@ -419,10 +563,20 @@ class ProjectController extends Controller
             'en_proceso' => $base()->where('estado_interno', 'En proceso')->count(),
         ];
 
+        // fecha_externo es la fecha real en que se marcó Ganado/Perdido (setExternalStatus);
+        // updated_at se corre con cualquier edición posterior y no sirve para esto.
         $winsAnio = $base()
             ->where('estado_externo', 'Ganado')
-            ->whereYear('updated_at', $year)
+            ->whereYear('fecha_externo', $year)
             ->count();
+
+        $winsPorMes = $base()
+            ->where('estado_externo', 'Ganado')
+            ->whereYear('fecha_externo', $year)
+            ->selectRaw("DATE_FORMAT(fecha_externo, '%Y-%m') as mes, COUNT(*) as total, SUM(potencial_anual_usd) as total_usd")
+            ->groupBy('mes')
+            ->orderBy('mes')
+            ->get();
 
         $potencialPorProbabilidad = $base()
             ->where('estado_externo', 'En espera')
@@ -523,6 +677,7 @@ class ProjectController extends Controller
                 'by_ejecutivo'             => $byEjecutivo,
                 'by_month'                 => $byMonth,
                 'wins_anio'                => $winsAnio,
+                'wins_por_mes'             => $winsPorMes,
                 'potencial_probabilidad'   => $potencialPorProbabilidad,
                 'pronostico_anual_usd'     => round($pronosticoAnual, 2),
                 'pronostico_anio_curso_usd' => round($pronosticoAnioCurso, 2),
@@ -536,6 +691,65 @@ class ProjectController extends Controller
                     'client_id'   => $clientId ? (int) $clientId : null,
                     'category_id' => $categoryId ? (int) $categoryId : null,
                 ],
+            ],
+        ]);
+    }
+
+    /**
+     * Pipeline de alta probabilidad, desglosado por cliente: solo proyectos
+     * `probabilidad_cierre = alto` aún en espera, con su fecha de cierre
+     * estimada y el potencial en USD — más su equivalente en COP a la TRM
+     * elegida (por defecto, la de hoy).
+     */
+    public function dashboardClientes(Request $request): JsonResponse
+    {
+        $ejecutivo = $request->query('ejecutivo');
+        $trmParam  = $request->query('trm');
+        $trm       = is_numeric($trmParam) ? (float) $trmParam : $this->trmService->getTrm();
+
+        $projects = Project::query()
+            ->where('probabilidad_cierre', 'alto')
+            ->where('estado_externo', 'En espera')
+            ->when($ejecutivo, fn ($q) => $q->where('ejecutivo', $ejecutivo))
+            ->with('client:id,client_name')
+            ->orderBy('fecha_cierre_estimada')
+            ->get([
+                'id', 'nombre', 'client_id', 'nombre_prospecto', 'ejecutivo',
+                'fecha_cierre_estimada', 'potencial_anual_usd', 'potencial_anual_kg',
+            ]);
+
+        $clientes = $projects
+            ->groupBy(fn ($p) => $p->client_id ? "c{$p->client_id}" : 'p:' . $p->nombre_prospecto)
+            ->map(function ($items) use ($trm) {
+                $first    = $items->first();
+                $totalUsd = (float) $items->sum('potencial_anual_usd');
+
+                return [
+                    'cliente'   => $first->client?->client_name ?? $first->nombre_prospecto ?? 'Sin nombre',
+                    'client_id' => $first->client_id,
+                    'proyectos' => $items->map(fn ($p) => [
+                        'id'                    => $p->id,
+                        'nombre'                => $p->nombre,
+                        'ejecutivo'             => $p->ejecutivo,
+                        'fecha_cierre_estimada' => $p->fecha_cierre_estimada?->format('Y-m-d'),
+                        'potencial_usd'         => round((float) $p->potencial_anual_usd, 2),
+                        'potencial_kg'          => $p->potencial_anual_kg !== null ? round((float) $p->potencial_anual_kg, 2) : null,
+                    ])->values(),
+                    'fecha_cierre_mas_proxima' => $items->pluck('fecha_cierre_estimada')->filter()->sort()->first()?->format('Y-m-d'),
+                    'total_potencial_usd'      => round($totalUsd, 2),
+                    'total_potencial_cop'      => round($totalUsd * $trm, 2),
+                ];
+            })
+            ->sortByDesc('total_potencial_usd')
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'trm_usada'           => $trm,
+                'total_potencial_usd' => round((float) $clientes->sum('total_potencial_usd'), 2),
+                'total_potencial_cop' => round((float) $clientes->sum('total_potencial_cop'), 2),
+                'clientes'            => $clientes,
             ],
         ]);
     }

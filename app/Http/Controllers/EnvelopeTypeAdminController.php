@@ -13,13 +13,38 @@ class EnvelopeTypeAdminController extends Controller
 {
     public function __construct()
     {
-        $this->middleware('can:config edit');
+        // Módulo aparte de administración de envases: crear/editar/eliminar
+        // es solo para quien tenga 'envelope type manage' (Marketing y roles
+        // gerenciales). El listado público de solo-lectura para elegir envase
+        // en el formulario de proyecto vive en EnvelopeTypeController, sin
+        // esta restricción.
+        $this->middleware('can:envelope type manage');
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $types = EnvelopeType::orderBy('category')->orderBy('name')->get();
-        return response()->json(['success' => true, 'data' => $types]);
+        $query = EnvelopeType::query();
+
+        if ($search = $request->query('search')) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('category', 'like', "%{$search}%");
+            });
+        }
+
+        $perPage = max(1, min(100, (int) $request->query('per_page', 10)));
+        $types = $query->orderBy('category')->orderBy('name')->paginate($perPage);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $types->items(),
+            'meta'    => [
+                'current_page' => $types->currentPage(),
+                'last_page'    => $types->lastPage(),
+                'per_page'     => $types->perPage(),
+                'total'        => $types->total(),
+            ],
+        ]);
     }
 
     public function store(Request $request): JsonResponse

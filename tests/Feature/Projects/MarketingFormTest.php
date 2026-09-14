@@ -116,9 +116,9 @@ class MarketingFormTest extends ProjectFieldsTestCase
             'referencias' => [['referencia' => 'REF-1']],
         ]);
 
-        $project->load(['marketingVariants', 'envelopeType']);
+        $project->load(['marketingVariants', 'envelopeTypes']);
 
         $this->assertCount(1, $project->marketingVariants);
-        $this->assertTrue($project->relationLoaded('envelopeType'));
+        $this->assertTrue($project->relationLoaded('envelopeTypes'));
     }
 }

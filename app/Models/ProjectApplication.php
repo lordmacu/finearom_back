@@ -17,6 +17,7 @@ class ProjectApplication extends Model
         'dosis',
         'cantidad_aplicacion',
         'observaciones',
+        'notas_entrega',
     ];
 
     protected $casts = [
