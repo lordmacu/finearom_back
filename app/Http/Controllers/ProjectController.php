@@ -13,6 +13,7 @@ use App\Models\ProjectMarketing;
 use App\Models\ProjectSample;
 use App\Models\ProjectStatusHistory;
 use App\Models\ProjectGoogleTaskConfig;
+use App\Models\ProjectProductType;
 use App\Services\GoogleTaskService;
 use App\Services\ProjectMailService;
 use App\Services\ProjectTimeService;
@@ -107,12 +108,49 @@ class ProjectController extends Controller
         return $query;
     }
 
+    /**
+     * "Tipo de producto" con opción de escribir uno nuevo: si llega
+     * nuevo_tipo_producto (y no un product_id existente), busca-o-crea el
+     * ProjectProductType bajo la categoría elegida y lo deja como product_id.
+     * Sin categoría no hay dónde archivarlo — se ignora en silencio.
+     */
+    private function resolveProductType(array &$data): void
+    {
+        $nuevo = trim((string) ($data['nuevo_tipo_producto'] ?? ''));
+        unset($data['nuevo_tipo_producto']);
+
+        if ($nuevo === '' || !empty($data['product_id'])) {
+            return;
+        }
+
+        $categoriaId = $data['product_category_id'] ?? null;
+        if (!$categoriaId) {
+            return;
+        }
+
+        $objetivo = \App\Support\ProductTypeCatalog::normalizar($nuevo);
+        $existente = ProjectProductType::where('product_category_id', $categoriaId)
+            ->get()
+            ->first(fn($t) => \App\Support\ProductTypeCatalog::normalizar($t->nombre) === $objetivo);
+
+        $productType = $existente ?? ProjectProductType::create([
+            'nombre'              => $nuevo,
+            'product_category_id' => $categoriaId,
+            'active'              => true,
+        ]);
+
+        $data['product_id']    = $productType->id;
+        $data['tipo_producto'] = $productType->nombre;
+    }
+
     public function store(ProjectStoreRequest $request): JsonResponse
     {
         $project = DB::transaction(function () use ($request) {
             $data = $request->validated();
             $envelopeTypeIds = $data['envelope_type_ids'] ?? null;
             unset($data['envelope_type_ids']);
+
+            $this->resolveProductType($data);
 
             // Secciones visibles en el detalle: default todas si no se envió
             if (!isset($data['secciones_visibles'])) {
@@ -260,6 +298,8 @@ class ProjectController extends Controller
             $validated = $request->validated();
             $envelopeTypeIds = array_key_exists('envelope_type_ids', $validated) ? $validated['envelope_type_ids'] : null;
             unset($validated['envelope_type_ids']);
+
+            $this->resolveProductType($validated);
 
             // Si viene ejecutivo_id, resolver el nombre del usuario
             if (!empty($validated['ejecutivo_id'])) {

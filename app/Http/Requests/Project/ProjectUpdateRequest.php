@@ -14,6 +14,16 @@ class ProjectUpdateRequest extends FormRequest
         return ProjectOwnership::canManage($this->user(), $this->route('project'));
     }
 
+    protected function prepareForValidation(): void
+    {
+        // tipo_homologacion solo aplica cuando la característica es Homologación.
+        // Solo se fuerza a null si "homologacion" viene explícito en el request
+        // (update parcial: si no viene, no se toca lo que ya había).
+        if ($this->has('homologacion') && !$this->boolean('homologacion')) {
+            $this->merge(['tipo_homologacion' => null]);
+        }
+    }
+
     public function rules(): array
     {
         return [
@@ -45,6 +55,11 @@ class ProjectUpdateRequest extends FormRequest
             'base_cliente'    => 'nullable|boolean',
             'proactivo'       => 'nullable|boolean',
             'homologacion'    => 'nullable|boolean',
+            'tipo_homologacion' => 'nullable|in:cromatografia,olfativa',
+            'tipo_desarrollo' => 'nullable|in:desde_cero,ajuste_formula,piramides_olfativas',
+            'area_aplicacion' => 'nullable|in:pesaje_aceites,aplicaciones_liquidas,aplicaciones_jabon,montaje_estabilidad',
+            'area_evaluaciones' => 'nullable|in:evaluacion_laundry,evaluacion_cabinas',
+            'nuevo_tipo_producto' => 'nullable|string|max:200',
             'internacional'   => 'nullable|boolean',
             'fecha_requerida' => 'nullable|date',
             'fecha_creacion'  => 'nullable|date',

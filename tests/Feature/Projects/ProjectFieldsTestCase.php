@@ -169,6 +169,10 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->boolean('base_cliente')->default(false);
             $t->boolean('proactivo')->default(false);
             $t->boolean('homologacion')->default(false);
+            $t->string('tipo_homologacion', 20)->nullable();
+            $t->string('tipo_desarrollo', 30)->nullable();
+            $t->string('area_aplicacion', 30)->nullable();
+            $t->string('area_evaluaciones', 30)->nullable();
             $t->boolean('internacional')->default(false);
             $t->string('tipo_producto')->nullable();
             $t->decimal('trm', 12, 2)->nullable();
