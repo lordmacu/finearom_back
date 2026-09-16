@@ -5,7 +5,6 @@ namespace Tests\Feature\Projects;
 use App\Models\Process;
 use App\Models\Project;
 use App\Models\User;
-use App\Services\ProjectTimeService;
 use Spatie\Permission\Models\Role;
 
 class ProjectEngineerAssignmentTest extends ProjectMailTestCase
@@ -23,10 +22,6 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
         $role = Role::firstOrCreate(['name' => 'Desarrollo', 'guard_name' => 'web']);
         $this->engineer = User::create(['name' => 'Ing. Prueba', 'email' => 'ingeniero@finearom.co', 'password' => bcrypt('x')]);
         $this->engineer->assignRole($role);
-
-        $this->mock(ProjectTimeService::class, function ($mock) {
-            $mock->shouldReceive('calculate')->andReturn(null);
-        });
     }
 
     public function test_el_endpoint_lista_solo_usuarios_con_rol_desarrollo(): void

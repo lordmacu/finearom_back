@@ -2,256 +2,123 @@
 
 namespace App\Services;
 
-use App\Models\GroupClassification;
+use App\Models\Holiday;
 use App\Models\Project;
-use App\Models\TimeApplication;
-use App\Models\TimeEvaluation;
-use App\Models\TimeFine;
-use App\Models\TimeHomologation;
-use App\Models\TimeMarketing;
-use App\Models\TimeQuality;
-use App\Models\TimeResponse;
-use App\Models\TimeSample;
 use Carbon\Carbon;
 
+/**
+ * Cálculo de fecha_calculada de proyectos. Reemplaza por completo la lógica
+ * vieja basada en `grupo`/potencial/tipo_cliente y las tablas time_* (esa
+ * lógica se eliminó; las tablas quedan solo como catálogo administrable).
+ *
+ * Lógica: pasos secuenciales (desarrollo → aplicación → evaluación), donde
+ * cada uno suma sus días hábiles a la fecha de creación. Regulatoria y
+ * marketing corren en simultáneo al final, así que no se suman entre sí:
+ * se toma el mayor de los dos. Dentro de cada checklist (calidad, marketing)
+ * tampoco se suma por ítem marcado — cada uno tiene un tramo básico y uno
+ * elevado, y si hay ítems de ambos se toma el tramo de mayor valor.
+ */
 class ProjectTimeService
 {
-    /**
-     * Calcula la fecha_calculada de un proyecto sumando días hábiles
-     * desde fecha_creacion según las tablas de tiempos.
-     *
-     * Usa `precio` como base del cálculo si está definido; si no, usa el
-     * promedio de `rango_min`/`rango_max` (legacy). Retorna null si faltan
-     * datos mínimos (precio o rango, y volumen).
-     */
-    public function calculate(Project $project): ?Carbon
-    {
-        $precioBase = $project->precio
-            ?? ((!is_null($project->rango_min) && !is_null($project->rango_max))
-                ? ((float) $project->rango_min + (float) $project->rango_max) / 2
-                : null);
+    private const DIAS_HOMOLOGACION = ['cromatografia' => 15, 'olfativa' => 3];
+    private const DIAS_DESARROLLO = ['desde_cero' => 3, 'ajuste_formula' => 2, 'piramides_olfativas' => 1];
+    private const DIAS_AREA_APLICACION = ['pesaje_aceites' => 2, 'aplicaciones_liquidas' => 2, 'aplicaciones_jabon' => 8, 'montaje_estabilidad' => 20];
+    private const DIAS_AREA_EVALUACIONES = ['evaluacion_laundry' => 3, 'evaluacion_cabinas' => 2];
 
-        if (is_null($precioBase) || is_null($project->volumen)) {
-            return null;
+    private const CALIDAD_BASICO = ['MSDS', 'FDS', 'IFRA', 'Ficha Técnica', 'Certificados Alergenos', 'Certificado de análisis'];
+    private const CALIDAD_ESPECIALES = ['CARB', 'Libre Alérgenos', 'Reglamento Europeo', 'PSA Essity'];
+    private const DIAS_CALIDAD_BASICO = 5;
+    private const DIAS_CALIDAD_ESPECIALES = 15;
+
+    private const MARKETING_BASICO = ['Descripción Olfativa', 'Pirámide Olfativa', 'Caja', 'Presentación', 'Dummie Digital', 'Dummie Fisico', 'Investigación De Mercado'];
+    private const MARKETING_PRESENTACION_CERO = 'Presentación Cero';
+    private const DIAS_MARKETING_BASICO = 5;
+    private const DIAS_MARKETING_PRESENTACION_CERO = 15;
+
+    public function calculate(Project $project): Carbon
+    {
+        $project->loadMissing('marketingYCalidad');
+
+        $diasDesarrollo = $project->homologacion
+            ? (self::DIAS_HOMOLOGACION[$project->tipo_homologacion ?? ''] ?? 0)
+            : (self::DIAS_DESARROLLO[$project->tipo_desarrollo ?? ''] ?? 0);
+
+        $diasAplicacion = self::DIAS_AREA_APLICACION[$project->area_aplicacion ?? ''] ?? 0;
+        $diasEvaluacion = self::DIAS_AREA_EVALUACIONES[$project->area_evaluaciones ?? ''] ?? 0;
+
+        $diasRegulatoria = $this->diasCalidad($project->marketingYCalidad?->calidad);
+        $diasMarketing = $this->diasMarketing($project->marketingYCalidad?->marketing);
+
+        $totalDias = $diasDesarrollo + $diasAplicacion + $diasEvaluacion + max($diasRegulatoria, $diasMarketing);
+
+        $fechaBase = $project->fecha_creacion ? Carbon::parse($project->fecha_creacion) : now();
+
+        return $totalDias > 0 ? $this->addBusinessDays($fechaBase, $totalDias) : $fechaBase->copy();
+    }
+
+    private function diasCalidad(mixed $calidad): int
+    {
+        $items = $this->parseArray($calidad);
+        if ($this->algunoMarcado($items, self::CALIDAD_ESPECIALES)) {
+            return self::DIAS_CALIDAD_ESPECIALES;
         }
-
-        $project->loadMissing([
-            'client',
-            'prospect',
-            'application',
-            'evaluation',
-            'marketingYCalidad',
-            'variants',
-            'fragrances',
-        ]);
-
-        // Determinar tipo_cliente desde cliente real o desde prospecto
-        $tipoCliente = $project->client?->client_type ?? $project->prospect?->tipo_cliente ?? null;
-
-        if (!$tipoCliente) {
-            return null;
+        if ($this->algunoMarcado($items, self::CALIDAD_BASICO)) {
+            return self::DIAS_CALIDAD_BASICO;
         }
+        return 0;
+    }
 
-        $potencial = (float) $precioBase * (float) $project->volumen / 1000;
-        $grupo = $this->lookupGrupo($potencial, $tipoCliente);
-
-        $dias = 0;
-
-        // Paso 5: tiempo de aplicación si tiene observaciones no vacías
-        if ($project->application && !empty(trim((string) $project->application->observaciones))) {
-            $dias += $this->lookupApplication($potencial, $tipoCliente, $project->product_id);
+    private function diasMarketing(mixed $marketing): int
+    {
+        $items = $this->parseArray($marketing);
+        if (in_array(self::MARKETING_PRESENTACION_CERO, $items, true)) {
+            return self::DIAS_MARKETING_PRESENTACION_CERO;
         }
-
-        // Paso 6: tiempos de evaluación
-        if ($project->evaluation && !empty($project->evaluation->tipos)) {
-            $tipos = $this->parseArray($project->evaluation->tipos);
-            foreach ($tipos as $tipo) {
-                $dias += $this->lookupEvaluation($tipo, $grupo);
-            }
+        if ($this->algunoMarcado($items, self::MARKETING_BASICO)) {
+            return self::DIAS_MARKETING_BASICO;
         }
-
-        // Paso 7: tiempos de marketing
-        if ($project->marketingYCalidad && !empty($project->marketingYCalidad->marketing)) {
-            $marketingItems = $this->parseArray($project->marketingYCalidad->marketing);
-            foreach ($marketingItems as $item) {
-                $dias += $this->lookupMarketing($item, $grupo);
-            }
-        }
-
-        // Paso 8: tiempos de calidad
-        if ($project->marketingYCalidad && !empty($project->marketingYCalidad->calidad)) {
-            $calidadItems = $this->parseArray($project->marketingYCalidad->calidad);
-            foreach ($calidadItems as $item) {
-                $dias += $this->lookupQuality($item, $grupo);
-            }
-        }
-
-        // Paso 9: tiempos según tipo de proyecto
-        switch ($project->tipo) {
-            case 'Fine Fragances':
-                $numFragancias = $project->fragrances()->count();
-                $dias += $this->lookupFine($numFragancias, $tipoCliente);
-                break;
-
-            case 'Desarrollo':
-                $dias += $this->lookupSample($potencial, $tipoCliente);
-                $numVariantes = $project->variants()->count();
-                if ($project->homologacion) {
-                    $dias += $this->lookupHomologation($numVariantes, $grupo);
-                } else {
-                    $dias += $this->lookupResponse($numVariantes, $grupo);
-                }
-                break;
-
-            case 'Colección':
-                $dias += $this->lookupSample($potencial, $tipoCliente);
-                break;
-        }
-
-        if ($dias === 0) {
-            return null;
-        }
-
-        return $this->addBusinessDays(
-            Carbon::parse($project->fecha_creacion),
-            $dias
-        );
+        return 0;
     }
 
-    /**
-     * Suma $days días hábiles (excluye sábados y domingos) a $date.
-     * Si el resultado final cae en domingo, retrocede 2 días.
-     */
-    private function addBusinessDays(Carbon $date, int $days): Carbon
+    private function algunoMarcado(array $items, array $opciones): bool
     {
-        $result = $date->copy();
-        $added = 0;
-
-        while ($added < $days) {
-            $result->addDay();
-            $dayOfWeek = (int) $result->format('w'); // 0=domingo, 6=sábado
-            if ($dayOfWeek !== 0 && $dayOfWeek !== 6) {
-                $added++;
-            }
-        }
-
-        // Si cae en domingo, retroceder 2 días
-        if ((int) $result->format('w') === 0) {
-            $result->subDays(2);
-        }
-
-        return $result;
+        return count(array_intersect($items, $opciones)) > 0;
     }
 
-    // -------------------------------------------------------------------------
-    // Lookups — devuelven 0 si no encuentran registro
-    // -------------------------------------------------------------------------
-
-    private function lookupGrupo(float $potencial, string $tipoCliente): int
-    {
-        $row = GroupClassification::where('tipo_cliente', $tipoCliente)
-            ->where('rango_min', '<=', $potencial)
-            ->where('rango_max', '>=', $potencial)
-            ->first();
-
-        return $row ? (int) $row->valor : 0;
-    }
-
-    private function lookupSample(float $potencial, string $tipoCliente): int
-    {
-        $row = TimeSample::where('tipo_cliente', $tipoCliente)
-            ->where('rango_min', '<=', $potencial)
-            ->where('rango_max', '>=', $potencial)
-            ->first();
-
-        return $row ? (int) $row->valor : 0;
-    }
-
-    private function lookupApplication(float $potencial, string $tipoCliente, int $productId): int
-    {
-        $row = TimeApplication::where('tipo_cliente', $tipoCliente)
-            ->where('rango_min', '<=', $potencial)
-            ->where('rango_max', '>=', $potencial)
-            ->where('product_id', $productId)
-            ->first();
-
-        return $row ? (int) $row->valor : 0;
-    }
-
-    private function lookupEvaluation(string $solicitud, int $grupo): int
-    {
-        $row = TimeEvaluation::where('solicitud', trim($solicitud))
-            ->where('grupo', $grupo)
-            ->first();
-
-        return $row ? (int) $row->valor : 0;
-    }
-
-    private function lookupMarketing(string $solicitud, int $grupo): int
-    {
-        $row = TimeMarketing::where('solicitud', trim($solicitud))
-            ->where('grupo', $grupo)
-            ->first();
-
-        return $row ? (int) $row->valor : 0;
-    }
-
-    private function lookupQuality(string $solicitud, int $grupo): int
-    {
-        $row = TimeQuality::where('solicitud', trim($solicitud))
-            ->where('grupo', $grupo)
-            ->first();
-
-        return $row ? (int) $row->valor : 0;
-    }
-
-    private function lookupFine(int $numFragancias, string $tipoCliente): int
-    {
-        $row = TimeFine::where('tipo_cliente', $tipoCliente)
-            ->where('num_fragrances_min', '<=', $numFragancias)
-            ->where('num_fragrances_max', '>=', $numFragancias)
-            ->first();
-
-        return $row ? (int) $row->valor : 0;
-    }
-
-    private function lookupHomologation(int $numVariantes, int $grupo): int
-    {
-        $row = TimeHomologation::where('grupo', $grupo)
-            ->where('num_variantes_min', '<=', $numVariantes)
-            ->where('num_variantes_max', '>=', $numVariantes)
-            ->first();
-
-        return $row ? (int) $row->valor : 0;
-    }
-
-    private function lookupResponse(int $numVariantes, int $grupo): int
-    {
-        $row = TimeResponse::where('grupo', $grupo)
-            ->where('num_variantes_min', '<=', $numVariantes)
-            ->where('num_variantes_max', '>=', $numVariantes)
-            ->first();
-
-        return $row ? (int) $row->valor : 0;
-    }
-
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    /**
-     * Convierte un campo almacenado como string separado por comas
-     * (o ya como array) en un array de strings no vacíos.
-     */
     private function parseArray(mixed $value): array
     {
         if (is_array($value)) {
             return array_filter($value, fn($v) => trim((string) $v) !== '');
         }
+        return array_filter(explode(',', (string) $value), fn($v) => trim($v) !== '');
+    }
 
-        return array_filter(
-            explode(',', (string) $value),
-            fn($v) => trim($v) !== ''
-        );
+    /**
+     * Suma $days días hábiles (excluye sábados, domingos y feriados de la
+     * tabla `holidays`).
+     */
+    private function addBusinessDays(Carbon $date, int $days): Carbon
+    {
+        $result = $date->copy();
+        $holidays = $this->holidaySet();
+        $added = 0;
+
+        while ($added < $days) {
+            $result->addDay();
+            $dayOfWeek = (int) $result->format('w');
+            $esFeriado = in_array($result->toDateString(), $holidays, true);
+            if ($dayOfWeek !== 0 && $dayOfWeek !== 6 && !$esFeriado) {
+                $added++;
+            }
+        }
+
+        return $result;
+    }
+
+    private function holidaySet(): array
+    {
+        return Holiday::query()->pluck('date')
+            ->map(fn($d) => Carbon::parse($d)->toDateString())
+            ->all();
     }
 }

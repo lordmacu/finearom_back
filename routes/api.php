@@ -19,6 +19,7 @@ use App\Http\Controllers\FinearomEvaluationController;
 use App\Http\Controllers\FinearomReferenceController;
 use App\Http\Controllers\FineFragranceController;
 use App\Http\Controllers\FineFragranceHouseController;
+use App\Http\Controllers\HolidayController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProcessEmailController;
@@ -169,6 +170,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Categorías de productos
     Route::get('/product-categories/{id}/products-count', [ProductCategoryController::class, 'productsCount']);
     Route::apiResource('product-categories', ProductCategoryController::class)->only(['index', 'store', 'update', 'destroy']);
+
+    // Días feriados (usados en el cálculo de fecha_calculada de proyectos)
+    Route::apiResource('holidays', HolidayController::class)->only(['index', 'store', 'update', 'destroy']);
 
     // Configuración del sistema (Admin)
     Route::get('/settings/admin-configuration', [SettingsController::class, 'adminConfiguration']);

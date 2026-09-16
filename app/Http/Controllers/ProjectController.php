@@ -192,13 +192,7 @@ class ProjectController extends Controller
             ProjectEvaluation::create(['project_id' => $project->id]);
             ProjectMarketing::create(['project_id' => $project->id]);
 
-            $fechaCalculada = $this->timeService->calculate(
-                $project->fresh(['client', 'application', 'evaluation', 'marketingYCalidad', 'variants', 'fragrances'])
-            );
-
-            if ($fechaCalculada) {
-                $project->update(['fecha_calculada' => $fechaCalculada]);
-            }
+            $project->update(['fecha_calculada' => $this->timeService->calculate($project->fresh('marketingYCalidad'))]);
 
             ProjectStatusHistory::create([
                 'project_id'  => $project->id,
@@ -291,10 +285,9 @@ class ProjectController extends Controller
 
     public function update(ProjectUpdateRequest $request, Project $project): JsonResponse
     {
-        $recalculateFields = ['precio', 'rango_min', 'rango_max', 'volumen', 'tipo', 'homologacion', 'product_id'];
         $desarrolladorAntes = $project->desarrollador_id;
 
-        $project = DB::transaction(function () use ($request, $project, $recalculateFields) {
+        $project = DB::transaction(function () use ($request, $project) {
             $validated = $request->validated();
             $envelopeTypeIds = array_key_exists('envelope_type_ids', $validated) ? $validated['envelope_type_ids'] : null;
             unset($validated['envelope_type_ids']);
@@ -313,23 +306,7 @@ class ProjectController extends Controller
                 $project->envelopeTypes()->sync($envelopeTypeIds);
             }
 
-            $needsRecalculation = false;
-            foreach ($recalculateFields as $field) {
-                if (array_key_exists($field, $validated)) {
-                    $needsRecalculation = true;
-                    break;
-                }
-            }
-
-            if ($needsRecalculation) {
-                $fechaCalculada = $this->timeService->calculate(
-                    $project->fresh(['client', 'application', 'evaluation', 'marketingYCalidad', 'variants', 'fragrances'])
-                );
-
-                if ($fechaCalculada) {
-                    $project->update(['fecha_calculada' => $fechaCalculada]);
-                }
-            }
+            $project->update(['fecha_calculada' => $this->timeService->calculate($project->fresh('marketingYCalidad'))]);
 
             return $project;
         });
@@ -405,7 +382,8 @@ class ProjectController extends Controller
                 'tipo', 'rango_min', 'rango_max', 'volumen', 'precio', 'dosis',
                 'trm', 'factor', 'costo_perfumacion_especifico', 'costo_perfumacion_tonelada',
                 'tipo_etiquetado', 'max_variantes',
-                'base_cliente', 'proactivo', 'homologacion', 'internacional',
+                'base_cliente', 'proactivo', 'homologacion', 'tipo_homologacion',
+                'tipo_desarrollo', 'area_aplicacion', 'area_evaluaciones', 'internacional',
                 'tipo_producto', 'fecha_requerida',
             ]);
 
@@ -427,12 +405,7 @@ class ProjectController extends Controller
             ProjectEvaluation::create(['project_id' => $newProject->id]);
             ProjectMarketing::create(['project_id' => $newProject->id]);
 
-            $fechaCalculada = $this->timeService->calculate(
-                $newProject->fresh(['client', 'application', 'evaluation', 'marketingYCalidad', 'variants', 'fragrances'])
-            );
-            if ($fechaCalculada) {
-                $newProject->update(['fecha_calculada' => $fechaCalculada]);
-            }
+            $newProject->update(['fecha_calculada' => $this->timeService->calculate($newProject->fresh('marketingYCalidad'))]);
 
             return $newProject;
         });

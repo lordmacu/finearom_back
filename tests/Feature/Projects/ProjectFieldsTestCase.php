@@ -267,8 +267,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->timestamps();
         });
 
-        // Relaciones que ProjectTimeService y las respuestas del controller
-        // cargan aunque el test no las use.
+        // Relaciones que las respuestas del controller cargan aunque el test no las use.
         Schema::create('clients', function (Blueprint $t) {
             $t->id();
             $t->string('client_name')->nullable();
@@ -347,6 +346,14 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->unsignedBigInteger('project_id');
             $t->string('area', 30);
             $t->text('notas_entrega')->nullable();
+            $t->timestamps();
+        });
+
+        // La consulta ProjectTimeService::calculate() en cada store/update/updateMarketing.
+        Schema::create('holidays', function (Blueprint $t) {
+            $t->id();
+            $t->date('date')->unique();
+            $t->string('nombre', 150);
             $t->timestamps();
         });
     }

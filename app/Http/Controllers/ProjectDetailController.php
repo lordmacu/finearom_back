@@ -13,6 +13,7 @@ use App\Models\ProjectProposal;
 use App\Models\ProjectRequest as ProjectRequestModel;
 use App\Models\ProjectVariant;
 use App\Models\FinearomReference;
+use App\Services\ProjectTimeService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -20,8 +21,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ProjectDetailController extends Controller
 {
-    public function __construct()
-    {
+    public function __construct(
+        private readonly ProjectTimeService $timeService,
+    ) {
         $this->middleware('can:project edit')->except(['evaluationBenchImage']);
         $this->middleware('can:project list')->only(['evaluationBenchImage']);
         $this->middleware('can:project factor edit')->only(['updateFactor']);
@@ -107,6 +109,8 @@ class ProjectDetailController extends Controller
             ['project_id' => $project->id],
             $request->validated()
         );
+
+        $project->update(['fecha_calculada' => $this->timeService->calculate($project->fresh('marketingYCalidad'))]);
 
         return response()->json(['success' => true, 'data' => $marketing, 'message' => 'Marketing actualizado']);
     }

@@ -8,7 +8,6 @@ use App\Models\ProjectApplication;
 use App\Models\ProjectMarketingVariant;
 use App\Models\ProjectMarketingVariantReference;
 use App\Models\ProjectSample;
-use App\Services\ProjectTimeService;
 
 class ProjectCreationMailTest extends ProjectMailTestCase
 {
@@ -18,11 +17,6 @@ class ProjectCreationMailTest extends ProjectMailTestCase
 
         $this->template('project_created', 'Nuevo proyecto #|project_id| — |project_name|');
         Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
-
-        // La fecha calculada necesita las 9 tablas de tiempos; no es lo que se prueba aquí.
-        $this->mock(ProjectTimeService::class, function ($mock) {
-            $mock->shouldReceive('calculate')->andReturn(null);
-        });
     }
 
     public function test_crear_proyecto_no_envia_correo(): void
