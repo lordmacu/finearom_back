@@ -10,7 +10,11 @@ class MarketingVariantReferencesTest extends ProjectFieldsTestCase
 {
     private function project(): Project
     {
-        return Project::create(['nombre' => 'Proyecto Referencias', 'fecha_creacion' => today()]);
+        return Project::create([
+            'nombre'           => 'Proyecto Referencias',
+            'fecha_creacion'   => today(),
+            'desarrollador_id' => $this->user->id,
+        ]);
     }
 
     private function variante(Project $project, string $nombre = 'Variante 1'): int
