@@ -354,7 +354,19 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->string('mime_type');
             $t->bigInteger('size');
             $t->string('categoria')->nullable();
+            $t->unsignedBigInteger('delivery_log_id')->nullable();
             $t->string('ejecutivo');
+            $t->timestamps();
+        });
+
+        Schema::create('project_area_delivery_logs', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('project_id');
+            $t->string('area', 30);
+            $t->string('tipo', 20);
+            $t->longText('notas')->nullable();
+            $t->string('ejecutivo')->nullable();
+            $t->unsignedBigInteger('user_id')->nullable();
             $t->timestamps();
         });
 

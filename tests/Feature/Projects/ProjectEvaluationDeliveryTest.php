@@ -44,7 +44,7 @@ class ProjectEvaluationDeliveryTest extends ProjectMailTestCase
         $this->assertSame('project_evaluation_delivered', EmailLog::latest('id')->first()->process_type);
     }
 
-    public function test_reentregar_envia_actualizacion_con_diff_de_notas_y_todos_los_adjuntos(): void
+    public function test_reentregar_envia_actualizacion_con_diff_de_notas_y_solo_sus_adjuntos(): void
     {
         $project = $this->project(['estado_interno' => 'En proceso']);
 
@@ -70,28 +70,11 @@ class ProjectEvaluationDeliveryTest extends ProjectMailTestCase
         // El correo se atribuye al área, no a la persona que oprimió el botón
         $this->assertStringContainsString('Evaluaciones', $html);
         $this->assertStringNotContainsString('Tester', $html);
-        // Los dos adjuntos (el conservado + el nuevo) van en el correo
-        $this->assertCount(2, $email->getAttachments());
+        // Cada entrega viaja con sus propios adjuntos; los anteriores quedan en la bitácora
+        $this->assertCount(1, $email->getAttachments());
+        $this->assertSame('segundo.pdf', $email->getAttachments()[0]->getFilename());
+        $this->assertSame(2, DB::table('project_files')->where('categoria', 'evaluaciones')->count());
         $this->assertSame('project_evaluation_updated', EmailLog::latest('id')->first()->process_type);
-    }
-
-    public function test_eliminar_un_adjunto_lo_quita_del_correo(): void
-    {
-        $project = $this->project(['estado_interno' => 'En proceso']);
-
-        $this->postJson("/api/projects/{$project->id}/evaluaciones/entregar", [
-            'adjuntos' => [UploadedFile::fake()->create('a-borrar.pdf', 100, 'application/pdf')],
-        ])->assertOk();
-
-        $fileId = DB::table('project_files')->where('categoria', 'evaluaciones')->value('id');
-
-        $this->postJson("/api/projects/{$project->id}/evaluaciones/entregar", [
-            'notas'    => 'Sin adjuntos',
-            'eliminar' => [$fileId],
-        ])->assertOk();
-
-        $this->assertSame(0, DB::table('project_files')->where('categoria', 'evaluaciones')->count());
-        $this->assertCount(0, $this->sentMessages()->last()->getOriginalMessage()->getAttachments());
     }
 
     public function test_rechaza_cuando_el_total_de_adjuntos_supera_25mb(): void

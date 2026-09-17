@@ -186,6 +186,12 @@ class Project extends Model
         return $this->hasOne(ProjectEvaluation::class, 'project_id');
     }
 
+    /** Bitácora de entregas por área (parciales, final y actualizaciones). */
+    public function deliveryLogs(): HasMany
+    {
+        return $this->hasMany(ProjectAreaDeliveryLog::class, 'project_id');
+    }
+
     // Notas de entrega de las áreas sin subentidad propia (regulatoria, especiales)
     public function areaDeliveries(): HasMany
     {

@@ -17,6 +17,7 @@ class ProjectFile extends Model
         'mime_type',
         'size',
         'categoria',
+        'delivery_log_id',
         'ejecutivo',
         'drive_file_id',
         'drive_link',

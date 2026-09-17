@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Mail\ProjectThreadMail;
 use App\Models\Process;
 use App\Models\Project;
+use App\Models\ProjectAreaDeliveryLog;
 use App\Models\User;
+use App\Support\HtmlText;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -156,61 +158,35 @@ class ProjectMailService
     }
 
     /**
-     * Correo de entrega de un área externa (Aplicaciones, Evaluaciones,
-     * Marketing, Regulatoria o P. Especiales): las notas del modal viajan en
-     * el cuerpo (HTML del editor) y los adjuntos del área van adjuntos al
-     * correo. Destinatarios: lista propia (`project_{área}_delivered`,
-     * fallback `project_created`) + ejecutiva + ingeniero asignado.
+     * Correo de una entrega de área externa (Aplicaciones, Evaluaciones,
+     * Marketing, Regulatoria o P. Especiales): las notas de ESA entrega viajan
+     * en el cuerpo (HTML del editor) y sus adjuntos van adjuntos al correo.
+     * Destinatarios: lista propia (`project_{área}_delivered`, fallback
+     * `project_created`) + ejecutiva + ingeniero asignado.
      *
      * El correo se atribuye al ÁREA, no a la persona que oprimió el botón
      * (`delivered_by` = "Regulatoria", "P. Especiales"…): a quien lo recibe le
      * importa qué área entregó, no quién de ese equipo lo hizo.
      *
-     * Re-entrega ($isUpdate): template de actualización que solo avisa si las
-     * notas cambiaron — el correo trae las notas vigentes, nunca el valor
-     * anterior (ese quedó en el correo previo del mismo hilo).
+     * Template según el tipo de entrega de la bitácora: parcial → `…_partial`,
+     * final → `…_delivered`, actualización → `…_updated` (avisa si las notas
+     * cambiaron respecto a las de la entrega anterior).
      */
-    public function sendAreaDelivered(Project $project, string $area, bool $isUpdate = false, ?string $notasAntes = null): bool
+    public function sendAreaDelivered(Project $project, string $area, ProjectAreaDeliveryLog $log, ?string $notasAntes = null): bool
     {
         $cfg = match ($area) {
-            'marketing' => [
-                'delivered' => 'marketing_delivered',
-                'updated'   => 'marketing_updated',
-                'process'   => 'project_marketing_delivered',
-                'categoria' => 'marketing',
-                'label'     => 'Marketing',
-            ],
-            'aplicaciones' => [
-                'delivered' => 'applications_ready',
-                'updated'   => 'applications_updated',
-                'process'   => 'project_applications_ready',
-                'categoria' => 'aplicaciones',
-                'label'     => 'Aplicaciones',
-            ],
-            'regulatoria' => [
-                'delivered' => 'regulatoria_delivered',
-                'updated'   => 'regulatoria_updated',
-                'process'   => 'project_regulatoria_delivered',
-                'categoria' => 'regulatoria',
-                'label'     => 'Regulatoria',
-            ],
-            'especiales' => [
-                'delivered' => 'especiales_delivered',
-                'updated'   => 'especiales_updated',
-                'process'   => 'project_especiales_delivered',
-                'categoria' => 'especiales',
-                'label'     => 'P. Especiales',
-            ],
-            default => [
-                'delivered' => 'evaluation_delivered',
-                'updated'   => 'evaluation_updated',
-                'process'   => 'project_evaluation_delivered',
-                'categoria' => 'evaluaciones',
-                'label'     => 'Evaluaciones',
-            ],
+            'marketing'    => ['prefix' => 'marketing',    'delivered' => 'marketing_delivered',   'process' => 'project_marketing_delivered',   'label' => 'Marketing'],
+            'aplicaciones' => ['prefix' => 'applications', 'delivered' => 'applications_ready',    'process' => 'project_applications_ready',    'label' => 'Aplicaciones'],
+            'regulatoria'  => ['prefix' => 'regulatoria',  'delivered' => 'regulatoria_delivered', 'process' => 'project_regulatoria_delivered', 'label' => 'Regulatoria'],
+            'especiales'   => ['prefix' => 'especiales',   'delivered' => 'especiales_delivered',  'process' => 'project_especiales_delivered',  'label' => 'P. Especiales'],
+            default        => ['prefix' => 'evaluation',   'delivered' => 'evaluation_delivered',  'process' => 'project_evaluation_delivered',  'label' => 'Evaluaciones'],
         };
 
-        $action = $isUpdate ? $cfg['updated'] : $cfg['delivered'];
+        $action = match ($log->tipo) {
+            ProjectAreaDeliveryLog::PARCIAL       => "{$cfg['prefix']}_partial",
+            ProjectAreaDeliveryLog::ACTUALIZACION => "{$cfg['prefix']}_updated",
+            default                               => $cfg['delivered'],
+        };
 
         $recipients = $this->recipients($project, $cfg['process'], $action);
 
@@ -222,26 +198,23 @@ class ProjectMailService
             return false;
         }
 
-        $notas = $project->notasEntrega($area);
+        $notas = $log->notas;
 
         // Las notas son HTML del editor enriquecido (CkEditor) — van crudas al correo
         $extra = [
             'delivered_by'  => $cfg['label'],
-            'notas_entrega' => ($notas && trim(strip_tags($notas)) !== '') ? $notas : null,
+            'notas_entrega' => HtmlText::isBlank($notas) ? null : $notas,
         ];
 
-        // Solo se avisa QUE cambiaron: las notas como quedaron van completas
-        // más abajo en el mismo correo (|notas_entrega|), y las anteriores
-        // siguen visibles en el correo previo del hilo.
-        if ($isUpdate && $notasAntes !== $notas) {
-            $extra['changes_table'] = '<p style="font-size:13px;color:#6b7280;">Se actualizaron las notas de entrega; abajo están como quedaron.</p>';
-        } elseif ($isUpdate) {
-            $extra['changes_table'] = '<p style="font-size:13px;color:#6b7280;">Las notas no cambiaron; se actualizaron los adjuntos.</p>';
+        // Solo se avisa QUE cambiaron: las notas anteriores siguen visibles
+        // en el correo previo del hilo y en la bitácora.
+        if ($log->tipo === ProjectAreaDeliveryLog::ACTUALIZACION) {
+            $extra['changes_table'] = $notasAntes !== $notas && !HtmlText::isBlank($notas)
+                ? '<p style="font-size:13px;color:#6b7280;">Se actualizaron las notas de entrega; abajo están como quedaron.</p>'
+                : '<p style="font-size:13px;color:#6b7280;">Las notas no cambiaron; esta actualización trae nuevos adjuntos.</p>';
         }
 
-        $attachments = $project->files()
-            ->where('categoria', $cfg['categoria'])
-            ->get(['path', 'nombre_original'])
+        $attachments = $log->files
             ->map(fn ($f) => ['path' => $f->path, 'name' => $f->nombre_original])
             ->all();
 
