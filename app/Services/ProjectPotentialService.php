@@ -15,9 +15,9 @@ use Illuminate\Validation\ValidationException;
 /**
  * Potencial a la vista: proyectos de una ejecutiva con las referencias que
  * Desarrollo creó y su precio. La ejecutiva marca cuáles seleccionó el cliente
- * y llena el potencial de cada una; al guardarlas, el potencial anual del
- * proyecto (USD y Kg) se recalcula como la suma de las seleccionadas. Entre
- * guardado y guardado también se puede ajustar a mano (updatePotential). Cada seleccionada trae su plan de
+ * y llena el potencial de cada una. El potencial anual del proyecto (USD y Kg)
+ * es el que se escribe a mano (creación, detalle o este módulo) y nunca se
+ * recalcula; la suma de las referencias seleccionadas se informa aparte. Cada seleccionada trae su plan de
  * despachos mes a mes para cada año pedido (PotentialDispatchPlan).
  */
 class ProjectPotentialService
@@ -94,7 +94,7 @@ class ProjectPotentialService
             ]);
         }
 
-        $antes = [$project->potencial_anual_usd, $project->potencial_anual_kg];
+        $antes = $project->potentialReferences()->pluck('reference_id')->sort()->values()->all();
 
         DB::transaction(function () use ($project, $selecciones) {
             foreach ($selecciones as $seleccion) {
@@ -107,32 +107,19 @@ class ProjectPotentialService
             $project->potentialReferences()
                 ->whereNotIn('reference_id', collect($selecciones)->pluck('reference_id'))
                 ->delete();
-
-            // Sin referencias seleccionadas se conserva el potencial manual
-            if ($selecciones !== []) {
-                $this->recalcularPotencial($project);
-            }
         });
 
-        if ((float) $antes[0] !== (float) $project->potencial_anual_usd || (float) $antes[1] !== (float) $project->potencial_anual_kg) {
-            $this->log(
-                $project->id,
-                sprintf(
-                    'Potencial a la vista: %d referencia(s) seleccionada(s) — USD %s → %s, Kg %s → %s',
-                    count($selecciones),
-                    $this->fmt($antes[0]), $this->fmt($project->potencial_anual_usd),
-                    $this->fmt($antes[1]), $this->fmt($project->potencial_anual_kg),
-                ),
-                $executive,
-            );
+        $despues = collect($selecciones)->pluck('reference_id')->map(fn ($id) => (int) $id)->sort()->values()->all();
+        if ($antes !== $despues) {
+            $this->log($project->id, sprintf('Potencial a la vista: %d referencia(s) seleccionada(s) por el cliente', count($despues)), $executive);
         }
 
         return $this->detail($project->fresh(), $anios);
     }
 
     /**
-     * Ajuste manual del potencial anual del proyecto. Se mantiene hasta que se
-     * guarden referencias seleccionadas, que lo recalculan como su suma.
+     * Ajuste manual del potencial anual del proyecto (el mismo dato que se
+     * escribe al crearlo o en su detalle). Nada lo recalcula.
      *
      * @param array<string, float|null> $valores potencial_anual_usd y/o potencial_anual_kg
      */
@@ -155,20 +142,6 @@ class ProjectPotentialService
         return $project;
     }
 
-    /** Potencial del proyecto = suma de las referencias seleccionadas (USD = Kg × precio). */
-    private function recalcularPotencial(Project $project): void
-    {
-        $filas = $project->potentialReferences()->with('reference:id,precio')->get();
-
-        $kg  = $filas->sum(fn ($s) => (float) $s->kg_anio);
-        $usd = $filas->sum(fn ($s) => (float) $s->kg_anio * (float) $s->reference?->precio);
-
-        $project->update([
-            'potencial_anual_kg'  => round($kg, 2),
-            'potencial_anual_usd' => round($usd, 2),
-        ]);
-    }
-
     private function relaciones(): array
     {
         return [
@@ -183,6 +156,8 @@ class ProjectPotentialService
 
     private function resumen(Project $p): array
     {
+        $seleccionadas = $p->marketingVariants->flatMap->references->filter(fn ($r) => $r->potential !== null);
+
         return [
             'id'                  => $p->id,
             'nombre'              => $p->nombre,
@@ -197,6 +172,11 @@ class ProjectPotentialService
             'fecha_creacion'      => $p->fecha_creacion?->format('Y-m-d'),
             'potencial_anual_usd' => $this->decimal($p->potencial_anual_usd),
             'potencial_anual_kg'  => $this->decimal($p->potencial_anual_kg),
+            // Informativo: lo que suman las referencias seleccionadas (USD = Kg × precio)
+            'suma_referencias'    => $seleccionadas->isEmpty() ? null : [
+                'kg'  => round($seleccionadas->sum(fn ($r) => (float) $r->potential->kg_anio), 2),
+                'usd' => round($seleccionadas->sum(fn ($r) => (float) $r->potential->kg_anio * (float) $r->precio), 2),
+            ],
         ];
     }
 

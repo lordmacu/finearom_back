@@ -94,8 +94,9 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertSame('C-2', $refs['Ref B']['codigo']);
         $this->assertEquals(20, $refs['Ref B']['precio']);
         $this->assertSame(1, $res->json('meta.total_seleccionadas'));
-        $this->assertEquals(2000, $res->json('meta.total_potencial_usd'));
-        $this->assertEquals(100, $res->json('meta.total_potencial_kg'));
+        // Suma informativa de las seleccionadas (100 Kg × 20 USD); el potencial del proyecto no cambia
+        $this->assertEquals(['kg' => 100, 'usd' => 2000], $res->json('data.0.suma_referencias'));
+        $this->assertNull($res->json('data.0.potencial_anual_kg'));
     }
 
     public function test_el_listado_trae_el_plan_de_despachos_del_anio_y_los_totales_por_mes(): void
@@ -283,31 +284,33 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertSame('2026-11-01', $refs['Ref A']['potencial']['fecha_primer_despacho']);
         $this->assertSame('ganado', $refs['Ref B']['potencial']['estado']);
 
+        // El potencial del proyecto no se toca; la suma se informa aparte
         $project->refresh();
-        $this->assertEquals(1200, $project->potencial_anual_kg);
-        $this->assertEquals(16500, $project->potencial_anual_usd);
+        $this->assertNull($project->potencial_anual_kg);
+        $this->assertNull($project->potencial_anual_usd);
+        $this->assertEquals(['kg' => 1200, 'usd' => 16500], $res->json('data.suma_referencias'));
         $this->assertStringContainsString('2 referencia(s) seleccionada(s)', ProjectStatusHistory::first()->descripcion);
         // El estado de la referencia no toca el del proyecto
         $this->assertSame('En espera', $project->estado_externo);
     }
 
-    public function test_deseleccionar_borra_los_datos_y_sin_seleccion_se_conserva_el_potencial_manual(): void
+    public function test_deseleccionar_borra_los_datos_de_la_referencia(): void
     {
         $project = $this->proyecto();
         $a = $this->refId($project, 'Ref A');
         $b = $this->refId($project, 'Ref B');
         $this->guardar($project, [$this->seleccion($a), $this->seleccion($b)])->assertOk();
 
-        $this->guardar($project, [$this->seleccion($b, ['kg_anio' => 50])])->assertOk();
+        $res = $this->guardar($project, [$this->seleccion($b, ['kg_anio' => 50])])->assertOk();
         $this->assertSame([$b], ProjectPotentialReference::pluck('reference_id')->all());
-        $this->assertEquals(50, $project->fresh()->potencial_anual_kg);
+        $this->assertEquals(50, $res->json('data.suma_referencias.kg'));
 
         $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => 999])->assertOk();
 
         $this->guardar($project, [])->assertOk();
         $this->assertSame(0, ProjectPotentialReference::count());
-        // Sin selección no hay suma que calcular: queda el valor manual
         $this->assertEquals(999, $project->fresh()->potencial_anual_kg);
+        $this->assertNull($this->getJson("/api/project-potential/projects/{$project->id}")->json('data.suma_referencias'));
     }
 
     public function test_rechaza_referencias_de_otro_proyecto_y_valores_invalidos(): void
@@ -351,7 +354,7 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->patchJson("/api/project-potential/references/{$ref}", ['precio' => 30])->assertNotFound();
     }
 
-    public function test_el_potencial_se_ajusta_a_mano_hasta_el_siguiente_guardado_de_referencias(): void
+    public function test_el_potencial_manual_se_conserva_al_guardar_referencias(): void
     {
         $project = $this->proyecto();
 
@@ -366,10 +369,11 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertEquals(800, $project->potencial_anual_kg);
         $this->assertStringContainsString('Potencial anual (USD) (manual)', ProjectStatusHistory::orderBy('id')->first()->descripcion);
 
-        // Guardar las referencias vuelve a la suma de las seleccionadas
-        $this->guardar($project, [$this->seleccion($this->refId($project, 'Ref B'), ['kg_anio' => 10])])->assertOk();
-        $this->assertEquals(10, $project->fresh()->potencial_anual_kg);
-        $this->assertEquals(200, $project->fresh()->potencial_anual_usd);
+        // Guardar referencias no pisa lo editado: la suma queda aparte
+        $res = $this->guardar($project, [$this->seleccion($this->refId($project, 'Ref B'), ['kg_anio' => 10])])->assertOk();
+        $this->assertEquals(800, $project->fresh()->potencial_anual_kg);
+        $this->assertEquals(12345.67, $project->fresh()->potencial_anual_usd);
+        $this->assertEquals(['kg' => 10, 'usd' => 200], $res->json('data.suma_referencias'));
     }
 
     public function test_el_ajuste_manual_valida_y_respeta_permisos(): void
