@@ -160,6 +160,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->decimal('rango_min', 12, 2)->nullable();
             $t->decimal('rango_max', 12, 2)->nullable();
             $t->decimal('volumen', 12, 2)->nullable();
+            $t->decimal('potencial_anual_usd', 12, 2)->nullable();
             $t->decimal('potencial_anual_kg', 12, 2)->nullable();
             $t->decimal('precio', 12, 2)->nullable();
             $t->decimal('dosis', 8, 2)->nullable();

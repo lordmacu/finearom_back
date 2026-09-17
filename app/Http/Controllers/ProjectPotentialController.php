@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ProjectPotential\ProjectPotentialIndexRequest;
-use App\Http\Requests\ProjectPotential\ProjectPotentialKgRequest;
+use App\Http\Requests\ProjectPotential\ProjectPotentialUpdateRequest;
 use App\Http\Requests\ProjectPotential\ProjectPotentialPriceRequest;
 use App\Models\Project;
 use App\Models\ProjectMarketingVariantReference;
@@ -34,19 +34,26 @@ class ProjectPotentialController extends Controller
             'meta'    => [
                 'total_proyectos'    => $projects->count(),
                 'total_referencias'  => $projects->sum(fn ($p) => $p['referencias']->count()),
+                'total_potencial_usd' => round((float) $projects->sum('potencial_anual_usd'), 2),
                 'total_potencial_kg' => round((float) $projects->sum('potencial_anual_kg'), 2),
             ],
         ]);
     }
 
-    public function updateProject(ProjectPotentialKgRequest $request, Project $project): JsonResponse
+    public function updateProject(ProjectPotentialUpdateRequest $request, Project $project): JsonResponse
     {
-        $kg = $request->validated('potencial_anual_kg');
-        $project = $this->service->updatePotentialKg($project, $kg === null ? null : (float) $kg, auth()->user()->name);
+        $valores = array_map(fn ($v) => $v === null ? null : (float) $v, $request->validated());
+        $project = $this->service->updatePotential($project, $valores, auth()->user()->name);
+
+        $decimal = fn ($v) => $v !== null ? (float) $v : null;
 
         return response()->json([
             'success' => true,
-            'data'    => ['id' => $project->id, 'potencial_anual_kg' => $project->potencial_anual_kg !== null ? (float) $project->potencial_anual_kg : null],
+            'data'    => [
+                'id'                  => $project->id,
+                'potencial_anual_usd' => $decimal($project->potencial_anual_usd),
+                'potencial_anual_kg'  => $decimal($project->potencial_anual_kg),
+            ],
             'message' => 'Potencial actualizado',
         ]);
     }

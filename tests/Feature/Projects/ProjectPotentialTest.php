@@ -34,6 +34,7 @@ class ProjectPotentialTest extends ProjectMailTestCase
             'estado_externo'     => 'En espera',
             'fecha_creacion'     => today(),
             'potencial_anual_kg' => 500,
+            'potencial_anual_usd' => 9000,
         ], $attrs));
 
         $variant = ProjectMarketingVariant::create(['project_id' => $project->id, 'nombre' => 'Var 1']);
@@ -61,6 +62,42 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertSame('C-1', $res->json('data.0.referencias.0.codigo'));
         $this->assertEquals(12.5, $res->json('data.0.referencias.0.precio'));
         $this->assertEquals(500, $res->json('meta.total_potencial_kg'));
+        $this->assertEquals(9000, $res->json('data.0.potencial_anual_usd'));
+        $this->assertEquals(9000, $res->json('meta.total_potencial_usd'));
+    }
+
+    public function test_muestra_el_origen_proactivo_reactivo_u_homologacion(): void
+    {
+        $this->projectConReferencia('María Ortega', ['nombre' => 'P1', 'proactivo' => true]);
+        $this->projectConReferencia('María Ortega', ['nombre' => 'P2', 'proactivo' => false]);
+        $this->projectConReferencia('María Ortega', ['nombre' => 'P3', 'proactivo' => true, 'homologacion' => true]);
+
+        $origenes = collect($this->getJson('/api/project-potential?ejecutivo=' . urlencode('María Ortega'))->json('data'))
+            ->pluck('origen', 'nombre');
+
+        $this->assertSame(['P1' => 'proactivo', 'P2' => 'reactivo', 'P3' => 'homologacion'], $origenes->sortKeys()->all());
+    }
+
+    public function test_edita_el_potencial_en_usd_sin_tocar_los_kg(): void
+    {
+        $project = $this->projectConReferencia()->variant->project;
+
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_usd' => 12345.67])
+            ->assertOk()
+            ->assertJsonPath('data.potencial_anual_usd', 12345.67)
+            ->assertJsonPath('data.potencial_anual_kg', 500);
+
+        $this->assertEquals(12345.67, $project->fresh()->potencial_anual_usd);
+        $this->assertStringContainsString('Potencial anual (USD)', ProjectStatusHistory::first()->descripcion);
+    }
+
+    public function test_exige_al_menos_un_potencial(): void
+    {
+        $project = $this->projectConReferencia()->variant->project;
+
+        $this->patchJson("/api/project-potential/projects/{$project->id}", [])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['potencial_anual_usd', 'potencial_anual_kg']);
     }
 
     public function test_filtra_por_estado_externo(): void

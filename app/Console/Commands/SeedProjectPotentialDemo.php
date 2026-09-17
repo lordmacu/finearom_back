@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Storage;
  * Datos de demostración para "Potencial a la vista" sobre proyectos existentes.
  *
  * Toma unos proyectos por ejecutiva real (tabla executives ∩ users), les asigna
- * la ejecutiva, el ingeniero de desarrollo y el potencial anual en Kg, y les
+ * la ejecutiva, el ingeniero de desarrollo y el potencial anual (USD y Kg), y les
  * crea variantes "[DEMO]" con referencias (código y precio). Los valores
  * originales quedan en storage/app/demo/potencial-backup.json y --purge los
  * restaura y borra las variantes de demo.
@@ -28,7 +28,7 @@ class SeedProjectPotentialDemo extends Command
 
     private const BACKUP = 'demo/potencial-backup.json';
     private const PREFIX = '[DEMO] ';
-    private const BACKUP_FIELDS = ['ejecutivo', 'ejecutivo_id', 'desarrollador_id', 'potencial_anual_kg'];
+    private const BACKUP_FIELDS = ['ejecutivo', 'ejecutivo_id', 'desarrollador_id', 'potencial_anual_usd', 'potencial_anual_kg'];
 
     private const NOMBRES = [
         'Brisa Marina', 'Vainilla Cálida', 'Lavanda Fresh', 'Coco Tropical', 'Citrus Burst',
@@ -74,12 +74,15 @@ class SeedProjectPotentialDemo extends Command
                     $usados[] = $project->id;
                     $backup[] = ['id' => $project->id] + $project->only(self::BACKUP_FIELDS);
 
+                    // Uno por ejecutiva queda sin potencial para ver el caso "falta el dato"
+                    $kg = $i === 1 ? null : mt_rand(4, 120) * 50;
+
                     $project->update([
-                        'ejecutivo'          => $ejecutiva->name,
-                        'ejecutivo_id'       => $ejecutiva->id,
-                        'desarrollador_id'   => $project->desarrollador_id ?? $desarrolladorId,
-                        // Uno por ejecutiva queda sin Kg para ver el caso "falta el dato"
-                        'potencial_anual_kg' => $i === 1 ? null : mt_rand(4, 120) * 50,
+                        'ejecutivo'           => $ejecutiva->name,
+                        'ejecutivo_id'        => $ejecutiva->id,
+                        'desarrollador_id'    => $project->desarrollador_id ?? $desarrolladorId,
+                        'potencial_anual_kg'  => $kg,
+                        'potencial_anual_usd' => $kg === null ? null : round($kg * mt_rand(900, 3500) / 100, 2),
                     ]);
 
                     $this->crearVariantes($project, $i);

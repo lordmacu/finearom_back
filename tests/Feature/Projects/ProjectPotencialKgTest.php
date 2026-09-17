@@ -13,9 +13,11 @@ class ProjectPotencialKgTest extends ProjectMailTestCase
             'tipo'               => 'Desarrollo',
             'nombre_prospecto'   => 'Prospecto P',
             'potencial_anual_kg' => 1250.5,
+            'potencial_anual_usd' => 30000,
         ])->assertCreated()->json('data.id');
 
         $this->assertEquals(1250.5, Project::find($id)->potencial_anual_kg);
+        $this->assertEquals(30000, Project::find($id)->potencial_anual_usd);
     }
 
     public function test_editar_proyecto_actualiza_el_potencial_anual_en_kg(): void

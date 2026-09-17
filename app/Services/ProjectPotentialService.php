@@ -9,7 +9,7 @@ use Illuminate\Support\Collection;
 
 /**
  * Potencial a la vista: proyectos de una ejecutiva con las referencias que
- * Desarrollo creó, su precio y el potencial anual en Kg. Los ajustes manuales
+ * Desarrollo creó, su precio y el potencial anual (USD y Kg). Los ajustes manuales
  * escriben sobre el dato real (el mismo que ve el detalle del proyecto) y
  * quedan en el historial del proyecto.
  */
@@ -43,11 +43,13 @@ class ProjectPotentialService
                 'id'                 => $p->id,
                 'nombre'             => $p->nombre,
                 'tipo'               => $p->tipo,
+                'origen'             => $this->origen($p),
                 'cliente'            => $p->client?->client_name ?? $p->prospect?->nombre ?? $p->nombre_prospecto,
                 'es_prospecto'       => $p->client_id === null,
                 'estado_externo'     => $p->estado_externo,
                 'estado_interno'     => $p->estado_interno,
                 'fecha_creacion'     => $p->fecha_creacion?->format('Y-m-d'),
+                'potencial_anual_usd' => $p->potencial_anual_usd !== null ? (float) $p->potencial_anual_usd : null,
                 'potencial_anual_kg' => $p->potencial_anual_kg !== null ? (float) $p->potencial_anual_kg : null,
                 'referencias'        => $p->marketingVariants->flatMap(
                     fn ($v) => $v->references->map(fn (ProjectMarketingVariantReference $r) => [
@@ -61,13 +63,31 @@ class ProjectPotentialService
             ]);
     }
 
-    public function updatePotentialKg(Project $project, ?float $kg, string $executive): Project
+    /** Mismo criterio que el formulario de creación: homologación manda sobre proactivo. */
+    private function origen(Project $project): string
     {
-        $antes = $project->potencial_anual_kg;
-        $project->update(['potencial_anual_kg' => $kg]);
+        return match (true) {
+            (bool) $project->homologacion => 'homologacion',
+            (bool) $project->proactivo    => 'proactivo',
+            default                       => 'reactivo',
+        };
+    }
 
-        if ($this->changed($antes, $kg)) {
-            $this->log($project->id, "Potencial anual (Kg): {$this->fmt($antes)} → {$this->fmt($kg)}", $executive);
+    /** @param array<string, float|null> $valores potencial_anual_usd y/o potencial_anual_kg */
+    public function updatePotential(Project $project, array $valores, string $executive): Project
+    {
+        $etiquetas = [
+            'potencial_anual_usd' => 'Potencial anual (USD)',
+            'potencial_anual_kg'  => 'Potencial anual (Kg)',
+        ];
+
+        $antes = $project->only(array_keys($valores));
+        $project->update($valores);
+
+        foreach ($valores as $campo => $nuevo) {
+            if ($this->changed($antes[$campo], $nuevo)) {
+                $this->log($project->id, "{$etiquetas[$campo]}: {$this->fmt($antes[$campo])} → {$this->fmt($nuevo)}", $executive);
+            }
         }
 
         return $project;
