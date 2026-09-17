@@ -330,7 +330,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/project-potential/ejecutivas', [ProjectPotentialController::class, 'ejecutivas']);
     Route::get('/project-potential', [ProjectPotentialController::class, 'index']);
     Route::patch('/project-potential/projects/{project}', [ProjectPotentialController::class, 'updateProject']);
-    Route::patch('/project-potential/references/{reference}', [ProjectPotentialController::class, 'updateReference']);
 
     Route::get('/projects/export', [ProjectController::class, 'export']);
     Route::get('/projects/dashboard', [ProjectController::class, 'dashboard']);

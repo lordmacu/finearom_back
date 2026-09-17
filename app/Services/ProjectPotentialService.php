@@ -9,9 +9,9 @@ use Illuminate\Support\Collection;
 
 /**
  * Potencial a la vista: proyectos de una ejecutiva con las referencias que
- * Desarrollo creó, su precio y el potencial anual (USD y Kg). Los ajustes manuales
- * escriben sobre el dato real (el mismo que ve el detalle del proyecto) y
- * quedan en el historial del proyecto.
+ * Desarrollo creó, su precio y el potencial anual (USD y Kg). El precio solo
+ * se consulta (lo asigna Desarrollo); el potencial se ajusta a mano sobre el
+ * dato real del proyecto y queda en su historial.
  */
 class ProjectPotentialService
 {
@@ -91,23 +91,6 @@ class ProjectPotentialService
         }
 
         return $project;
-    }
-
-    public function updateReferencePrice(ProjectMarketingVariantReference $reference, ?float $precio, string $executive): ProjectMarketingVariantReference
-    {
-        $antes = $reference->precio;
-        $reference->update(['precio' => $precio]);
-
-        if ($this->changed($antes, $precio)) {
-            $nombre = $reference->referencia ?: ($reference->codigo ?: "#{$reference->id}");
-            $this->log(
-                $reference->variant->project_id,
-                "Precio referencia {$nombre} (USD/Kg): {$this->fmt($antes)} → {$this->fmt($precio)}",
-                $executive,
-            );
-        }
-
-        return $reference;
     }
 
     private function changed($antes, ?float $despues): bool

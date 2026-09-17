@@ -126,18 +126,6 @@ class ProjectPotentialTest extends ProjectMailTestCase
             ->assertExactJson(['success' => true, 'data' => ['Ana Pérez', 'María Ortega']]);
     }
 
-    public function test_edita_el_precio_real_de_la_referencia_y_lo_registra_en_el_historial(): void
-    {
-        $ref = $this->projectConReferencia();
-
-        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => 20])
-            ->assertOk()
-            ->assertJsonPath('data.precio', 20);
-
-        $this->assertEquals(20, $ref->fresh()->precio);
-        $this->assertStringContainsString('Precio referencia Ref A', ProjectStatusHistory::first()->descripcion);
-    }
-
     public function test_edita_el_potencial_real_del_proyecto_y_lo_registra_en_el_historial(): void
     {
         $project = $this->projectConReferencia()->variant->project;
@@ -152,20 +140,9 @@ class ProjectPotentialTest extends ProjectMailTestCase
     {
         $ref = $this->projectConReferencia();
 
-        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => 12.5])->assertOk();
+        $this->patchJson("/api/project-potential/projects/{$ref->variant->project_id}", ['potencial_anual_kg' => 500])->assertOk();
 
         $this->assertSame(0, ProjectStatusHistory::count());
-    }
-
-    public function test_permite_vaciar_el_valor_y_rechaza_negativos(): void
-    {
-        $ref = $this->projectConReferencia();
-
-        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => null])->assertOk();
-        $this->assertNull($ref->fresh()->precio);
-
-        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => -3])
-            ->assertStatus(422)->assertJsonValidationErrors('precio');
     }
 
     public function test_sin_permiso_de_edicion_solo_puede_consultar(): void
@@ -174,8 +151,15 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->givePermissions(['project potential list']);
 
         $this->getJson('/api/project-potential?ejecutivo=' . urlencode('María Ortega'))->assertOk();
-        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => 30])->assertForbidden();
         $this->patchJson("/api/project-potential/projects/{$ref->variant->project_id}", ['potencial_anual_kg' => 1])->assertForbidden();
+    }
+
+    public function test_el_precio_de_las_referencias_no_se_edita_desde_el_modulo(): void
+    {
+        $ref = $this->projectConReferencia();
+
+        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => 30])->assertNotFound();
+        $this->assertEquals(12.5, $ref->fresh()->precio);
     }
 
     public function test_sin_permiso_no_puede_consultar(): void

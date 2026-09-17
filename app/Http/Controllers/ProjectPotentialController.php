@@ -4,9 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\ProjectPotential\ProjectPotentialIndexRequest;
 use App\Http\Requests\ProjectPotential\ProjectPotentialUpdateRequest;
-use App\Http\Requests\ProjectPotential\ProjectPotentialPriceRequest;
 use App\Models\Project;
-use App\Models\ProjectMarketingVariantReference;
 use App\Services\ProjectPotentialService;
 use Illuminate\Http\JsonResponse;
 
@@ -16,7 +14,7 @@ class ProjectPotentialController extends Controller
         private readonly ProjectPotentialService $service
     ) {
         $this->middleware('can:project potential list')->only(['index', 'ejecutivas']);
-        $this->middleware('can:project potential edit')->only(['updateProject', 'updateReference']);
+        $this->middleware('can:project potential edit')->only(['updateProject']);
     }
 
     public function ejecutivas(): JsonResponse
@@ -55,18 +53,6 @@ class ProjectPotentialController extends Controller
                 'potencial_anual_kg'  => $decimal($project->potencial_anual_kg),
             ],
             'message' => 'Potencial actualizado',
-        ]);
-    }
-
-    public function updateReference(ProjectPotentialPriceRequest $request, ProjectMarketingVariantReference $reference): JsonResponse
-    {
-        $precio = $request->validated('precio');
-        $reference = $this->service->updateReferencePrice($reference, $precio === null ? null : (float) $precio, auth()->user()->name);
-
-        return response()->json([
-            'success' => true,
-            'data'    => ['id' => $reference->id, 'precio' => $reference->precio !== null ? (float) $reference->precio : null],
-            'message' => 'Precio actualizado',
         ]);
     }
 }
