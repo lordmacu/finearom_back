@@ -67,6 +67,29 @@ class MarketingVariantReferencesTest extends ProjectFieldsTestCase
         $this->assertNull($data['references'][1]['precio']);
     }
 
+    public function test_con_id_actualiza_la_referencia_en_su_lugar_y_borra_las_que_no_vienen(): void
+    {
+        $project = $this->project();
+        $id      = $this->variante($project);
+        $url     = "/api/projects/{$project->id}/marketing-variants/{$id}/references";
+
+        $refs = $this->putJson($url, [
+            'referencias' => [$this->referencia(['referencia' => 'Queda']), $this->referencia(['referencia' => 'Se va'])],
+        ])->json('data.references');
+
+        $data = $this->putJson($url, [
+            'referencias' => [
+                $this->referencia(['id' => $refs[0]['id'], 'referencia' => 'Queda editada']),
+                $this->referencia(['referencia' => 'Nueva']),
+            ],
+        ])->assertOk()->json('data.references');
+
+        $this->assertSame($refs[0]['id'], $data[0]['id']);
+        $this->assertSame('Queda editada', $data[0]['referencia']);
+        $this->assertSame('Nueva', $data[1]['referencia']);
+        $this->assertNull(DB::table('project_marketing_variant_references')->find($refs[1]['id']));
+    }
+
     public function test_rechaza_precio_negativo(): void
     {
         $project = $this->project();

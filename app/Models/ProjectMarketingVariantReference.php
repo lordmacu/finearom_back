@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ProjectMarketingVariantReference extends Model
 {
@@ -31,5 +32,11 @@ class ProjectMarketingVariantReference extends Model
     public function variant(): BelongsTo
     {
         return $this->belongsTo(ProjectMarketingVariant::class, 'variant_id');
+    }
+
+    /** Datos de Potencial a la vista si el cliente seleccionó esta referencia. */
+    public function potential(): HasOne
+    {
+        return $this->hasOne(ProjectPotentialReference::class, 'reference_id');
     }
 }

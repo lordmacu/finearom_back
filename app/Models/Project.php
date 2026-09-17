@@ -213,6 +213,11 @@ public function marketingYCalidad(): HasOne
         return $this->hasMany(ProjectMarketingVariant::class);
     }
 
+    public function potentialReferences(): HasMany
+    {
+        return $this->hasMany(ProjectPotentialReference::class, 'project_id');
+    }
+
     public function variants(): HasMany
     {
         return $this->hasMany(ProjectVariant::class, 'project_id');

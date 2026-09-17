@@ -21,6 +21,8 @@ class ProjectMarketingVariantReferenceRequest extends FormRequest
             // Desarrollo puede dejar la variante sin referencias.
             'referencias'                => ['present', 'array', "max:{$max}"],
             'referencias.*'              => ['array'],
+            // id de una referencia existente: se actualiza en su lugar (conserva lo que cuelga de ella)
+            'referencias.*.id'           => ['nullable', 'integer'],
             'referencias.*.referencia'   => ['nullable', 'string', 'max:200'],
             'referencias.*.codigo'       => ['nullable', 'string', 'max:100'],
             'referencias.*.aplicacion'   => ['nullable', 'string', 'max:200'],

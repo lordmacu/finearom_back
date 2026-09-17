@@ -329,7 +329,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Potencial a la vista (proyectos por ejecutiva: referencias, precio, Kg)
     Route::get('/project-potential/ejecutivas', [ProjectPotentialController::class, 'ejecutivas']);
     Route::get('/project-potential', [ProjectPotentialController::class, 'index']);
-    Route::patch('/project-potential/projects/{project}', [ProjectPotentialController::class, 'updateProject']);
+    Route::get('/project-potential/projects/{project}', [ProjectPotentialController::class, 'show']);
+    Route::put('/project-potential/projects/{project}/selections', [ProjectPotentialController::class, 'updateSelections']);
 
     Route::get('/projects/export', [ProjectController::class, 'export']);
     Route::get('/projects/dashboard', [ProjectController::class, 'dashboard']);

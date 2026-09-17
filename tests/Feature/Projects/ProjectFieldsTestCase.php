@@ -331,6 +331,20 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->timestamps();
         });
 
+        Schema::create('project_potential_references', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('project_id');
+            $t->unsignedBigInteger('reference_id')->unique();
+            $t->decimal('kg_anio', 12, 2)->nullable();
+            $t->date('fecha_primer_despacho')->nullable();
+            $t->decimal('venta_anio_usd', 14, 2)->nullable();
+            $t->string('frecuencia_compra', 20)->nullable();
+            $t->text('seguimiento')->nullable();
+            $t->string('estado', 20)->default('abierto');
+            $t->string('probabilidad', 10)->nullable();
+            $t->timestamps();
+        });
+
         Schema::create('project_files', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('project_id');

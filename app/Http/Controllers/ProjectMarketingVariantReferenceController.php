@@ -12,9 +12,9 @@ use Illuminate\Support\Facades\DB;
 /**
  * Referencias de una variante de Marketing. Pertenecen a Desarrollo.
  *
- * Es un sync completo: llega el array entero y reemplaza lo que había.
- * Como Desarrollo es dueño de todas las columnas de la tabla, borrar y
- * recrear no pisa trabajo de nadie más.
+ * Es un sync completo: llega el array entero. Las que traen `id` se
+ * actualizan en su lugar (Potencial a la vista cuelga datos de la ejecutiva
+ * de cada referencia), las nuevas se crean y las que no vienen se borran.
  */
 class ProjectMarketingVariantReferenceController extends Controller
 {
@@ -41,18 +41,31 @@ class ProjectMarketingVariantReferenceController extends Controller
         }
 
         DB::transaction(function () use ($request, $variant) {
-            $variant->references()->delete();
+            $referencias = array_values($request->validated()['referencias']);
+            $existentes  = $variant->references()->get()->keyBy('id');
+            $conservadas = [];
 
-            foreach (array_values($request->validated()['referencias']) as $orden => $referencia) {
-                $variant->references()->create([
+            foreach ($referencias as $orden => $referencia) {
+                $datos = [
                     'referencia' => $referencia['referencia'] ?? null,
                     'codigo'     => $referencia['codigo'] ?? null,
                     'aplicacion' => $referencia['aplicacion'] ?? null,
                     'dosis'      => $referencia['dosis'] ?? null,
                     'precio'     => $referencia['precio'] ?? null,
                     'orden'      => $orden,
-                ]);
+                ];
+
+                // Un id ajeno a esta variante se trata como referencia nueva
+                $actual = $existentes->get($referencia['id'] ?? null);
+                if ($actual) {
+                    $actual->update($datos);
+                    $conservadas[] = $actual->id;
+                } else {
+                    $conservadas[] = $variant->references()->create($datos)->id;
+                }
             }
+
+            $variant->references()->whereNotIn('id', $conservadas)->delete();
         });
 
         return response()->json([

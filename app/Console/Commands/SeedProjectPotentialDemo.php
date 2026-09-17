@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Project;
 use App\Models\ProjectMarketingVariant;
+use App\Models\ProjectPotentialReference;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -13,8 +14,9 @@ use Illuminate\Support\Facades\Storage;
  * Datos de demostración para "Potencial a la vista" sobre proyectos existentes.
  *
  * Toma unos proyectos por ejecutiva real (tabla executives ∩ users), les asigna
- * la ejecutiva, el ingeniero de desarrollo y el potencial anual (USD y Kg), y les
- * crea variantes "[DEMO]" con referencias (código y precio). Los valores
+ * la ejecutiva y el ingeniero de desarrollo, les crea variantes "[DEMO]" con
+ * referencias (código y precio) y marca algunas como seleccionadas por el
+ * cliente con su potencial; el del proyecto queda como la suma. Los valores
  * originales quedan en storage/app/demo/potencial-backup.json y --purge los
  * restaura y borra las variantes de demo.
  */
@@ -74,18 +76,15 @@ class SeedProjectPotentialDemo extends Command
                     $usados[] = $project->id;
                     $backup[] = ['id' => $project->id] + $project->only(self::BACKUP_FIELDS);
 
-                    // Uno por ejecutiva queda sin potencial para ver el caso "falta el dato"
-                    $kg = $i === 1 ? null : mt_rand(4, 120) * 50;
-
                     $project->update([
-                        'ejecutivo'           => $ejecutiva->name,
-                        'ejecutivo_id'        => $ejecutiva->id,
-                        'desarrollador_id'    => $project->desarrollador_id ?? $desarrolladorId,
-                        'potencial_anual_kg'  => $kg,
-                        'potencial_anual_usd' => $kg === null ? null : round($kg * mt_rand(900, 3500) / 100, 2),
+                        'ejecutivo'        => $ejecutiva->name,
+                        'ejecutivo_id'     => $ejecutiva->id,
+                        'desarrollador_id' => $project->desarrollador_id ?? $desarrolladorId,
                     ]);
 
-                    $this->crearVariantes($project, $i);
+                    $referencias = $this->crearVariantes($project, $i);
+                    // El segundo de cada ejecutiva queda sin selección (el cliente aún no elige)
+                    $this->seleccionar($project, $i === 1 ? [] : $referencias);
                 }
 
                 $this->line("  {$ejecutiva->name}: " . $proyectos->pluck('id')->implode(', '));
@@ -116,11 +115,13 @@ class SeedProjectPotentialDemo extends Command
         )->values();
     }
 
-    private function crearVariantes(Project $project, int $indice): void
+    private function crearVariantes(Project $project, int $indice): array
     {
+        $creadas = [];
+
         // El tercer proyecto de cada ejecutiva queda sin referencias (Desarrollo aún no entrega)
         if ($indice === 2) {
-            return;
+            return $creadas;
         }
 
         foreach (range(1, mt_rand(1, 2)) as $orden) {
@@ -132,7 +133,7 @@ class SeedProjectPotentialDemo extends Command
 
             foreach (range(0, mt_rand(0, 2)) as $r) {
                 $nombre = self::NOMBRES[mt_rand(0, count(self::NOMBRES) - 1)];
-                $variant->references()->create([
+                $creadas[] = $variant->references()->create([
                     'referencia' => $nombre,
                     'codigo'     => 'FA-' . mt_rand(10000, 99999),
                     'aplicacion' => $project->tipo_producto,
@@ -143,6 +144,38 @@ class SeedProjectPotentialDemo extends Command
                 ]);
             }
         }
+
+        return $creadas;
+    }
+
+    /** El cliente elige la mitad (al menos una) y el potencial del proyecto es su suma. */
+    private function seleccionar(Project $project, array $referencias): void
+    {
+        $elegidas = array_slice($referencias, 0, (int) ceil(count($referencias) / 2));
+        $kgTotal  = 0;
+        $usdTotal = 0;
+
+        foreach ($elegidas as $ref) {
+            $kg = mt_rand(4, 60) * 50;
+            ProjectPotentialReference::create([
+                'project_id'            => $project->id,
+                'reference_id'          => $ref->id,
+                'kg_anio'               => $kg,
+                'fecha_primer_despacho' => now()->addMonths(mt_rand(1, 10))->startOfMonth(),
+                'venta_anio_usd'        => mt_rand(0, 1) ? round($kg * (float) $ref->precio / mt_rand(2, 6), 2) : null,
+                'frecuencia_compra'     => ProjectPotentialReference::FRECUENCIAS[mt_rand(1, 5)],
+                'seguimiento'           => ['Panel consumidor', 'Pendiente muestra', 'Estimar volumen', null][mt_rand(0, 3)],
+                'estado'                => ProjectPotentialReference::ESTADOS[mt_rand(0, 3)],
+                'probabilidad'          => ProjectPotentialReference::PROBABILIDADES[mt_rand(0, 2)],
+            ]);
+            $kgTotal  += $kg;
+            $usdTotal += $kg * (float) $ref->precio;
+        }
+
+        $project->update([
+            'potencial_anual_kg'  => $elegidas ? $kgTotal : null,
+            'potencial_anual_usd' => $elegidas ? round($usdTotal, 2) : null,
+        ]);
     }
 
     private function purge(): int

@@ -4,14 +4,17 @@ namespace App\Services;
 
 use App\Models\Project;
 use App\Models\ProjectMarketingVariantReference;
+use App\Models\ProjectPotentialReference;
 use App\Models\ProjectStatusHistory;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Potencial a la vista: proyectos de una ejecutiva con las referencias que
- * Desarrollo creó, su precio y el potencial anual (USD y Kg). El precio solo
- * se consulta (lo asigna Desarrollo); el potencial se ajusta a mano sobre el
- * dato real del proyecto y queda en su historial.
+ * Desarrollo creó y su precio. La ejecutiva marca cuáles seleccionó el cliente
+ * y llena el potencial de cada una; el potencial anual del proyecto (USD y Kg)
+ * pasa a ser la suma de las seleccionadas.
  */
 class ProjectPotentialService
 {
@@ -31,36 +34,156 @@ class ProjectPotentialService
         return Project::query()
             ->where('ejecutivo', $ejecutivo)
             ->when($estadoExterno, fn ($q) => $q->where('estado_externo', $estadoExterno))
-            ->with([
-                'client:id,client_name',
-                'prospect:id,nombre',
-                'marketingVariants' => fn ($q) => $q->orderBy('orden')->orderBy('id'),
-                'marketingVariants.references' => fn ($q) => $q->orderBy('orden')->orderBy('id'),
-            ])
+            ->with($this->relaciones())
             ->orderByDesc('id')
             ->get()
-            ->map(fn (Project $p) => [
-                'id'                 => $p->id,
-                'nombre'             => $p->nombre,
-                'tipo'               => $p->tipo,
-                'origen'             => $this->origen($p),
-                'cliente'            => $p->client?->client_name ?? $p->prospect?->nombre ?? $p->nombre_prospecto,
-                'es_prospecto'       => $p->client_id === null,
-                'estado_externo'     => $p->estado_externo,
-                'estado_interno'     => $p->estado_interno,
-                'fecha_creacion'     => $p->fecha_creacion?->format('Y-m-d'),
-                'potencial_anual_usd' => $p->potencial_anual_usd !== null ? (float) $p->potencial_anual_usd : null,
-                'potencial_anual_kg' => $p->potencial_anual_kg !== null ? (float) $p->potencial_anual_kg : null,
-                'referencias'        => $p->marketingVariants->flatMap(
-                    fn ($v) => $v->references->map(fn (ProjectMarketingVariantReference $r) => [
-                        'id'         => $r->id,
-                        'variante'   => $v->nombre,
-                        'referencia' => $r->referencia,
-                        'codigo'     => $r->codigo,
-                        'precio'     => $r->precio !== null ? (float) $r->precio : null,
-                    ])
-                )->values(),
+            ->map(fn (Project $p) => $this->resumen($p) + [
+                'referencias' => $this->referencias($p)->map(fn ($r) => [
+                    'id'           => $r['id'],
+                    'variante'     => $r['variante'],
+                    'referencia'   => $r['referencia'],
+                    'codigo'       => $r['codigo'],
+                    'precio'       => $r['precio'],
+                    'seleccionada' => $r['seleccionada'],
+                ])->values(),
             ]);
+    }
+
+    /** Detalle para la ventana: el proyecto y todas sus referencias con el potencial de las seleccionadas. */
+    public function detail(Project $project): array
+    {
+        $project->load($this->relaciones());
+
+        return $this->resumen($project) + ['referencias' => $this->referencias($project)->values()];
+    }
+
+    /**
+     * Sync completo de las referencias seleccionadas: las que no vienen dejan
+     * de estar seleccionadas (se borran sus datos).
+     *
+     * @param array<int, array<string, mixed>> $selecciones
+     */
+    public function saveSelections(Project $project, array $selecciones, string $executive): array
+    {
+        $refsDelProyecto = $project->marketingVariants()
+            ->with('references')
+            ->get()
+            ->flatMap->references
+            ->keyBy('id');
+
+        $ajenas = collect($selecciones)->pluck('reference_id')->reject(fn ($id) => $refsDelProyecto->has($id));
+        if ($ajenas->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'selecciones' => 'Hay referencias que no pertenecen a este proyecto.',
+            ]);
+        }
+
+        $antes = [$project->potencial_anual_usd, $project->potencial_anual_kg];
+
+        DB::transaction(function () use ($project, $selecciones) {
+            foreach ($selecciones as $seleccion) {
+                ProjectPotentialReference::updateOrCreate(
+                    ['reference_id' => $seleccion['reference_id']],
+                    ['project_id' => $project->id] + collect($seleccion)->except('reference_id')->all(),
+                );
+            }
+
+            $project->potentialReferences()
+                ->whereNotIn('reference_id', collect($selecciones)->pluck('reference_id'))
+                ->delete();
+
+            $this->recalcularPotencial($project, $selecciones === []);
+        });
+
+        if ((float) $antes[0] !== (float) $project->potencial_anual_usd || (float) $antes[1] !== (float) $project->potencial_anual_kg) {
+            $this->log(
+                $project->id,
+                sprintf(
+                    'Potencial a la vista: %d referencia(s) seleccionada(s) — USD %s → %s, Kg %s → %s',
+                    count($selecciones),
+                    $this->fmt($antes[0]), $this->fmt($project->potencial_anual_usd),
+                    $this->fmt($antes[1]), $this->fmt($project->potencial_anual_kg),
+                ),
+                $executive,
+            );
+        }
+
+        return $this->detail($project->fresh());
+    }
+
+    /** Potencial del proyecto = suma de las referencias seleccionadas (USD = Kg × precio). */
+    private function recalcularPotencial(Project $project, bool $sinSeleccion): void
+    {
+        $filas = $project->potentialReferences()->with('reference:id,precio')->get();
+
+        $kg  = $filas->sum(fn ($s) => (float) $s->kg_anio);
+        $usd = $filas->sum(fn ($s) => (float) $s->kg_anio * (float) $s->reference?->precio);
+
+        $project->update([
+            'potencial_anual_kg'  => $sinSeleccion ? null : round($kg, 2),
+            'potencial_anual_usd' => $sinSeleccion ? null : round($usd, 2),
+        ]);
+    }
+
+    private function relaciones(): array
+    {
+        return [
+            'client:id,client_name',
+            'prospect:id,nombre',
+            'productCategory:id,name',
+            'marketingVariants' => fn ($q) => $q->orderBy('orden')->orderBy('id'),
+            'marketingVariants.references' => fn ($q) => $q->orderBy('orden')->orderBy('id'),
+            'marketingVariants.references.potential',
+        ];
+    }
+
+    private function resumen(Project $p): array
+    {
+        return [
+            'id'                  => $p->id,
+            'nombre'              => $p->nombre,
+            'tipo'                => $p->tipo,
+            'origen'              => $this->origen($p),
+            'segmento'            => $p->productCategory?->name,
+            'cliente'             => $p->client?->client_name ?? $p->prospect?->nombre ?? $p->nombre_prospecto,
+            'es_prospecto'        => $p->client_id === null,
+            'ejecutivo'           => $p->ejecutivo,
+            'estado_externo'      => $p->estado_externo,
+            'estado_interno'      => $p->estado_interno,
+            'fecha_creacion'      => $p->fecha_creacion?->format('Y-m-d'),
+            'potencial_anual_usd' => $this->decimal($p->potencial_anual_usd),
+            'potencial_anual_kg'  => $this->decimal($p->potencial_anual_kg),
+        ];
+    }
+
+    private function referencias(Project $p): Collection
+    {
+        return $p->marketingVariants->flatMap(
+            fn ($v) => $v->references->map(function (ProjectMarketingVariantReference $r) use ($v) {
+                $s      = $r->potential;
+                $precio = $this->decimal($r->precio);
+                $kg     = $this->decimal($s?->kg_anio);
+
+                return [
+                    'id'           => $r->id,
+                    'variante'     => $v->nombre,
+                    'referencia'   => $r->referencia,
+                    'codigo'       => $r->codigo,
+                    'precio'       => $precio,
+                    'seleccionada' => $s !== null,
+                    'potencial'    => $s ? [
+                        'kg_anio'               => $kg,
+                        'potencial_anual_usd'   => $kg !== null && $precio !== null ? round($kg * $precio, 2) : null,
+                        'fecha_primer_despacho' => $s->fecha_primer_despacho?->format('Y-m-d'),
+                        'venta_anio_usd'        => $this->decimal($s->venta_anio_usd),
+                        'frecuencia_compra'     => $s->frecuencia_compra,
+                        'seguimiento'           => $s->seguimiento,
+                        'estado'                => $s->estado,
+                        'probabilidad'          => $s->probabilidad,
+                    ] : null,
+                ];
+            })
+        );
     }
 
     /** Mismo criterio que el formulario de creación: homologación manda sobre proactivo. */
@@ -73,29 +196,9 @@ class ProjectPotentialService
         };
     }
 
-    /** @param array<string, float|null> $valores potencial_anual_usd y/o potencial_anual_kg */
-    public function updatePotential(Project $project, array $valores, string $executive): Project
+    private function decimal($valor): ?float
     {
-        $etiquetas = [
-            'potencial_anual_usd' => 'Potencial anual (USD)',
-            'potencial_anual_kg'  => 'Potencial anual (Kg)',
-        ];
-
-        $antes = $project->only(array_keys($valores));
-        $project->update($valores);
-
-        foreach ($valores as $campo => $nuevo) {
-            if ($this->changed($antes[$campo], $nuevo)) {
-                $this->log($project->id, "{$etiquetas[$campo]}: {$this->fmt($antes[$campo])} → {$this->fmt($nuevo)}", $executive);
-            }
-        }
-
-        return $project;
-    }
-
-    private function changed($antes, ?float $despues): bool
-    {
-        return ($antes === null ? null : (float) $antes) !== $despues;
+        return $valor === null ? null : (float) $valor;
     }
 
     private function fmt($valor): string
