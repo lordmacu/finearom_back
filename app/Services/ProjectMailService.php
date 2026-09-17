@@ -203,6 +203,11 @@ class ProjectMailService
         // Las notas son HTML del editor enriquecido (CkEditor) — van crudas al correo
         $extra = [
             'delivered_by'  => $cfg['label'],
+            'tipo_entrega'  => match ($log->tipo) {
+                ProjectAreaDeliveryLog::PARCIAL       => 'Entrega parcial',
+                ProjectAreaDeliveryLog::ACTUALIZACION => 'Actualización',
+                default                               => 'Entrega final',
+            },
             'notas_entrega' => HtmlText::isBlank($notas) ? null : $notas,
         ];
 

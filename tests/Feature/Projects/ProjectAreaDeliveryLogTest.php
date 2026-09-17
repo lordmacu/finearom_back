@@ -19,8 +19,8 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
         Storage::fake('local');
 
         $this->template('project_created', 'Nuevo proyecto #|project_id| — |project_name|');
-        $this->template('project_applications_partial', 'Aplicaciones parcial — #|project_id|', '|delivered_by||notas_entrega|');
-        $this->template('project_applications_ready', 'Aplicaciones listas — #|project_id|', '|delivered_by||notas_entrega|');
+        $this->template('project_applications_partial', 'Aplicaciones parcial — #|project_id|', '|delivered_by| [|tipo_entrega|] |notas_entrega|');
+        $this->template('project_applications_ready', 'Aplicaciones listas — #|project_id|', '|delivered_by| [|tipo_entrega|] |notas_entrega|');
         $this->template('project_applications_updated', 'Aplicaciones actualizadas — #|project_id|', '|delivered_by||changes_table||notas_entrega|');
         Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
 
@@ -50,6 +50,7 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
         $this->assertStringContainsString('Primer lote de aplicaciones', $email->getHtmlBody());
         $this->assertCount(1, $email->getAttachments());
         $this->assertSame('project_applications_partial', EmailLog::latest('id')->first()->process_type);
+        $this->assertStringContainsString('[Entrega parcial]', $email->getHtmlBody());
         $this->assertSame('Aplicaciones registró una entrega parcial', ProjectStatusHistory::latest('id')->value('descripcion'));
     }
 
@@ -67,6 +68,7 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
         $final = $this->sentMessages()->last()->getOriginalMessage();
         $this->assertSame(['final.pdf'], array_map(fn ($a) => $a->getFilename(), $final->getAttachments()));
         $this->assertSame('project_applications_ready', EmailLog::latest('id')->first()->process_type);
+        $this->assertStringContainsString('[Entrega final]', $final->getHtmlBody());
 
         $data = $this->getJson("/api/projects/{$project->id}/aplicaciones/entrega")->assertOk()->json('data');
 
