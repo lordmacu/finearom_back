@@ -2,19 +2,25 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ProjectPotential\ProjectPotentialExportRequest;
 use App\Http\Requests\ProjectPotential\ProjectPotentialIndexRequest;
 use App\Http\Requests\ProjectPotential\ProjectPotentialSelectionsRequest;
 use App\Models\Project;
+use App\Services\ProjectPotentialExportService;
 use App\Services\ProjectPotentialService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProjectPotentialController extends Controller
 {
     public function __construct(
-        private readonly ProjectPotentialService $service
+        private readonly ProjectPotentialService $service,
+        private readonly ProjectPotentialExportService $exportService,
     ) {
-        $this->middleware('can:project potential list')->only(['index', 'ejecutivas', 'show']);
+        $this->middleware('can:project potential list')->only(['index', 'ejecutivas', 'show', 'export']);
         $this->middleware('can:project potential edit')->only(['updateSelections']);
     }
 
@@ -71,6 +77,23 @@ class ProjectPotentialController extends Controller
             'success' => true,
             'data'    => $data,
             'message' => 'Referencias seleccionadas guardadas',
+        ]);
+    }
+
+    public function export(ProjectPotentialExportRequest $request): StreamedResponse
+    {
+        $anio      = (int) ($request->validated('anio') ?? now()->year);
+        $ejecutivo = $request->validated('ejecutivo');
+        $writer    = new Xlsx($this->exportService->build($ejecutivo, $request->validated('estado_externo'), $anio));
+
+        $fileName = 'potencial_a_la_vista_' . ($ejecutivo ? Str::slug($ejecutivo, '_') . '_' : '') . $anio . '.xlsx';
+
+        return new StreamedResponse(function () use ($writer) {
+            $writer->save('php://output');
+        }, 200, [
+            'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment;filename=\"{$fileName}\"",
+            'Cache-Control'       => 'max-age=0',
         ]);
     }
 }

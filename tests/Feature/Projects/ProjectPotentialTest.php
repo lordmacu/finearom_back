@@ -137,6 +137,58 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertEquals([3 => 300, 9 => 300], collect($plan['meses'])->filter(fn ($m) => $m['kg'] > 0)->pluck('kg', 'mes')->all());
     }
 
+    public function test_la_descarga_tiene_el_formato_del_excel_con_una_fila_por_referencia_seleccionada(): void
+    {
+        $categoria = DB::table('product_categories')->insertGetId(['name' => 'Home Care', 'slug' => 'home-care']);
+        $project   = $this->proyecto('María Ortega', ['nombre' => 'Control olor', 'proactivo' => true, 'product_category_id' => $categoria]);
+        $this->proyecto('Otra Ejecutiva', ['nombre' => 'Ajeno']);
+        $this->guardar($project, [$this->seleccion($this->refId($project, 'Ref B'), [
+            'kg_anio' => 1200, 'frecuencia_compra' => 'trimestral', 'fecha_primer_despacho' => '2026-06-01',
+            'estado' => 'ganado', 'probabilidad' => 'alta', 'venta_anio_usd' => 700,
+        ])])->assertOk();
+
+        $sheet = app(\App\Services\ProjectPotentialExportService::class)
+            ->build('María Ortega', null, 2026)
+            ->getActiveSheet();
+        $fila = fn (int $n) => $sheet->rangeToArray("A{$n}:BO{$n}", null, true, false)[0];
+
+        $encabezado = $fila(1);
+        $this->assertSame('EJECUTIVA', $encabezado[0]);
+        $this->assertSame('REFERENCIA - CODIGO', $encabezado[4]);
+        $this->assertSame('VENTA 2026', $encabezado[11]);
+        $this->assertSame('ENERO KG 2026', $encabezado[15]);
+        $this->assertSame('TOTAL VENTA ESTIMADA AÑO 2026 USD', $encabezado[39]);
+        $this->assertSame('ENERO KG 2027', $encabezado[41]);
+        $this->assertSame('PROBABILIDAD', $encabezado[66]);
+        $this->assertSame('FF203764', $sheet->getStyle('A1')->getFill()->getStartColor()->getARGB());
+
+        $datos = $fila(2);
+        $this->assertEquals(['MARÍA ORTEGA', $project->id, 'Prospecto P', 'Control olor', 'C-2 Ref B', 'HOME CARE', 'PROACTIVO'], array_slice($datos, 0, 7));
+        $this->assertSame('n', $sheet->getCell('B2')->getDataType());
+        $this->assertSame('n', $sheet->getCell('Z2')->getDataType());
+        $this->assertEquals([1200, 20, 24000, 'JUNIO 2026', 700, 'TRIMESTRAL', 'Panel consumidor', 'GANADO'], array_slice($datos, 7, 8));
+        $this->assertNull($datos[15]);          // enero 2026 sin despacho
+        $this->assertEquals(300, $datos[25]);   // junio 2026 Kg
+        $this->assertEquals(6000, $datos[26]);  // junio 2026 USD
+        $this->assertEquals(18000, $datos[39]); // total 2026
+        $this->assertSame('ALTA', $datos[40]);
+        $this->assertEquals(300, $datos[45]);   // marzo 2027 Kg
+        $this->assertEquals(24000, $datos[65]); // total 2027
+        $this->assertNull($fila(3)[0]);         // una sola fila: Ref A no está seleccionada, el otro proyecto es ajeno
+    }
+
+    public function test_el_endpoint_de_descarga_aplica_filtros_y_permisos(): void
+    {
+        $this->getJson('/api/project-potential/export?estado_externo=Otro')->assertStatus(422);
+
+        $res = $this->get('/api/project-potential/export?anio=2027&ejecutivo=' . urlencode('María Ortega'))->assertOk();
+        $this->assertStringContainsString('spreadsheetml', $res->headers->get('Content-Type'));
+        $this->assertStringContainsString('potencial_a_la_vista_maria_ortega_2027.xlsx', $res->headers->get('Content-Disposition'));
+
+        $this->givePermissions(['project list']);
+        $this->get('/api/project-potential/export')->assertForbidden();
+    }
+
     public function test_filtra_por_estado_externo(): void
     {
         $this->proyecto();

@@ -7,6 +7,7 @@ use App\Models\ProjectMarketingVariantReference;
 use App\Models\ProjectPotentialReference;
 use App\Models\ProjectStatusHistory;
 use App\Support\PotentialDispatchPlan;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -31,14 +32,20 @@ class ProjectPotentialService
             ->pluck('ejecutivo');
     }
 
+    /** Proyectos con todo lo que muestra el módulo; sin ejecutiva trae los de todas. */
+    public function query(?string $ejecutivo = null, ?string $estadoExterno = null): Builder
+    {
+        return Project::query()
+            ->when($ejecutivo, fn ($q) => $q->where('ejecutivo', $ejecutivo))
+            ->when($estadoExterno, fn ($q) => $q->where('estado_externo', $estadoExterno))
+            ->with($this->relaciones());
+    }
+
     public function projectsFor(string $ejecutivo, ?string $estadoExterno = null, ?int $anio = null): Collection
     {
         $anio ??= (int) now()->year;
 
-        return Project::query()
-            ->where('ejecutivo', $ejecutivo)
-            ->when($estadoExterno, fn ($q) => $q->where('estado_externo', $estadoExterno))
-            ->with($this->relaciones())
+        return $this->query($ejecutivo, $estadoExterno)
             ->orderByDesc('id')
             ->get()
             ->map(fn (Project $p) => $this->resumen($p) + [
@@ -196,7 +203,7 @@ class ProjectPotentialService
     }
 
     /** Mismo criterio que el formulario de creación: homologación manda sobre proactivo. */
-    private function origen(Project $project): string
+    public function origen(Project $project): string
     {
         return match (true) {
             (bool) $project->homologacion => 'homologacion',
