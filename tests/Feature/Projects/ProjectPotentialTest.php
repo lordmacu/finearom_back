@@ -291,7 +291,7 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertSame('En espera', $project->estado_externo);
     }
 
-    public function test_deseleccionar_borra_los_datos_y_sin_seleccion_el_potencial_queda_vacio(): void
+    public function test_deseleccionar_borra_los_datos_y_sin_seleccion_se_conserva_el_potencial_manual(): void
     {
         $project = $this->proyecto();
         $a = $this->refId($project, 'Ref A');
@@ -302,10 +302,12 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertSame([$b], ProjectPotentialReference::pluck('reference_id')->all());
         $this->assertEquals(50, $project->fresh()->potencial_anual_kg);
 
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => 999])->assertOk();
+
         $this->guardar($project, [])->assertOk();
         $this->assertSame(0, ProjectPotentialReference::count());
-        $this->assertNull($project->fresh()->potencial_anual_kg);
-        $this->assertNull($project->fresh()->potencial_anual_usd);
+        // Sin selección no hay suma que calcular: queda el valor manual
+        $this->assertEquals(999, $project->fresh()->potencial_anual_kg);
     }
 
     public function test_rechaza_referencias_de_otro_proyecto_y_valores_invalidos(): void

@@ -108,7 +108,10 @@ class ProjectPotentialService
                 ->whereNotIn('reference_id', collect($selecciones)->pluck('reference_id'))
                 ->delete();
 
-            $this->recalcularPotencial($project, $selecciones === []);
+            // Sin referencias seleccionadas se conserva el potencial manual
+            if ($selecciones !== []) {
+                $this->recalcularPotencial($project);
+            }
         });
 
         if ((float) $antes[0] !== (float) $project->potencial_anual_usd || (float) $antes[1] !== (float) $project->potencial_anual_kg) {
@@ -128,8 +131,8 @@ class ProjectPotentialService
     }
 
     /**
-     * Ajuste manual del potencial anual del proyecto. Se mantiene hasta el
-     * próximo guardado de las referencias seleccionadas, que lo recalcula.
+     * Ajuste manual del potencial anual del proyecto. Se mantiene hasta que se
+     * guarden referencias seleccionadas, que lo recalculan como su suma.
      *
      * @param array<string, float|null> $valores potencial_anual_usd y/o potencial_anual_kg
      */
@@ -153,7 +156,7 @@ class ProjectPotentialService
     }
 
     /** Potencial del proyecto = suma de las referencias seleccionadas (USD = Kg × precio). */
-    private function recalcularPotencial(Project $project, bool $sinSeleccion): void
+    private function recalcularPotencial(Project $project): void
     {
         $filas = $project->potentialReferences()->with('reference:id,precio')->get();
 
@@ -161,8 +164,8 @@ class ProjectPotentialService
         $usd = $filas->sum(fn ($s) => (float) $s->kg_anio * (float) $s->reference?->precio);
 
         $project->update([
-            'potencial_anual_kg'  => $sinSeleccion ? null : round($kg, 2),
-            'potencial_anual_usd' => $sinSeleccion ? null : round($usd, 2),
+            'potencial_anual_kg'  => round($kg, 2),
+            'potencial_anual_usd' => round($usd, 2),
         ]);
     }
 
