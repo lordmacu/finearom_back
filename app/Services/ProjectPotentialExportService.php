@@ -13,8 +13,8 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 /**
  * Descarga de Potencial a la vista con el formato de la hoja "POTENCIAL A LA
  * VISTA" del Excel de proyectos: una fila por referencia seleccionada, los
- * datos hasta COMENTARIOS O ESTADO y los meses del año elegido con su total
- * y probabilidad.
+ * datos hasta COMENTARIOS O ESTADO y, por cada año elegido, sus meses con el
+ * total y la probabilidad.
  */
 class ProjectPotentialExportService
 {
@@ -31,17 +31,18 @@ class ProjectPotentialExportService
         private readonly ProjectPotentialService $potential
     ) {}
 
-    public function build(?string $ejecutivo, ?string $estadoExterno, int $anio): Spreadsheet
+    /** @param int[] $anios */
+    public function build(?string $ejecutivo, ?string $estadoExterno, array $anios): Spreadsheet
     {
         $spreadsheet = new Spreadsheet();
         $sheet       = $spreadsheet->getActiveSheet();
         $sheet->setTitle('POTENCIAL A LA VISTA');
         $spreadsheet->getDefaultStyle()->getFont()->setName('Calibri')->setSize(10);
 
-        $encabezados = $this->encabezados($anio);
+        $encabezados = $this->encabezados($anios);
         $sheet->fromArray($encabezados, null, 'A1');
 
-        $filas = $this->filas($ejecutivo, $estadoExterno, $anio);
+        $filas = $this->filas($ejecutivo, $estadoExterno, $anios);
         if ($filas) {
             $sheet->fromArray($filas, null, 'A2', true);
         }
@@ -51,16 +52,19 @@ class ProjectPotentialExportService
         return $spreadsheet;
     }
 
-    private function encabezados(int $anio): array
+    private function encabezados(array $anios): array
     {
+        // La venta manual de la ventana es la del año en curso
+        $anioActual = now()->year;
+
         $base = [
             'EJECUTIVA', 'NÚMERO PROYECTO', 'CLIENTE', 'PROYECTO', 'REFERENCIA - CODIGO', 'SEGMENTO',
             'TIPO PROYECTO', 'KG AÑO', 'PRECIO USD', 'POTENCIAL ANUAL USD', 'FECHA PRIMER DESPACHO',
-            "VENTA {$anio}", 'FRECUENCIA COMPRA AÑO', 'SEGUIMIENTO',
+            "VENTA {$anioActual}", 'FRECUENCIA COMPRA AÑO', 'SEGUIMIENTO',
             'COMENTARIOS O ESTADO ( ABIERTO, GANADO, PERDIDO o CANCELADO.)',
         ];
 
-        return array_merge($base, $this->encabezadosBloque($anio));
+        return array_merge($base, ...array_map(fn ($anio) => $this->encabezadosBloque($anio), $anios));
     }
 
     private function encabezadosBloque(int $anio): array
@@ -74,7 +78,7 @@ class ProjectPotentialExportService
         return array_merge($columnas, ["TOTAL VENTA ESTIMADA AÑO {$anio} USD", 'PROBABILIDAD']);
     }
 
-    private function filas(?string $ejecutivo, ?string $estadoExterno, int $anio): array
+    private function filas(?string $ejecutivo, ?string $estadoExterno, array $anios): array
     {
         $filas = [];
 
@@ -115,14 +119,16 @@ class ProjectPotentialExportService
                         mb_strtoupper($s->estado),
                     ];
 
-                    $plan = PotentialDispatchPlan::for($kg, $precio, $s->frecuencia_compra, $s->fecha_primer_despacho, $anio);
-                    foreach (range(0, 11) as $i) {
-                        $mes    = $plan['meses'][$i] ?? null;
-                        $fila[] = $mes && $mes['kg'] > 0 ? $mes['kg'] : null;
-                        $fila[] = $mes && $mes['kg'] > 0 ? $mes['usd'] : null;
+                    foreach ($anios as $anio) {
+                        $plan = PotentialDispatchPlan::for($kg, $precio, $s->frecuencia_compra, $s->fecha_primer_despacho, $anio);
+                        foreach (range(0, 11) as $i) {
+                            $mes    = $plan['meses'][$i] ?? null;
+                            $fila[] = $mes && $mes['kg'] > 0 ? $mes['kg'] : null;
+                            $fila[] = $mes && $mes['kg'] > 0 ? $mes['usd'] : null;
+                        }
+                        $fila[] = $plan['total_usd'] ?? null;
+                        $fila[] = $probabilidad;
                     }
-                    $fila[] = $plan['total_usd'] ?? null;
-                    $fila[] = $probabilidad;
 
                     $filas[] = $fila;
                 }

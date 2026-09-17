@@ -5,11 +5,11 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ProjectPotential\ProjectPotentialExportRequest;
 use App\Http\Requests\ProjectPotential\ProjectPotentialIndexRequest;
 use App\Http\Requests\ProjectPotential\ProjectPotentialSelectionsRequest;
+use App\Http\Requests\ProjectPotential\ProjectPotentialShowRequest;
 use App\Models\Project;
 use App\Services\ProjectPotentialExportService;
 use App\Services\ProjectPotentialService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -31,9 +31,9 @@ class ProjectPotentialController extends Controller
 
     public function index(ProjectPotentialIndexRequest $request): JsonResponse
     {
-        $anio     = (int) ($request->validated('anio') ?? now()->year);
-        $projects = $this->service->projectsFor($request->validated('ejecutivo'), $request->validated('estado_externo'), $anio);
-        $planes   = $projects->flatMap(fn ($p) => $p['referencias']->pluck('plan'))->filter();
+        $anios    = $request->anios();
+        $projects = $this->service->projectsFor($request->validated('ejecutivo'), $request->validated('estado_externo'), $anios);
+        $planes   = $projects->flatMap(fn ($p) => $p['referencias']->flatMap(fn ($r) => $r['planes']));
 
         return response()->json([
             'success' => true,
@@ -44,24 +44,20 @@ class ProjectPotentialController extends Controller
                 'total_seleccionadas' => $projects->sum(fn ($p) => $p['referencias']->where('seleccionada', true)->count()),
                 'total_potencial_usd' => round((float) $projects->sum('potencial_anual_usd'), 2),
                 'total_potencial_kg'  => round((float) $projects->sum('potencial_anual_kg'), 2),
-                'anio'                => $anio,
-                // Venta estimada del año según el plan de despachos, total y por mes
-                'total_anio_kg'       => round((float) $planes->sum('total_kg'), 2),
-                'total_anio_usd'      => round((float) $planes->sum('total_usd'), 2),
-                'meses'               => collect(range(1, 12))->map(fn ($mes) => [
-                    'mes' => $mes,
-                    'kg'  => round((float) $planes->sum(fn ($pl) => $pl['meses'][$mes - 1]['kg']), 2),
-                    'usd' => round((float) $planes->sum(fn ($pl) => $pl['meses'][$mes - 1]['usd'] ?? 0), 2),
-                ]),
+                'anios'               => $anios,
+                // Venta estimada por año según el plan de despachos
+                'por_anio'            => collect($anios)->map(fn ($anio) => [
+                    'anio'      => $anio,
+                    'total_kg'  => round((float) $planes->where('anio', $anio)->sum('total_kg'), 2),
+                    'total_usd' => round((float) $planes->where('anio', $anio)->sum('total_usd'), 2),
+                ])->values(),
             ],
         ]);
     }
 
-    public function show(Request $request, Project $project): JsonResponse
+    public function show(ProjectPotentialShowRequest $request, Project $project): JsonResponse
     {
-        $anio = $request->integer('anio') ?: null;
-
-        return response()->json(['success' => true, 'data' => $this->service->detail($project, $anio)]);
+        return response()->json(['success' => true, 'data' => $this->service->detail($project, $request->anios())]);
     }
 
     public function updateSelections(ProjectPotentialSelectionsRequest $request, Project $project): JsonResponse
@@ -70,7 +66,7 @@ class ProjectPotentialController extends Controller
             $project,
             $request->validated('selecciones'),
             auth()->user()->name,
-            $request->validated('anio'),
+            $request->anios(),
         );
 
         return response()->json([
@@ -82,11 +78,11 @@ class ProjectPotentialController extends Controller
 
     public function export(ProjectPotentialExportRequest $request): StreamedResponse
     {
-        $anio      = (int) ($request->validated('anio') ?? now()->year);
+        $anios     = $request->anios();
         $ejecutivo = $request->validated('ejecutivo');
-        $writer    = new Xlsx($this->exportService->build($ejecutivo, $request->validated('estado_externo'), $anio));
+        $writer    = new Xlsx($this->exportService->build($ejecutivo, $request->validated('estado_externo'), $anios));
 
-        $fileName = 'potencial_a_la_vista_' . ($ejecutivo ? Str::slug($ejecutivo, '_') . '_' : '') . $anio . '.xlsx';
+        $fileName = 'potencial_a_la_vista_' . ($ejecutivo ? Str::slug($ejecutivo, '_') . '_' : '') . implode('-', $anios) . '.xlsx';
 
         return new StreamedResponse(function () use ($writer) {
             $writer->save('php://output');

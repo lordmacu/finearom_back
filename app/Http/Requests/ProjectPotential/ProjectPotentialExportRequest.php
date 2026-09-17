@@ -6,6 +6,8 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class ProjectPotentialExportRequest extends FormRequest
 {
+    use ResolvesPotentialYears;
+
     public function authorize(): bool
     {
         return true;
@@ -14,10 +16,9 @@ class ProjectPotentialExportRequest extends FormRequest
     public function rules(): array
     {
         // Los mismos filtros del listado; sin ejecutiva se descargan todas
-        return [
+        return array_merge($this->yearRules(), [
             'ejecutivo'      => ['nullable', 'string', 'max:255'],
             'estado_externo' => ['nullable', 'in:En espera,Ganado,Perdido'],
-            'anio'           => ['nullable', 'integer', 'min:2000', 'max:2100'],
-        ];
+        ]);
     }
 }

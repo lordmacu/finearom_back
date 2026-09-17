@@ -17,7 +17,7 @@ use Illuminate\Validation\ValidationException;
  * Desarrollo creó y su precio. La ejecutiva marca cuáles seleccionó el cliente
  * y llena el potencial de cada una; el potencial anual del proyecto (USD y Kg)
  * pasa a ser la suma de las seleccionadas. Cada seleccionada trae su plan de
- * despachos mes a mes para el año pedido (PotentialDispatchPlan).
+ * despachos mes a mes para cada año pedido (PotentialDispatchPlan).
  */
 class ProjectPotentialService
 {
@@ -41,34 +41,34 @@ class ProjectPotentialService
             ->with($this->relaciones());
     }
 
-    public function projectsFor(string $ejecutivo, ?string $estadoExterno = null, ?int $anio = null): Collection
+    /** @param int[] $anios */
+    public function projectsFor(string $ejecutivo, ?string $estadoExterno, array $anios): Collection
     {
-        $anio ??= (int) now()->year;
-
         return $this->query($ejecutivo, $estadoExterno)
             ->orderByDesc('id')
             ->get()
             ->map(fn (Project $p) => $this->resumen($p) + [
-                'referencias' => $this->referencias($p, $anio)->map(fn ($r) => [
+                'referencias' => $this->referencias($p, $anios)->map(fn ($r) => [
                     'id'           => $r['id'],
                     'variante'     => $r['variante'],
                     'referencia'   => $r['referencia'],
                     'codigo'       => $r['codigo'],
                     'precio'       => $r['precio'],
                     'seleccionada' => $r['seleccionada'],
-                    'plan'         => $r['plan'],
+                    'planes'       => $r['planes'],
                 ])->values(),
             ]);
     }
 
     /** Detalle para la ventana: el proyecto y todas sus referencias con el potencial de las seleccionadas. */
-    public function detail(Project $project, ?int $anio = null): array
+    /** @param int[] $anios */
+    public function detail(Project $project, array $anios): array
     {
         $project->load($this->relaciones());
 
         return $this->resumen($project) + [
-            'anio'        => $anio ??= (int) now()->year,
-            'referencias' => $this->referencias($project, $anio)->values(),
+            'anios'       => $anios,
+            'referencias' => $this->referencias($project, $anios)->values(),
         ];
     }
 
@@ -78,7 +78,7 @@ class ProjectPotentialService
      *
      * @param array<int, array<string, mixed>> $selecciones
      */
-    public function saveSelections(Project $project, array $selecciones, string $executive, ?int $anio = null): array
+    public function saveSelections(Project $project, array $selecciones, string $executive, array $anios): array
     {
         $refsDelProyecto = $project->marketingVariants()
             ->with('references')
@@ -123,7 +123,7 @@ class ProjectPotentialService
             );
         }
 
-        return $this->detail($project->fresh(), $anio);
+        return $this->detail($project->fresh(), $anios);
     }
 
     /** Potencial del proyecto = suma de las referencias seleccionadas (USD = Kg × precio). */
@@ -171,10 +171,11 @@ class ProjectPotentialService
         ];
     }
 
-    private function referencias(Project $p, int $anio): Collection
+    /** @param int[] $anios */
+    private function referencias(Project $p, array $anios): Collection
     {
         return $p->marketingVariants->flatMap(
-            fn ($v) => $v->references->map(function (ProjectMarketingVariantReference $r) use ($v, $anio) {
+            fn ($v) => $v->references->map(function (ProjectMarketingVariantReference $r) use ($v, $anios) {
                 $s      = $r->potential;
                 $precio = $this->decimal($r->precio);
                 $kg     = $this->decimal($s?->kg_anio);
@@ -186,7 +187,12 @@ class ProjectPotentialService
                     'codigo'       => $r->codigo,
                     'precio'       => $precio,
                     'seleccionada' => $s !== null,
-                    'plan'         => $s ? PotentialDispatchPlan::for($s->kg_anio, $r->precio, $s->frecuencia_compra, $s->fecha_primer_despacho, $anio) : null,
+                    // Un plan por año pedido (null si la referencia no está seleccionada o le faltan datos)
+                    'planes'       => $s ? collect($anios)
+                        ->map(fn ($anio) => PotentialDispatchPlan::for($s->kg_anio, $r->precio, $s->frecuencia_compra, $s->fecha_primer_despacho, $anio))
+                        ->filter()
+                        ->values()
+                        ->all() : [],
                     'potencial'    => $s ? [
                         'kg_anio'               => $kg,
                         'potencial_anual_usd'   => $kg !== null && $precio !== null ? round($kg * $precio, 2) : null,

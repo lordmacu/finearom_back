@@ -8,6 +8,8 @@ use Illuminate\Validation\Rule;
 
 class ProjectPotentialSelectionsRequest extends FormRequest
 {
+    use ResolvesPotentialYears;
+
     public function authorize(): bool
     {
         return true;
@@ -15,9 +17,8 @@ class ProjectPotentialSelectionsRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
+        return array_merge($this->yearRules(), [
             // 'present': un array vacío deja el proyecto sin referencias seleccionadas
-            'anio'                                => ['nullable', 'integer', 'min:2000', 'max:2100'],
             'selecciones'                         => ['present', 'array'],
             'selecciones.*.reference_id'          => ['required', 'integer', 'distinct'],
             'selecciones.*.kg_anio'               => ['nullable', 'numeric', 'min:0'],
@@ -27,7 +28,7 @@ class ProjectPotentialSelectionsRequest extends FormRequest
             'selecciones.*.seguimiento'           => ['nullable', 'string', 'max:2000'],
             'selecciones.*.estado'                => ['required', Rule::in(ProjectPotentialReference::ESTADOS)],
             'selecciones.*.probabilidad'          => ['nullable', Rule::in(ProjectPotentialReference::PROBABILIDADES)],
-        ];
+        ]);
     }
 
     public function messages(): array

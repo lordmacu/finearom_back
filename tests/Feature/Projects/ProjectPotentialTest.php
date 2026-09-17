@@ -106,21 +106,24 @@ class ProjectPotentialTest extends ProjectMailTestCase
             'kg_anio' => 1200, 'frecuencia_compra' => 'trimestral', 'fecha_primer_despacho' => '2026-06-01',
         ])])->assertOk();
 
-        $res = $this->getJson('/api/project-potential?anio=2026&ejecutivo=' . urlencode('María Ortega'))->assertOk();
+        $res = $this->getJson('/api/project-potential?anios[]=2027&anios[]=2026&ejecutivo=' . urlencode('María Ortega'))->assertOk();
 
         $refs = collect($res->json('data.0.referencias'))->keyBy('referencia');
-        $this->assertNull($refs['Ref A']['plan']);
-        $this->assertSame(3, $refs['Ref B']['plan']['despachos']);
-        $this->assertEquals(300, $refs['Ref B']['plan']['meses'][5]['kg']);
-        $this->assertEquals(18000, $refs['Ref B']['plan']['total_usd']);
-        $this->assertSame(2026, $res->json('meta.anio'));
-        $this->assertEquals(900, $res->json('meta.total_anio_kg'));
-        $this->assertEquals(18000, $res->json('meta.total_anio_usd'));
-        $this->assertEquals(6000, $res->json('meta.meses.8.usd'));
-        $this->assertEquals(0, $res->json('meta.meses.0.kg'));
+        $this->assertSame([], $refs['Ref A']['planes']);
+        [$plan2026, $plan2027] = $refs['Ref B']['planes'];
+        $this->assertSame(2026, $plan2026['anio']);
+        $this->assertSame(3, $plan2026['despachos']);
+        $this->assertEquals(300, $plan2026['meses'][5]['kg']);
+        $this->assertEquals(18000, $plan2026['total_usd']);
+        $this->assertSame(4, $plan2027['despachos']);
+        // Años ordenados y con su venta estimada
+        $this->assertSame([2026, 2027], $res->json('meta.anios'));
+        $this->assertEquals(['anio' => 2026, 'total_kg' => 900, 'total_usd' => 18000], $res->json('meta.por_anio.0'));
+        $this->assertEquals(['anio' => 2027, 'total_kg' => 1200, 'total_usd' => 24000], $res->json('meta.por_anio.1'));
 
-        $siguiente = $this->getJson('/api/project-potential?anio=2027&ejecutivo=' . urlencode('María Ortega'))->assertOk();
-        $this->assertEquals(1200, $siguiente->json('meta.total_anio_kg'));
+        // Un solo año con el parámetro antiguo
+        $solo = $this->getJson('/api/project-potential?anio=2027&ejecutivo=' . urlencode('María Ortega'))->assertOk();
+        $this->assertSame([2027], $solo->json('meta.anios'));
     }
 
     public function test_el_detalle_calcula_el_plan_para_el_anio_pedido(): void
@@ -130,10 +133,10 @@ class ProjectPotentialTest extends ProjectMailTestCase
             'kg_anio' => 600, 'frecuencia_compra' => 'semestral', 'fecha_primer_despacho' => '2026-09-01',
         ])])->assertOk();
 
-        $res = $this->getJson("/api/project-potential/projects/{$project->id}?anio=2027")->assertOk();
+        $res = $this->getJson("/api/project-potential/projects/{$project->id}?anios[]=2027")->assertOk();
 
-        $this->assertSame(2027, $res->json('data.anio'));
-        $plan = collect($res->json('data.referencias'))->firstWhere('referencia', 'Ref A')['plan'];
+        $this->assertSame([2027], $res->json('data.anios'));
+        $plan = collect($res->json('data.referencias'))->firstWhere('referencia', 'Ref A')['planes'][0];
         $this->assertEquals([3 => 300, 9 => 300], collect($plan['meses'])->filter(fn ($m) => $m['kg'] > 0)->pluck('kg', 'mes')->all());
     }
 
@@ -148,14 +151,14 @@ class ProjectPotentialTest extends ProjectMailTestCase
         ])])->assertOk();
 
         $sheet = app(\App\Services\ProjectPotentialExportService::class)
-            ->build('María Ortega', null, 2026)
+            ->build('María Ortega', null, [2026])
             ->getActiveSheet();
         $fila = fn (int $n) => $sheet->rangeToArray("A{$n}:AP{$n}", null, true, false)[0];
 
         $encabezado = $fila(1);
         $this->assertSame('EJECUTIVA', $encabezado[0]);
         $this->assertSame('REFERENCIA - CODIGO', $encabezado[4]);
-        $this->assertSame('VENTA 2026', $encabezado[11]);
+        $this->assertSame('VENTA ' . now()->year, $encabezado[11]);
         $this->assertSame('ENERO KG 2026', $encabezado[15]);
         $this->assertSame('TOTAL VENTA ESTIMADA AÑO 2026 USD', $encabezado[39]);
         $this->assertSame('PROBABILIDAD', $encabezado[40]);
@@ -177,6 +180,29 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertNull($fila(3)[0]);         // una sola fila: Ref A no está seleccionada, el otro proyecto es ajeno
     }
 
+    public function test_la_descarga_con_varios_anios_agrega_un_bloque_de_meses_por_anio(): void
+    {
+        $project = $this->proyecto();
+        $this->guardar($project, [$this->seleccion($this->refId($project, 'Ref B'), [
+            'kg_anio' => 1200, 'frecuencia_compra' => 'trimestral', 'fecha_primer_despacho' => '2026-06-01', 'probabilidad' => 'media',
+        ])])->assertOk();
+
+        $sheet = app(\App\Services\ProjectPotentialExportService::class)
+            ->build('María Ortega', null, [2026, 2027])
+            ->getActiveSheet();
+        [$encabezado, $datos] = $sheet->rangeToArray('A1:BP2', null, true, false);
+
+        $this->assertSame('ENERO KG 2026', $encabezado[15]);
+        $this->assertSame('ENERO KG 2027', $encabezado[41]);
+        $this->assertSame('TOTAL VENTA ESTIMADA AÑO 2027 USD', $encabezado[65]);
+        $this->assertSame('PROBABILIDAD', $encabezado[66]);
+        $this->assertNull($encabezado[67]);
+        $this->assertEquals(18000, $datos[39]); // total 2026
+        $this->assertEquals(300, $datos[45]);   // marzo 2027 Kg
+        $this->assertEquals(24000, $datos[65]); // total 2027
+        $this->assertSame('MEDIA', $datos[66]);
+    }
+
     public function test_el_endpoint_de_descarga_aplica_filtros_y_permisos(): void
     {
         $this->getJson('/api/project-potential/export?estado_externo=Otro')->assertStatus(422);
@@ -184,6 +210,9 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $res = $this->get('/api/project-potential/export?anio=2027&ejecutivo=' . urlencode('María Ortega'))->assertOk();
         $this->assertStringContainsString('spreadsheetml', $res->headers->get('Content-Type'));
         $this->assertStringContainsString('potencial_a_la_vista_maria_ortega_2027.xlsx', $res->headers->get('Content-Disposition'));
+
+        $varios = $this->get('/api/project-potential/export?anios[]=2027&anios[]=2026')->assertOk();
+        $this->assertStringContainsString('potencial_a_la_vista_2026-2027.xlsx', $varios->headers->get('Content-Disposition'));
 
         $this->givePermissions(['project list']);
         $this->get('/api/project-potential/export')->assertForbidden();

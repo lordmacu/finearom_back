@@ -6,6 +6,8 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class ProjectPotentialIndexRequest extends FormRequest
 {
+    use ResolvesPotentialYears;
+
     public function authorize(): bool
     {
         return true;
@@ -13,11 +15,10 @@ class ProjectPotentialIndexRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
+        return array_merge($this->yearRules(), [
             'ejecutivo'      => ['required', 'string', 'max:255'],
             'estado_externo' => ['nullable', 'in:En espera,Ganado,Perdido'],
-            'anio'           => ['nullable', 'integer', 'min:2000', 'max:2100'],
-        ];
+        ]);
     }
 
     public function messages(): array
