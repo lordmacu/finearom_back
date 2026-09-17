@@ -1,0 +1,150 @@
+<?php
+
+namespace Tests\Feature\Projects;
+
+use App\Models\Project;
+use App\Models\ProjectMarketingVariant;
+use App\Models\ProjectMarketingVariantReference;
+use App\Models\ProjectStatusHistory;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+class ProjectPotentialTest extends ProjectMailTestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Schema::create('prospects', function (Blueprint $t) {
+            $t->id();
+            $t->string('nombre');
+            $t->timestamps();
+        });
+
+        $this->givePermissions(['project potential list', 'project potential edit']);
+    }
+
+    private function projectConReferencia(string $ejecutivo = 'María Ortega', array $attrs = []): ProjectMarketingVariantReference
+    {
+        $project = Project::create(array_merge([
+            'nombre'             => 'Proyecto Potencial',
+            'tipo'               => 'Desarrollo',
+            'nombre_prospecto'   => 'Prospecto P',
+            'ejecutivo'          => $ejecutivo,
+            'estado_externo'     => 'En espera',
+            'fecha_creacion'     => today(),
+            'potencial_anual_kg' => 500,
+        ], $attrs));
+
+        $variant = ProjectMarketingVariant::create(['project_id' => $project->id, 'nombre' => 'Var 1']);
+
+        return ProjectMarketingVariantReference::create([
+            'variant_id' => $variant->id,
+            'referencia' => 'Ref A',
+            'codigo'     => 'C-1',
+            'precio'     => 12.5,
+        ]);
+    }
+
+    public function test_lista_solo_los_proyectos_de_la_ejecutiva_con_sus_referencias(): void
+    {
+        $this->projectConReferencia('María Ortega');
+        $this->projectConReferencia('Otra Ejecutiva');
+
+        $res = $this->getJson('/api/project-potential?ejecutivo=' . urlencode('María Ortega'))->assertOk();
+
+        $this->assertCount(1, $res->json('data'));
+        $this->assertSame('Desarrollo', $res->json('data.0.tipo'));
+        $this->assertSame('Prospecto P', $res->json('data.0.cliente'));
+        $this->assertEquals(500, $res->json('data.0.potencial_anual_kg'));
+        $this->assertSame('Ref A', $res->json('data.0.referencias.0.referencia'));
+        $this->assertSame('C-1', $res->json('data.0.referencias.0.codigo'));
+        $this->assertEquals(12.5, $res->json('data.0.referencias.0.precio'));
+        $this->assertEquals(500, $res->json('meta.total_potencial_kg'));
+    }
+
+    public function test_filtra_por_estado_externo(): void
+    {
+        $this->projectConReferencia('María Ortega');
+        $this->projectConReferencia('María Ortega', ['estado_externo' => 'Ganado']);
+
+        $res = $this->getJson('/api/project-potential?ejecutivo=' . urlencode('María Ortega') . '&estado_externo=Ganado')->assertOk();
+
+        $this->assertCount(1, $res->json('data'));
+        $this->assertSame('Ganado', $res->json('data.0.estado_externo'));
+    }
+
+    public function test_exige_la_ejecutiva(): void
+    {
+        $this->getJson('/api/project-potential')->assertStatus(422)->assertJsonValidationErrors('ejecutivo');
+    }
+
+    public function test_lista_las_ejecutivas(): void
+    {
+        $this->projectConReferencia('María Ortega');
+        $this->projectConReferencia('Ana Pérez');
+
+        $this->getJson('/api/project-potential/ejecutivas')
+            ->assertOk()
+            ->assertExactJson(['success' => true, 'data' => ['Ana Pérez', 'María Ortega']]);
+    }
+
+    public function test_edita_el_precio_real_de_la_referencia_y_lo_registra_en_el_historial(): void
+    {
+        $ref = $this->projectConReferencia();
+
+        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => 20])
+            ->assertOk()
+            ->assertJsonPath('data.precio', 20);
+
+        $this->assertEquals(20, $ref->fresh()->precio);
+        $this->assertStringContainsString('Precio referencia Ref A', ProjectStatusHistory::first()->descripcion);
+    }
+
+    public function test_edita_el_potencial_real_del_proyecto_y_lo_registra_en_el_historial(): void
+    {
+        $project = $this->projectConReferencia()->variant->project;
+
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => 750.5])->assertOk();
+
+        $this->assertEquals(750.5, $project->fresh()->potencial_anual_kg);
+        $this->assertStringContainsString('Potencial anual (Kg)', ProjectStatusHistory::first()->descripcion);
+    }
+
+    public function test_guardar_el_mismo_valor_no_ensucia_el_historial(): void
+    {
+        $ref = $this->projectConReferencia();
+
+        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => 12.5])->assertOk();
+
+        $this->assertSame(0, ProjectStatusHistory::count());
+    }
+
+    public function test_permite_vaciar_el_valor_y_rechaza_negativos(): void
+    {
+        $ref = $this->projectConReferencia();
+
+        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => null])->assertOk();
+        $this->assertNull($ref->fresh()->precio);
+
+        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => -3])
+            ->assertStatus(422)->assertJsonValidationErrors('precio');
+    }
+
+    public function test_sin_permiso_de_edicion_solo_puede_consultar(): void
+    {
+        $ref = $this->projectConReferencia();
+        $this->givePermissions(['project potential list']);
+
+        $this->getJson('/api/project-potential?ejecutivo=' . urlencode('María Ortega'))->assertOk();
+        $this->patchJson("/api/project-potential/references/{$ref->id}", ['precio' => 30])->assertForbidden();
+        $this->patchJson("/api/project-potential/projects/{$ref->variant->project_id}", ['potencial_anual_kg' => 1])->assertForbidden();
+    }
+
+    public function test_sin_permiso_no_puede_consultar(): void
+    {
+        $this->givePermissions(['project list']);
+
+        $this->getJson('/api/project-potential?ejecutivo=X')->assertForbidden();
+    }
+}

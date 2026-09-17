@@ -49,6 +49,7 @@ class ProjectMarketingVariantReferenceController extends Controller
                     'codigo'     => $referencia['codigo'] ?? null,
                     'aplicacion' => $referencia['aplicacion'] ?? null,
                     'dosis'      => $referencia['dosis'] ?? null,
+                    'precio'     => $referencia['precio'] ?? null,
                     'orden'      => $orden,
                 ]);
             }

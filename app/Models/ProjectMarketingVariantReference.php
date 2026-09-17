@@ -18,11 +18,13 @@ class ProjectMarketingVariantReference extends Model
         'codigo',
         'aplicacion',
         'dosis',
+        'precio',
         'orden',
     ];
 
     protected $casts = [
         'dosis' => 'decimal:2',
+        'precio' => 'decimal:2',
         'orden' => 'integer',
     ];
 

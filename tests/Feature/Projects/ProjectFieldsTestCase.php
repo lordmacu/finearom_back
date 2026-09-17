@@ -160,6 +160,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->decimal('rango_min', 12, 2)->nullable();
             $t->decimal('rango_max', 12, 2)->nullable();
             $t->decimal('volumen', 12, 2)->nullable();
+            $t->decimal('potencial_anual_kg', 12, 2)->nullable();
             $t->decimal('precio', 12, 2)->nullable();
             $t->decimal('dosis', 8, 2)->nullable();
             $t->decimal('costo_perfumacion_especifico', 12, 2)->nullable();
@@ -324,6 +325,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->string('codigo', 100)->nullable();
             $t->string('aplicacion', 200)->nullable();
             $t->decimal('dosis', 8, 2)->nullable();
+            $t->decimal('precio', 12, 2)->nullable();
             $t->integer('orden')->default(0);
             $t->timestamps();
         });

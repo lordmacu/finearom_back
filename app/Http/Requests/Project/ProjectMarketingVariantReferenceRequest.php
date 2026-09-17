@@ -25,6 +25,7 @@ class ProjectMarketingVariantReferenceRequest extends FormRequest
             'referencias.*.codigo'       => ['nullable', 'string', 'max:100'],
             'referencias.*.aplicacion'   => ['nullable', 'string', 'max:200'],
             'referencias.*.dosis'        => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'referencias.*.precio'       => ['nullable', 'numeric', 'min:0'],
         ];
     }
 
@@ -36,6 +37,7 @@ class ProjectMarketingVariantReferenceRequest extends FormRequest
             'referencias.max'         => "Una variante admite máximo {$max} referencias.",
             'referencias.present'     => 'Falta el listado de referencias.',
             'referencias.*.dosis.max' => 'La dosis es un porcentaje: no puede pasar de 100.',
+            'referencias.*.precio.min' => 'El precio no puede ser negativo.',
         ];
     }
 }

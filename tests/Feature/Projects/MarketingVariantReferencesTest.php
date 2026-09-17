@@ -51,6 +51,32 @@ class MarketingVariantReferencesTest extends ProjectFieldsTestCase
         $this->assertSame(3, DB::table('project_marketing_variant_references')->count());
     }
 
+    public function test_guarda_el_precio_de_cada_referencia(): void
+    {
+        $project = $this->project();
+        $id      = $this->variante($project);
+
+        $data = $this->putJson("/api/projects/{$project->id}/marketing-variants/{$id}/references", [
+            'referencias' => [
+                $this->referencia(['referencia' => 'Con precio', 'precio' => 18.75]),
+                $this->referencia(['referencia' => 'Sin precio']),
+            ],
+        ])->assertOk()->json('data');
+
+        $this->assertEquals(18.75, $data['references'][0]['precio']);
+        $this->assertNull($data['references'][1]['precio']);
+    }
+
+    public function test_rechaza_precio_negativo(): void
+    {
+        $project = $this->project();
+        $id      = $this->variante($project);
+
+        $this->putJson("/api/projects/{$project->id}/marketing-variants/{$id}/references", [
+            'referencias' => [$this->referencia(['precio' => -1])],
+        ])->assertStatus(422)->assertJsonValidationErrors('referencias.0.precio');
+    }
+
     public function test_reemplaza_las_referencias_anteriores(): void
     {
         $project = $this->project();

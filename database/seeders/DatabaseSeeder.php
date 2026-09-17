@@ -63,6 +63,8 @@ class DatabaseSeeder extends Seeder
             'project catalog manage',
             'project variant commercial',
             'project variant technical',
+            'project potential list',
+            'project potential edit',
             'client visit list',
             'client visit create',
             'client visit edit',
@@ -91,6 +93,7 @@ class DatabaseSeeder extends Seeder
                     'project list', 'project create', 'project edit', 'project delete',
                     'project external status', 'project deliver', 'project factor edit',
                     'project catalog manage',
+                    'project potential list', 'project potential edit',
                     'client visit list', 'client visit create', 'client visit edit', 'client visit delete',
                 ]);
             }
