@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Cache;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
@@ -33,9 +34,17 @@ class ProjectPotentialPermissionSeeder extends Seeder
             Permission::findOrCreate($name, 'web');
         }
 
-        Role::whereIn('name', self::ROLES)->where('guard_name', 'web')->get()
-            ->each(fn (Role $role) => $role->givePermissionTo(self::PERMISSIONS));
+        $roles = Role::whereIn('name', self::ROLES)->where('guard_name', 'web')->get();
+        $roles->each(fn (Role $role) => $role->givePermissionTo(self::PERMISSIONS));
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        // /api/user cachea 1 h los permisos por usuario y los eventos de Spatie
+        // están apagados (ClearUserPermissionsCache no corre): sin esto el menú
+        // no muestra el módulo hasta que vence esa caché.
+        $roles->flatMap->users->unique('id')->each(function ($user) {
+            Cache::forget("user.{$user->id}.permissions");
+            Cache::forget("user.{$user->id}.roles");
+        });
     }
 }
