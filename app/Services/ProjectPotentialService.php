@@ -15,8 +15,9 @@ use Illuminate\Validation\ValidationException;
 /**
  * Potencial a la vista: proyectos de una ejecutiva con las referencias que
  * Desarrollo creó y su precio. La ejecutiva marca cuáles seleccionó el cliente
- * y llena el potencial de cada una; el potencial anual del proyecto (USD y Kg)
- * pasa a ser la suma de las seleccionadas. Cada seleccionada trae su plan de
+ * y llena el potencial de cada una; al guardarlas, el potencial anual del
+ * proyecto (USD y Kg) se recalcula como la suma de las seleccionadas. Entre
+ * guardado y guardado también se puede ajustar a mano (updatePotential). Cada seleccionada trae su plan de
  * despachos mes a mes para cada año pedido (PotentialDispatchPlan).
  */
 class ProjectPotentialService
@@ -124,6 +125,31 @@ class ProjectPotentialService
         }
 
         return $this->detail($project->fresh(), $anios);
+    }
+
+    /**
+     * Ajuste manual del potencial anual del proyecto. Se mantiene hasta el
+     * próximo guardado de las referencias seleccionadas, que lo recalcula.
+     *
+     * @param array<string, float|null> $valores potencial_anual_usd y/o potencial_anual_kg
+     */
+    public function updatePotential(Project $project, array $valores, string $executive): Project
+    {
+        $etiquetas = [
+            'potencial_anual_usd' => 'Potencial anual (USD)',
+            'potencial_anual_kg'  => 'Potencial anual (Kg)',
+        ];
+
+        $antes = $project->only(array_keys($valores));
+        $project->update($valores);
+
+        foreach ($valores as $campo => $nuevo) {
+            if (($antes[$campo] === null ? null : (float) $antes[$campo]) !== $nuevo) {
+                $this->log($project->id, "{$etiquetas[$campo]} (manual): {$this->fmt($antes[$campo])} → {$this->fmt($nuevo)}", $executive);
+            }
+        }
+
+        return $project;
     }
 
     /** Potencial del proyecto = suma de las referencias seleccionadas (USD = Kg × precio). */

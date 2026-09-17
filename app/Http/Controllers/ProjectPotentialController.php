@@ -6,6 +6,7 @@ use App\Http\Requests\ProjectPotential\ProjectPotentialExportRequest;
 use App\Http\Requests\ProjectPotential\ProjectPotentialIndexRequest;
 use App\Http\Requests\ProjectPotential\ProjectPotentialSelectionsRequest;
 use App\Http\Requests\ProjectPotential\ProjectPotentialShowRequest;
+use App\Http\Requests\ProjectPotential\ProjectPotentialUpdateRequest;
 use App\Models\Project;
 use App\Services\ProjectPotentialExportService;
 use App\Services\ProjectPotentialService;
@@ -21,7 +22,7 @@ class ProjectPotentialController extends Controller
         private readonly ProjectPotentialExportService $exportService,
     ) {
         $this->middleware('can:project potential list')->only(['index', 'ejecutivas', 'show', 'export']);
-        $this->middleware('can:project potential edit')->only(['updateSelections']);
+        $this->middleware('can:project potential edit')->only(['updateSelections', 'updateProject']);
     }
 
     public function ejecutivas(): JsonResponse
@@ -58,6 +59,24 @@ class ProjectPotentialController extends Controller
     public function show(ProjectPotentialShowRequest $request, Project $project): JsonResponse
     {
         return response()->json(['success' => true, 'data' => $this->service->detail($project, $request->anios())]);
+    }
+
+    public function updateProject(ProjectPotentialUpdateRequest $request, Project $project): JsonResponse
+    {
+        $valores = array_map(fn ($v) => $v === null ? null : (float) $v, $request->validated());
+        $project = $this->service->updatePotential($project, $valores, auth()->user()->name);
+
+        $decimal = fn ($v) => $v !== null ? (float) $v : null;
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'                  => $project->id,
+                'potencial_anual_usd' => $decimal($project->potencial_anual_usd),
+                'potencial_anual_kg'  => $decimal($project->potencial_anual_kg),
+            ],
+            'message' => 'Potencial actualizado',
+        ]);
     }
 
     public function updateSelections(ProjectPotentialSelectionsRequest $request, Project $project): JsonResponse

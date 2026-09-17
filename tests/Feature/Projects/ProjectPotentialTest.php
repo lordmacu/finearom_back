@@ -341,13 +341,49 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->getJson('/api/project-potential?ejecutivo=X')->assertForbidden();
     }
 
-    public function test_el_precio_y_el_potencial_no_se_editan_a_mano_desde_el_modulo(): void
+    public function test_el_precio_de_las_referencias_no_se_edita_desde_el_modulo(): void
     {
         $project = $this->proyecto();
         $ref     = $this->refId($project, 'Ref A');
 
         $this->patchJson("/api/project-potential/references/{$ref}", ['precio' => 30])->assertNotFound();
-        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => 1])->assertStatus(405);
-        $this->assertNull($project->fresh()->potencial_anual_kg);
+    }
+
+    public function test_el_potencial_se_ajusta_a_mano_hasta_el_siguiente_guardado_de_referencias(): void
+    {
+        $project = $this->proyecto();
+
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_usd' => 12345.67])
+            ->assertOk()
+            ->assertJsonPath('data.potencial_anual_usd', 12345.67)
+            ->assertJsonPath('data.potencial_anual_kg', null);
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => 800])->assertOk();
+
+        $project->refresh();
+        $this->assertEquals(12345.67, $project->potencial_anual_usd);
+        $this->assertEquals(800, $project->potencial_anual_kg);
+        $this->assertStringContainsString('Potencial anual (USD) (manual)', ProjectStatusHistory::orderBy('id')->first()->descripcion);
+
+        // Guardar las referencias vuelve a la suma de las seleccionadas
+        $this->guardar($project, [$this->seleccion($this->refId($project, 'Ref B'), ['kg_anio' => 10])])->assertOk();
+        $this->assertEquals(10, $project->fresh()->potencial_anual_kg);
+        $this->assertEquals(200, $project->fresh()->potencial_anual_usd);
+    }
+
+    public function test_el_ajuste_manual_valida_y_respeta_permisos(): void
+    {
+        $project = $this->proyecto();
+
+        $this->patchJson("/api/project-potential/projects/{$project->id}", [])
+            ->assertStatus(422)->assertJsonValidationErrors(['potencial_anual_usd', 'potencial_anual_kg']);
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => -1])
+            ->assertStatus(422)->assertJsonValidationErrors('potencial_anual_kg');
+
+        // Mismo valor: no ensucia el historial
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => null])->assertOk();
+        $this->assertSame(0, ProjectStatusHistory::count());
+
+        $this->givePermissions(['project potential list']);
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => 5])->assertForbidden();
     }
 }

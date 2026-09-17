@@ -331,6 +331,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/project-potential', [ProjectPotentialController::class, 'index']);
     Route::get('/project-potential/export', [ProjectPotentialController::class, 'export']);
     Route::get('/project-potential/projects/{project}', [ProjectPotentialController::class, 'show']);
+    Route::patch('/project-potential/projects/{project}', [ProjectPotentialController::class, 'updateProject']);
     Route::put('/project-potential/projects/{project}/selections', [ProjectPotentialController::class, 'updateSelections']);
 
     Route::get('/projects/export', [ProjectController::class, 'export']);
