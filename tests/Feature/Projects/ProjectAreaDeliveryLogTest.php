@@ -5,6 +5,7 @@ namespace Tests\Feature\Projects;
 use App\Models\EmailLog;
 use App\Models\Process;
 use App\Models\ProjectStatusHistory;
+use App\Services\ProjectMailService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -94,6 +95,28 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
         $this->assertSame(['actualizacion', 'final'], DB::table('project_area_delivery_logs')->orderByDesc('id')->pluck('tipo')->all());
         $this->assertSame('project_applications_updated', EmailLog::latest('id')->first()->process_type);
         $this->assertStringContainsString('Se actualizaron las notas', $this->sentMessages()->last()->getOriginalMessage()->getHtmlBody());
+    }
+
+    public function test_parciales_final_y_actualizacion_van_en_el_mismo_hilo_del_proyecto(): void
+    {
+        $project = $this->project(['estado_interno' => 'En proceso']);
+        app(ProjectMailService::class)->send($project, 'created');
+        $rootId      = $project->fresh()->email_thread_message_id;
+        $rootSubject = $project->fresh()->email_thread_subject;
+
+        $this->entregar($project, ['tipo' => 'parcial', 'notas' => 'Parcial 1'])->assertOk();
+        $this->entregar($project, ['tipo' => 'parcial', 'notas' => 'Parcial 2'])->assertOk();
+        $this->entregar($project, ['tipo' => 'final', 'notas' => 'Cierre'])->assertOk();
+        $this->entregar($project, ['notas' => 'Ajuste'])->assertOk();
+
+        $respuestas = $this->sentMessages()->slice(1)->map(fn ($m) => $m->getOriginalMessage());
+        $this->assertCount(4, $respuestas);
+        foreach ($respuestas as $correo) {
+            $this->assertSame('Re: ' . $rootSubject, $correo->getSubject());
+            $this->assertSame('<' . $rootId . '>', $correo->getHeaders()->get('In-Reply-To')->getBodyAsString());
+            $this->assertSame('<' . $rootId . '>', $correo->getHeaders()->get('References')->getBodyAsString());
+        }
+        $this->assertSame($rootId, $project->fresh()->email_thread_message_id);
     }
 
     public function test_sin_tipo_se_toma_como_entrega_final(): void
