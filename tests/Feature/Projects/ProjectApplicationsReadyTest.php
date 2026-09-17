@@ -24,7 +24,7 @@ class ProjectApplicationsReadyTest extends ProjectMailTestCase
         $this->template('project_created', 'Nuevo proyecto #|project_id| — |project_name|');
         $this->template('project_applications_ready', 'Aplicaciones listas — proyecto #|project_id|', '|delivered_by||notas_entrega|');
         $this->template('project_applications_updated', 'Aplicaciones actualizadas — proyecto #|project_id|', '|delivered_by||changes_table||notas_entrega|');
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
 
         $this->givePermissions(['project list', 'project deliver']);
     }
@@ -90,15 +90,16 @@ class ProjectApplicationsReadyTest extends ProjectMailTestCase
         $this->assertCount(0, $this->sentMessages());
     }
 
-    public function test_con_lista_propia_esas_ganan_sobre_el_fallback(): void
+    public function test_las_listas_viejas_por_accion_ya_no_reciben_correos(): void
     {
+        // Un registro antiguo con tipo por acción no se usa: solo cuenta la lista "proyectos"
         Process::create(['name' => 'Aplicaciones', 'email' => 'aplicaciones@finearom.co', 'process_type' => 'project_applications_ready']);
         $project = $this->project(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/aplicaciones/entregar", [])->assertOk();
 
         $email = $this->sentMessages()->last()->getOriginalMessage();
-        $this->assertSame(['aplicaciones@finearom.co'], $this->addresses($email->getTo()));
-        $this->assertNotContains('lab@finearom.co', $this->addresses($email->getCc()));
+        $this->assertSame(['lab@finearom.co'], $this->addresses($email->getTo()));
+        $this->assertNotContains('aplicaciones@finearom.co', $this->addresses($email->getCc()));
     }
 }

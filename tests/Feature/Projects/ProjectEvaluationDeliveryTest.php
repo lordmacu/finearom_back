@@ -19,7 +19,7 @@ class ProjectEvaluationDeliveryTest extends ProjectMailTestCase
         $this->template('project_created', 'Nuevo proyecto #|project_id| — |project_name|');
         $this->template('project_evaluation_delivered', 'Evaluaciones listas — proyecto #|project_id|', '|delivered_by||notas_entrega|');
         $this->template('project_evaluation_updated', 'Evaluaciones actualizadas — proyecto #|project_id|', '|delivered_by||changes_table||notas_entrega|');
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
 
         $this->givePermissions(['project list', 'project deliver']);
     }

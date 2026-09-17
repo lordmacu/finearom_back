@@ -22,7 +22,7 @@ class ProjectDevelopmentDeliveredTest extends ProjectMailTestCase
         $this->template('project_created', 'Nuevo proyecto #|project_id| — |project_name|');
         $this->template('project_development_delivered', 'Desarrollo entregado — proyecto #|project_id| — |project_name|', '|engineer_name||variants_table|');
         $this->template('project_development_updated', 'Desarrollo actualizado — proyecto #|project_id| — |project_name|', '|engineer_name||changes_table||variants_table|');
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
 
         $role = Role::firstOrCreate(['name' => 'Desarrollo', 'guard_name' => 'web']);
         $deliver = Permission::firstOrCreate(['name' => 'project deliver', 'guard_name' => 'web']);

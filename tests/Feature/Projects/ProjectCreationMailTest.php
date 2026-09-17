@@ -16,7 +16,7 @@ class ProjectCreationMailTest extends ProjectMailTestCase
         parent::setUp();
 
         $this->template('project_created', 'Nuevo proyecto #|project_id| — |project_name|');
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
     }
 
     public function test_crear_proyecto_no_envia_correo(): void

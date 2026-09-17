@@ -40,7 +40,7 @@ class ProjectMailService
      */
     public function send(Project $project, string $action, array $extra = []): bool
     {
-        $recipients = $this->recipients($project, "project_{$action}", $action);
+        $recipients = $this->recipients($project);
 
         if (empty($recipients)) {
             Log::info('Correo de proyecto omitido: sin destinatarios', [
@@ -107,8 +107,7 @@ class ProjectMailService
     /**
      * Correo de entrega del flujo de desarrollo (botón "Entregado" del
      * ingeniero): lista las variantes de marketing con sus referencias.
-     * Destinatarios: lista `project_development_delivered` (fallback a
-     * `project_created`) + ejecutiva + ingeniero asignado.
+     * Destinatarios: lista "Proyectos" + ejecutiva + ingeniero asignado.
      *
      * Si el área ya estaba entregada ($isUpdate), el correo sale con el
      * template `project_development_updated`: avisa si cambiaron las
@@ -119,7 +118,7 @@ class ProjectMailService
     {
         $action = $isUpdate ? 'development_updated' : 'development_delivered';
 
-        $recipients = $this->recipients($project, 'project_development_delivered', $action);
+        $recipients = $this->recipients($project);
 
         if (empty($recipients)) {
             Log::info('Correo de entrega de desarrollo omitido: sin destinatarios', [
@@ -161,8 +160,7 @@ class ProjectMailService
      * Correo de una entrega de área externa (Aplicaciones, Evaluaciones,
      * Marketing, Regulatoria o P. Especiales): las notas de ESA entrega viajan
      * en el cuerpo (HTML del editor) y sus adjuntos van adjuntos al correo.
-     * Destinatarios: lista propia (`project_{área}_delivered`, fallback
-     * `project_created`) + ejecutiva + ingeniero asignado.
+     * Destinatarios: lista "Proyectos" + ejecutiva + ingeniero asignado.
      *
      * El correo se atribuye al ÁREA, no a la persona que oprimió el botón
      * (`delivered_by` = "Regulatoria", "P. Especiales"…): a quien lo recibe le
@@ -175,11 +173,11 @@ class ProjectMailService
     public function sendAreaDelivered(Project $project, string $area, ProjectAreaDeliveryLog $log, ?string $notasAntes = null): bool
     {
         $cfg = match ($area) {
-            'marketing'    => ['prefix' => 'marketing',    'delivered' => 'marketing_delivered',   'process' => 'project_marketing_delivered',   'label' => 'Marketing'],
-            'aplicaciones' => ['prefix' => 'applications', 'delivered' => 'applications_ready',    'process' => 'project_applications_ready',    'label' => 'Aplicaciones'],
-            'regulatoria'  => ['prefix' => 'regulatoria',  'delivered' => 'regulatoria_delivered', 'process' => 'project_regulatoria_delivered', 'label' => 'Regulatoria'],
-            'especiales'   => ['prefix' => 'especiales',   'delivered' => 'especiales_delivered',  'process' => 'project_especiales_delivered',  'label' => 'P. Especiales'],
-            default        => ['prefix' => 'evaluation',   'delivered' => 'evaluation_delivered',  'process' => 'project_evaluation_delivered',  'label' => 'Evaluaciones'],
+            'marketing'    => ['prefix' => 'marketing',    'delivered' => 'marketing_delivered',   'label' => 'Marketing'],
+            'aplicaciones' => ['prefix' => 'applications', 'delivered' => 'applications_ready',    'label' => 'Aplicaciones'],
+            'regulatoria'  => ['prefix' => 'regulatoria',  'delivered' => 'regulatoria_delivered', 'label' => 'Regulatoria'],
+            'especiales'   => ['prefix' => 'especiales',   'delivered' => 'especiales_delivered',  'label' => 'P. Especiales'],
+            default        => ['prefix' => 'evaluation',   'delivered' => 'evaluation_delivered',  'label' => 'Evaluaciones'],
         };
 
         $action = match ($log->tipo) {
@@ -188,7 +186,7 @@ class ProjectMailService
             default                               => $cfg['delivered'],
         };
 
-        $recipients = $this->recipients($project, $cfg['process'], $action);
+        $recipients = $this->recipients($project);
 
         if (empty($recipients)) {
             Log::info('Correo de entrega de área omitido: sin destinatarios', [
@@ -352,26 +350,17 @@ class ProjectMailService
     }
 
     /**
-     * Emails del proceso (se aceptan varios separados por coma) + ejecutivo
-     * + ingeniero de desarrollo asignado (si lo hay: desde su asignación
-     * recibe todos los correos del hilo).
+     * Destinatarios de todo correo del hilo de proyectos: la lista única
+     * "Proyectos" (Configuración → Procesos; se aceptan varios emails
+     * separados por coma) + ejecutivo + ingeniero de desarrollo asignado (desde
+     * su asignación recibe todos los correos del hilo).
      * Primero = TO, resto = CC. Sin inválidos ni duplicados.
-     * Si la acción no tiene lista propia (y no es la creación), se usan los
-     * destinatarios de `project_created`: las novedades van a las mismas partes.
      *
      * @return string[]
      */
-    private function recipients(Project $project, string $processType, string $action): array
+    private function recipients(Project $project): array
     {
-        $emails = Process::where('process_type', $processType)->pluck('email');
-
-        if ($emails->isEmpty() && $action !== 'created') {
-            Log::info('Correo de proyecto: destinatarios tomados de project_created (fallback)', [
-                'project_id' => $project->id,
-                'action'     => $action,
-            ]);
-            $emails = Process::where('process_type', 'project_created')->pluck('email');
-        }
+        $emails = Process::where('process_type', Process::PROYECTOS)->pluck('email');
 
         return $emails
             ->flatMap(fn ($value) => explode(',', (string) $value))

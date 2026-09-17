@@ -23,7 +23,7 @@ class ProjectMailThreadTest extends ProjectMailTestCase
 
     public function test_el_primer_correo_abre_el_hilo_y_lo_guarda(): void
     {
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co, desarrollo@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co, desarrollo@finearom.co', 'process_type' => 'proyectos']);
         $project = $this->project();
 
         app(ProjectMailService::class)->send($project, 'created');
@@ -55,8 +55,7 @@ class ProjectMailThreadTest extends ProjectMailTestCase
 
     public function test_el_siguiente_correo_responde_en_el_mismo_hilo(): void
     {
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
-        Process::create(['name' => 'Mkt', 'email' => 'mkt@finearom.co', 'process_type' => 'project_test_action']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
         $project = $this->project();
         $service = app(ProjectMailService::class);
 
@@ -72,7 +71,7 @@ class ProjectMailThreadTest extends ProjectMailTestCase
         $this->assertSame('Re: ' . $rootSubject, $reply->getSubject());
         $this->assertSame('<' . $rootId . '>', $reply->getHeaders()->get('In-Reply-To')->getBodyAsString());
         $this->assertSame('<' . $rootId . '>', $reply->getHeaders()->get('References')->getBodyAsString());
-        $this->assertSame(['mkt@finearom.co'], $this->addresses($reply->getTo()));
+        $this->assertSame(['lab@finearom.co'], $this->addresses($reply->getTo()));
         $this->assertStringContainsString('variante creada', $reply->getHtmlBody());
 
         // El hilo sigue apuntando a la raíz
@@ -92,7 +91,7 @@ class ProjectMailThreadTest extends ProjectMailTestCase
 
     public function test_template_inexistente_no_lanza_ni_abre_hilo(): void
     {
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_sin_template']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
         $project = $this->project();
 
         app(ProjectMailService::class)->send($project, 'sin_template');
@@ -104,7 +103,7 @@ class ProjectMailThreadTest extends ProjectMailTestCase
     public function test_template_inactivo_no_envia(): void
     {
         DB::table('email_templates')->where('key', 'project_created')->update(['is_active' => false]);
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
         $project = $this->project();
 
         app(ProjectMailService::class)->send($project, 'created');
@@ -115,7 +114,7 @@ class ProjectMailThreadTest extends ProjectMailTestCase
 
     public function test_el_ejecutivo_no_se_duplica_si_ya_esta_en_la_lista(): void
     {
-        Process::create(['name' => 'Ejecutivo', 'email' => 'TESTER@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Ejecutivo', 'email' => 'TESTER@finearom.co', 'process_type' => 'proyectos']);
         $project = $this->project();
 
         app(ProjectMailService::class)->send($project, 'created');
@@ -137,7 +136,7 @@ class ProjectMailThreadTest extends ProjectMailTestCase
 
     public function test_la_asignacion_del_ingeniero_antes_de_la_creacion_no_abre_el_hilo(): void
     {
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
         $this->template('project_engineer_assigned', 'Se asignó ingeniero — proyecto #|project_id|', '|engineer_name|');
         $engineer = \App\Models\User::create(['name' => 'Ing. Hilo', 'email' => 'ing.hilo@finearom.co', 'password' => bcrypt('x')]);
         $project  = $this->project();

@@ -17,7 +17,7 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
 
         $this->template('project_created', 'Nuevo proyecto #|project_id| — |project_name|');
         $this->template('project_engineer_assigned', 'Se asignó ingeniero de desarrollo — proyecto #|project_id| — |project_name|', '|engineer_name|');
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
 
         $role = Role::firstOrCreate(['name' => 'Desarrollo', 'guard_name' => 'web']);
         $this->engineer = User::create(['name' => 'Ing. Prueba', 'email' => 'ingeniero@finearom.co', 'password' => bcrypt('x')]);

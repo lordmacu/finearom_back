@@ -22,7 +22,7 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
         $this->template('project_applications_partial', 'Aplicaciones parcial — #|project_id|', '|delivered_by| [|tipo_entrega|] |notas_entrega|');
         $this->template('project_applications_ready', 'Aplicaciones listas — #|project_id|', '|delivered_by| [|tipo_entrega|] |notas_entrega|');
         $this->template('project_applications_updated', 'Aplicaciones actualizadas — #|project_id|', '|delivered_by||changes_table||notas_entrega|');
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
 
         $this->givePermissions(['project list', 'project deliver']);
     }

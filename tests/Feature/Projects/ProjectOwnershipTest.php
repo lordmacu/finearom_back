@@ -24,7 +24,7 @@ class ProjectOwnershipTest extends ProjectMailTestCase
         parent::setUp();
 
         $this->template('project_created', 'Nuevo proyecto #|project_id| — |project_name|');
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
 
         $role = Role::firstOrCreate(['name' => 'Comercial', 'guard_name' => 'web']);
         $permissions = collect(['project list', 'project edit', 'project send creation'])

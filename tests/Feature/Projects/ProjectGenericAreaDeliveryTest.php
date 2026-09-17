@@ -26,7 +26,7 @@ class ProjectGenericAreaDeliveryTest extends ProjectMailTestCase
         $this->template('project_regulatoria_updated', 'Regulatoria actualizada — proyecto #|project_id|', '|delivered_by||changes_table||notas_entrega|');
         $this->template('project_especiales_delivered', 'P. Especiales entregado — proyecto #|project_id|', '|delivered_by||notas_entrega|');
         $this->template('project_especiales_updated', 'P. Especiales actualizada — proyecto #|project_id|', '|delivered_by||changes_table||notas_entrega|');
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
 
         $this->givePermissions(['project list', 'project deliver']);
     }

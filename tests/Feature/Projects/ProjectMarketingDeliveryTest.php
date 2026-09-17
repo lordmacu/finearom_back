@@ -19,7 +19,7 @@ class ProjectMarketingDeliveryTest extends ProjectMailTestCase
         $this->template('project_created', 'Nuevo proyecto #|project_id| — |project_name|');
         $this->template('project_marketing_delivered', 'Marketing entregado — proyecto #|project_id|', '|delivered_by||notas_entrega|');
         $this->template('project_marketing_updated', 'Marketing actualizado — proyecto #|project_id|', '|delivered_by||changes_table||notas_entrega|');
-        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'project_created']);
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
 
         $this->givePermissions(['project list', 'project deliver']);
     }
