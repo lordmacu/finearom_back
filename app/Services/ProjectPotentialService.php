@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Models\ProjectMarketingVariantReference;
 use App\Models\ProjectPotentialReference;
 use App\Models\ProjectStatusHistory;
+use App\Support\PotentialDispatchPlan;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -14,7 +15,8 @@ use Illuminate\Validation\ValidationException;
  * Potencial a la vista: proyectos de una ejecutiva con las referencias que
  * Desarrollo creó y su precio. La ejecutiva marca cuáles seleccionó el cliente
  * y llena el potencial de cada una; el potencial anual del proyecto (USD y Kg)
- * pasa a ser la suma de las seleccionadas.
+ * pasa a ser la suma de las seleccionadas. Cada seleccionada trae su plan de
+ * despachos mes a mes para el año pedido (PotentialDispatchPlan).
  */
 class ProjectPotentialService
 {
@@ -29,8 +31,10 @@ class ProjectPotentialService
             ->pluck('ejecutivo');
     }
 
-    public function projectsFor(string $ejecutivo, ?string $estadoExterno = null): Collection
+    public function projectsFor(string $ejecutivo, ?string $estadoExterno = null, ?int $anio = null): Collection
     {
+        $anio ??= (int) now()->year;
+
         return Project::query()
             ->where('ejecutivo', $ejecutivo)
             ->when($estadoExterno, fn ($q) => $q->where('estado_externo', $estadoExterno))
@@ -38,23 +42,27 @@ class ProjectPotentialService
             ->orderByDesc('id')
             ->get()
             ->map(fn (Project $p) => $this->resumen($p) + [
-                'referencias' => $this->referencias($p)->map(fn ($r) => [
+                'referencias' => $this->referencias($p, $anio)->map(fn ($r) => [
                     'id'           => $r['id'],
                     'variante'     => $r['variante'],
                     'referencia'   => $r['referencia'],
                     'codigo'       => $r['codigo'],
                     'precio'       => $r['precio'],
                     'seleccionada' => $r['seleccionada'],
+                    'plan'         => $r['plan'],
                 ])->values(),
             ]);
     }
 
     /** Detalle para la ventana: el proyecto y todas sus referencias con el potencial de las seleccionadas. */
-    public function detail(Project $project): array
+    public function detail(Project $project, ?int $anio = null): array
     {
         $project->load($this->relaciones());
 
-        return $this->resumen($project) + ['referencias' => $this->referencias($project)->values()];
+        return $this->resumen($project) + [
+            'anio'        => $anio ??= (int) now()->year,
+            'referencias' => $this->referencias($project, $anio)->values(),
+        ];
     }
 
     /**
@@ -63,7 +71,7 @@ class ProjectPotentialService
      *
      * @param array<int, array<string, mixed>> $selecciones
      */
-    public function saveSelections(Project $project, array $selecciones, string $executive): array
+    public function saveSelections(Project $project, array $selecciones, string $executive, ?int $anio = null): array
     {
         $refsDelProyecto = $project->marketingVariants()
             ->with('references')
@@ -108,7 +116,7 @@ class ProjectPotentialService
             );
         }
 
-        return $this->detail($project->fresh());
+        return $this->detail($project->fresh(), $anio);
     }
 
     /** Potencial del proyecto = suma de las referencias seleccionadas (USD = Kg × precio). */
@@ -156,10 +164,10 @@ class ProjectPotentialService
         ];
     }
 
-    private function referencias(Project $p): Collection
+    private function referencias(Project $p, int $anio): Collection
     {
         return $p->marketingVariants->flatMap(
-            fn ($v) => $v->references->map(function (ProjectMarketingVariantReference $r) use ($v) {
+            fn ($v) => $v->references->map(function (ProjectMarketingVariantReference $r) use ($v, $anio) {
                 $s      = $r->potential;
                 $precio = $this->decimal($r->precio);
                 $kg     = $this->decimal($s?->kg_anio);
@@ -171,6 +179,7 @@ class ProjectPotentialService
                     'codigo'       => $r->codigo,
                     'precio'       => $precio,
                     'seleccionada' => $s !== null,
+                    'plan'         => $s ? PotentialDispatchPlan::for($s->kg_anio, $r->precio, $s->frecuencia_compra, $s->fecha_primer_despacho, $anio) : null,
                     'potencial'    => $s ? [
                         'kg_anio'               => $kg,
                         'potencial_anual_usd'   => $kg !== null && $precio !== null ? round($kg * $precio, 2) : null,

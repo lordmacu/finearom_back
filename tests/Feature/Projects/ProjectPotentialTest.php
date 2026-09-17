@@ -98,6 +98,45 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertEquals(100, $res->json('meta.total_potencial_kg'));
     }
 
+    public function test_el_listado_trae_el_plan_de_despachos_del_anio_y_los_totales_por_mes(): void
+    {
+        $project = $this->proyecto();
+        // Ref B: 1200 Kg/año × 20 USD, trimestral desde junio 2026
+        $this->guardar($project, [$this->seleccion($this->refId($project, 'Ref B'), [
+            'kg_anio' => 1200, 'frecuencia_compra' => 'trimestral', 'fecha_primer_despacho' => '2026-06-01',
+        ])])->assertOk();
+
+        $res = $this->getJson('/api/project-potential?anio=2026&ejecutivo=' . urlencode('María Ortega'))->assertOk();
+
+        $refs = collect($res->json('data.0.referencias'))->keyBy('referencia');
+        $this->assertNull($refs['Ref A']['plan']);
+        $this->assertSame(3, $refs['Ref B']['plan']['despachos']);
+        $this->assertEquals(300, $refs['Ref B']['plan']['meses'][5]['kg']);
+        $this->assertEquals(18000, $refs['Ref B']['plan']['total_usd']);
+        $this->assertSame(2026, $res->json('meta.anio'));
+        $this->assertEquals(900, $res->json('meta.total_anio_kg'));
+        $this->assertEquals(18000, $res->json('meta.total_anio_usd'));
+        $this->assertEquals(6000, $res->json('meta.meses.8.usd'));
+        $this->assertEquals(0, $res->json('meta.meses.0.kg'));
+
+        $siguiente = $this->getJson('/api/project-potential?anio=2027&ejecutivo=' . urlencode('María Ortega'))->assertOk();
+        $this->assertEquals(1200, $siguiente->json('meta.total_anio_kg'));
+    }
+
+    public function test_el_detalle_calcula_el_plan_para_el_anio_pedido(): void
+    {
+        $project = $this->proyecto();
+        $this->guardar($project, [$this->seleccion($this->refId($project, 'Ref A'), [
+            'kg_anio' => 600, 'frecuencia_compra' => 'semestral', 'fecha_primer_despacho' => '2026-09-01',
+        ])])->assertOk();
+
+        $res = $this->getJson("/api/project-potential/projects/{$project->id}?anio=2027")->assertOk();
+
+        $this->assertSame(2027, $res->json('data.anio'));
+        $plan = collect($res->json('data.referencias'))->firstWhere('referencia', 'Ref A')['plan'];
+        $this->assertEquals([3 => 300, 9 => 300], collect($plan['meses'])->filter(fn ($m) => $m['kg'] > 0)->pluck('kg', 'mes')->all());
+    }
+
     public function test_filtra_por_estado_externo(): void
     {
         $this->proyecto();

@@ -17,6 +17,7 @@ class ProjectPotentialSelectionsRequest extends FormRequest
     {
         return [
             // 'present': un array vacío deja el proyecto sin referencias seleccionadas
+            'anio'                                => ['nullable', 'integer', 'min:2000', 'max:2100'],
             'selecciones'                         => ['present', 'array'],
             'selecciones.*.reference_id'          => ['required', 'integer', 'distinct'],
             'selecciones.*.kg_anio'               => ['nullable', 'numeric', 'min:0'],

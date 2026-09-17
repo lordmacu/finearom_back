@@ -16,6 +16,7 @@ class ProjectPotentialIndexRequest extends FormRequest
         return [
             'ejecutivo'      => ['required', 'string', 'max:255'],
             'estado_externo' => ['nullable', 'in:En espera,Ganado,Perdido'],
+            'anio'           => ['nullable', 'integer', 'min:2000', 'max:2100'],
         ];
     }
 
