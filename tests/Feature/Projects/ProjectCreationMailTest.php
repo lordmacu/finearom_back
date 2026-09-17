@@ -51,7 +51,8 @@ class ProjectCreationMailTest extends ProjectMailTestCase
         $email = $this->sentMessages()->first()->getOriginalMessage();
         $this->assertSame(['lab@finearom.co'], $this->addresses($email->getTo()));
         // El ejecutivo del proyecto va en CC
-        $this->assertSame(['tester@finearom.co'], $this->addresses($email->getCc()));
+        // Solo la lista configurada: la ejecutiva no va en copia
+        $this->assertSame([], $this->addresses($email->getCc()));
         $this->assertSame("Nuevo proyecto #{$project->id} — Aroma Test", $email->getSubject());
         $this->assertNotNull($project->fresh()->email_thread_message_id);
     }

@@ -33,7 +33,8 @@ class ProjectMailThreadTest extends ProjectMailTestCase
         $email = $sent->getOriginalMessage();
 
         $this->assertSame(['lab@finearom.co'], $this->addresses($email->getTo()));
-        $this->assertSame(['desarrollo@finearom.co', 'tester@finearom.co'], $this->addresses($email->getCc()));
+        // Lista configurada + ingeniero asignado; la ejecutiva no va
+        $this->assertSame(['desarrollo@finearom.co'], $this->addresses($email->getCc()));
         $this->assertSame("Nuevo proyecto #{$project->id} — Aroma Test · Prospecto SAS", $email->getSubject());
 
         $html = $email->getHtmlBody();
@@ -112,9 +113,10 @@ class ProjectMailThreadTest extends ProjectMailTestCase
         $this->assertNull($project->fresh()->email_thread_message_id);
     }
 
-    public function test_el_ejecutivo_no_se_duplica_si_ya_esta_en_la_lista(): void
+    public function test_un_correo_repetido_en_la_lista_no_se_duplica(): void
     {
         Process::create(['name' => 'Ejecutivo', 'email' => 'TESTER@finearom.co', 'process_type' => 'proyectos']);
+        Process::create(['name' => 'Otra vez', 'email' => 'tester@finearom.co ', 'process_type' => 'proyectos']);
         $project = $this->project();
 
         app(ProjectMailService::class)->send($project, 'created');
@@ -124,14 +126,14 @@ class ProjectMailThreadTest extends ProjectMailTestCase
         $this->assertSame([], $this->addresses($email->getCc()));
     }
 
-    public function test_sin_ejecutivo_id_el_ejecutivo_se_busca_por_nombre(): void
+    public function test_la_ejecutiva_no_recibe_correos_si_no_esta_en_la_lista(): void
     {
         $project = $this->project(['ejecutivo_id' => null, 'ejecutivo' => 'Tester']);
 
         app(ProjectMailService::class)->send($project, 'created');
 
-        $email = $this->sentMessages()->first()->getOriginalMessage();
-        $this->assertSame(['tester@finearom.co'], $this->addresses($email->getTo()));
+        // Sin lista configurada ni ingeniero no hay a quién enviar
+        $this->assertCount(0, $this->sentMessages());
     }
 
     public function test_la_asignacion_del_ingeniero_antes_de_la_creacion_no_abre_el_hilo(): void

@@ -44,7 +44,8 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
 
         $email = $this->sentMessages()->first()->getOriginalMessage();
         $this->assertSame(['ingeniero@finearom.co'], $this->addresses($email->getTo()));
-        $this->assertSame(['tester@finearom.co'], $this->addresses($email->getCc()));
+        // En copia la lista "Proyectos", no la ejecutiva
+        $this->assertSame(['lab@finearom.co'], $this->addresses($email->getCc()));
         $this->assertStringContainsString('Se asignó ingeniero de desarrollo', $email->getSubject());
         $this->assertStringContainsString('Ing. Prueba', $email->getHtmlBody());
     }
@@ -95,7 +96,7 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
         $email = $this->sentMessages()->first()->getOriginalMessage();
         $this->assertSame(['lab@finearom.co'], $this->addresses($email->getTo()));
         $this->assertContains('ingeniero@finearom.co', $this->addresses($email->getCc()));
-        $this->assertContains('tester@finearom.co', $this->addresses($email->getCc()));
+        $this->assertNotContains('tester@finearom.co', $this->addresses($email->getCc()));
     }
 
     public function test_sin_ingeniero_asignado_no_se_copia_nadie_extra(): void

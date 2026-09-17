@@ -24,6 +24,7 @@ class ProjectEngineerReminderTest extends ProjectMailTestCase
 
     public function test_recuerda_solo_a_proyectos_de_mas_de_24h_sin_ingeniero(): void
     {
+        \App\Models\Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
         $this->projectSinIngeniero();                                                       // debe recordar
         $this->projectSinIngeniero(['fecha_creacion' => today()]);                          // muy reciente
         $this->projectSinIngeniero(['desarrollador_id' => $this->user->id]);                // ya asignado
@@ -34,8 +35,8 @@ class ProjectEngineerReminderTest extends ProjectMailTestCase
 
         $this->assertCount(1, $this->sentMessages());
         $email = $this->sentMessages()->first()->getOriginalMessage();
-        // El recordatorio va a la ejecutiva del proyecto (el usuario Tester del fixture)
-        $this->assertSame(['tester@finearom.co'], $this->addresses($email->getTo()));
+        // El recordatorio va a la lista "Proyectos", no a la ejecutiva
+        $this->assertSame(['lab@finearom.co'], $this->addresses($email->getTo()));
         $this->assertStringContainsString('Falta asignar ingeniero de desarrollo', $email->getSubject());
     }
 

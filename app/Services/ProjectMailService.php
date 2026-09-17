@@ -15,10 +15,9 @@ use Illuminate\Support\Str;
 /**
  * Correos internos de un proyecto, todos en un mismo hilo.
  *
- * Convención por acción: template `project_{accion}` y destinatarios en
- * `processes` con process_type `project_{accion}`; el ejecutivo del proyecto
- * siempre se suma, y una vez asignado, el ingeniero de desarrollo también
- * recibe todos los correos siguientes del hilo. El primer correo exitoso
+ * Convención por acción: template `project_{accion}`. Destinatarios: solo la
+ * lista "Proyectos" (processes.process_type = 'proyectos') y, una vez
+ * asignado, el ingeniero de desarrollo. Nunca la ejecutiva ni el cliente. El primer correo exitoso
  * abre el hilo (se guardan su Message-ID y asunto); los siguientes van como
  * respuesta.
  *
@@ -55,16 +54,11 @@ class ProjectMailService
 
     /**
      * Correo de asignación del ingeniero de desarrollo: va al ingeniero (TO)
-     * y a la ejecutiva del proyecto (CC), dentro del hilo si ya existe.
+     * y a la lista "Proyectos" (CC), dentro del hilo si ya existe.
      */
     public function sendEngineerAssigned(Project $project, User $engineer): bool
     {
-        $recipients = collect([$engineer->email, $this->executiveEmail($project)])
-            ->map(fn ($email) => strtolower(trim((string) $email)))
-            ->filter(fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL))
-            ->unique()
-            ->values()
-            ->all();
+        $recipients = $this->normalizar(collect([$engineer->email])->merge($this->configuredEmails()));
 
         if (empty($recipients)) {
             Log::info('Correo de asignación omitido: ingeniero sin email válido', [
@@ -81,19 +75,14 @@ class ProjectMailService
 
     /**
      * Recordatorio diario del cron: el proyecto lleva más de 24 h sin ingeniero
-     * de desarrollo asignado. Va a la ejecutiva del proyecto.
+     * de desarrollo asignado. Va a la lista "Proyectos".
      */
     public function sendEngineerReminder(Project $project): bool
     {
-        $recipients = collect([$this->executiveEmail($project)])
-            ->map(fn ($email) => strtolower(trim((string) $email)))
-            ->filter(fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL))
-            ->unique()
-            ->values()
-            ->all();
+        $recipients = $this->normalizar($this->configuredEmails());
 
         if (empty($recipients)) {
-            Log::info('Recordatorio de ingeniero omitido: ejecutivo sin email válido', [
+            Log::info('Recordatorio de ingeniero omitido: lista "Proyectos" vacía', [
                 'project_id' => $project->id,
             ]);
             return false;
@@ -107,7 +96,7 @@ class ProjectMailService
     /**
      * Correo de entrega del flujo de desarrollo (botón "Entregado" del
      * ingeniero): lista las variantes de marketing con sus referencias.
-     * Destinatarios: lista "Proyectos" + ejecutiva + ingeniero asignado.
+     * Destinatarios: lista "Proyectos" + ingeniero asignado.
      *
      * Si el área ya estaba entregada ($isUpdate), el correo sale con el
      * template `project_development_updated`: avisa si cambiaron las
@@ -160,7 +149,7 @@ class ProjectMailService
      * Correo de una entrega de área externa (Aplicaciones, Evaluaciones,
      * Marketing, Regulatoria o P. Especiales): las notas de ESA entrega viajan
      * en el cuerpo (HTML del editor) y sus adjuntos van adjuntos al correo.
-     * Destinatarios: lista "Proyectos" + ejecutiva + ingeniero asignado.
+     * Destinatarios: lista "Proyectos" + ingeniero asignado.
      *
      * El correo se atribuye al ÁREA, no a la persona que oprimió el botón
      * (`delivered_by` = "Regulatoria", "P. Especiales"…): a quien lo recibe le
@@ -350,22 +339,30 @@ class ProjectMailService
     }
 
     /**
-     * Destinatarios de todo correo del hilo de proyectos: la lista única
-     * "Proyectos" (Configuración → Procesos; se aceptan varios emails
-     * separados por coma) + ejecutivo + ingeniero de desarrollo asignado (desde
-     * su asignación recibe todos los correos del hilo).
+     * Destinatarios de todo correo del hilo de proyectos: solo la lista
+     * "Proyectos" (Configuración → Procesos) + el ingeniero de desarrollo
+     * cuando está asignado. Nunca la ejecutiva ni el cliente.
      * Primero = TO, resto = CC. Sin inválidos ni duplicados.
      *
      * @return string[]
      */
     private function recipients(Project $project): array
     {
-        $emails = Process::where('process_type', Process::PROYECTOS)->pluck('email');
+        return $this->normalizar($this->configuredEmails()->push($this->engineerEmail($project)));
+    }
 
+    /** Emails de la lista "Proyectos" (cada fila admite varios separados por coma). */
+    private function configuredEmails(): \Illuminate\Support\Collection
+    {
+        return Process::where('process_type', Process::PROYECTOS)
+            ->pluck('email')
+            ->flatMap(fn ($value) => explode(',', (string) $value));
+    }
+
+    /** @return string[] */
+    private function normalizar(\Illuminate\Support\Collection $emails): array
+    {
         return $emails
-            ->flatMap(fn ($value) => explode(',', (string) $value))
-            ->push($this->executiveEmail($project))
-            ->push($this->engineerEmail($project))
             ->map(fn ($email) => strtolower(trim((string) $email)))
             ->filter(fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL))
             ->unique()
@@ -377,18 +374,6 @@ class ProjectMailService
     {
         return $project->desarrollador_id
             ? $project->desarrollador?->email
-            : null;
-    }
-
-    private function executiveEmail(Project $project): ?string
-    {
-        if ($project->ejecutivo_id) {
-            return $project->ejecutivoUser?->email;
-        }
-
-        // Proyectos duplicados o legacy solo traen el nombre del ejecutivo
-        return $project->ejecutivo
-            ? User::where('name', $project->ejecutivo)->value('email')
             : null;
     }
 
