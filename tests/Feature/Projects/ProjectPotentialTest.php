@@ -150,7 +150,7 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $sheet = app(\App\Services\ProjectPotentialExportService::class)
             ->build('María Ortega', null, 2026)
             ->getActiveSheet();
-        $fila = fn (int $n) => $sheet->rangeToArray("A{$n}:BO{$n}", null, true, false)[0];
+        $fila = fn (int $n) => $sheet->rangeToArray("A{$n}:AP{$n}", null, true, false)[0];
 
         $encabezado = $fila(1);
         $this->assertSame('EJECUTIVA', $encabezado[0]);
@@ -158,8 +158,9 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertSame('VENTA 2026', $encabezado[11]);
         $this->assertSame('ENERO KG 2026', $encabezado[15]);
         $this->assertSame('TOTAL VENTA ESTIMADA AÑO 2026 USD', $encabezado[39]);
-        $this->assertSame('ENERO KG 2027', $encabezado[41]);
-        $this->assertSame('PROBABILIDAD', $encabezado[66]);
+        $this->assertSame('PROBABILIDAD', $encabezado[40]);
+        // Solo el año elegido: nada después de PROBABILIDAD
+        $this->assertNull($encabezado[41]);
         $this->assertSame('FF203764', $sheet->getStyle('A1')->getFill()->getStartColor()->getARGB());
 
         $datos = $fila(2);
@@ -172,8 +173,7 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertEquals(6000, $datos[26]);  // junio 2026 USD
         $this->assertEquals(18000, $datos[39]); // total 2026
         $this->assertSame('ALTA', $datos[40]);
-        $this->assertEquals(300, $datos[45]);   // marzo 2027 Kg
-        $this->assertEquals(24000, $datos[65]); // total 2027
+        $this->assertNull($datos[41]);
         $this->assertNull($fila(3)[0]);         // una sola fila: Ref A no está seleccionada, el otro proyecto es ajeno
     }
 

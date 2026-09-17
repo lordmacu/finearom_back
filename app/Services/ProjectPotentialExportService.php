@@ -13,8 +13,8 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 /**
  * Descarga de Potencial a la vista con el formato de la hoja "POTENCIAL A LA
  * VISTA" del Excel de proyectos: una fila por referencia seleccionada, los
- * datos hasta COMENTARIOS O ESTADO y dos bloques de meses (año elegido y el
- * siguiente) con su total y probabilidad.
+ * datos hasta COMENTARIOS O ESTADO y los meses del año elegido con su total
+ * y probabilidad.
  */
 class ProjectPotentialExportService
 {
@@ -60,7 +60,7 @@ class ProjectPotentialExportService
             'COMENTARIOS O ESTADO ( ABIERTO, GANADO, PERDIDO o CANCELADO.)',
         ];
 
-        return array_merge($base, $this->encabezadosBloque($anio), $this->encabezadosBloque($anio + 1));
+        return array_merge($base, $this->encabezadosBloque($anio));
     }
 
     private function encabezadosBloque(int $anio): array
@@ -115,16 +115,14 @@ class ProjectPotentialExportService
                         mb_strtoupper($s->estado),
                     ];
 
-                    foreach ([$anio, $anio + 1] as $anioBloque) {
-                        $plan = PotentialDispatchPlan::for($kg, $precio, $s->frecuencia_compra, $s->fecha_primer_despacho, $anioBloque);
-                        foreach (range(0, 11) as $i) {
-                            $mes    = $plan['meses'][$i] ?? null;
-                            $fila[] = $mes && $mes['kg'] > 0 ? $mes['kg'] : null;
-                            $fila[] = $mes && $mes['kg'] > 0 ? $mes['usd'] : null;
-                        }
-                        $fila[] = $plan['total_usd'] ?? null;
-                        $fila[] = $probabilidad;
+                    $plan = PotentialDispatchPlan::for($kg, $precio, $s->frecuencia_compra, $s->fecha_primer_despacho, $anio);
+                    foreach (range(0, 11) as $i) {
+                        $mes    = $plan['meses'][$i] ?? null;
+                        $fila[] = $mes && $mes['kg'] > 0 ? $mes['kg'] : null;
+                        $fila[] = $mes && $mes['kg'] > 0 ? $mes['usd'] : null;
                     }
+                    $fila[] = $plan['total_usd'] ?? null;
+                    $fila[] = $probabilidad;
 
                     $filas[] = $fila;
                 }
