@@ -70,7 +70,7 @@ class ProjectStoreRequest extends FormRequest
             'fecha_creacion'  => 'nullable|date',
             'tipo_producto'   => 'nullable|string|max:200',
             'ejecutivo_id'    => 'nullable|integer|exists:users,id',
-            'desarrollador_id' => 'nullable|integer|exists:users,id',
+            // desarrollador_id no va al crear: el ingeniero se asigna al editar
             'ejecutivo'       => 'nullable|string|max:200',
             'fecha_cierre_estimada'      => 'nullable|date',
             'potencial_anual_usd'        => 'nullable|numeric|min:0',

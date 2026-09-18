@@ -33,8 +33,9 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
         $this->assertNotContains('tester@finearom.co', $emails);
     }
 
-    public function test_crear_con_ingeniero_envia_el_correo_de_asignacion(): void
+    public function test_crear_no_asigna_ingeniero_ni_envia_correo(): void
     {
+        // El ingeniero se asigna al editar, no al crear
         $this->postJson('/api/projects', [
             'nombre'           => 'Proyecto Con Ing',
             'tipo'             => 'Desarrollo',
@@ -42,34 +43,72 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
             'desarrollador_id' => $this->engineer->id,
         ])->assertCreated();
 
-        $email = $this->sentMessages()->first()->getOriginalMessage();
-        $this->assertSame(['ingeniero@finearom.co'], $this->addresses($email->getTo()));
-        // En copia la lista "Proyectos", no la ejecutiva
-        $this->assertSame(['lab@finearom.co'], $this->addresses($email->getCc()));
-        $this->assertStringContainsString('Se asignó ingeniero de desarrollo', $email->getSubject());
-        $this->assertStringContainsString('Ing. Prueba', $email->getHtmlBody());
+        $this->assertNull(Project::where('nombre', 'Proyecto Con Ing')->value('desarrollador_id'));
+        $this->assertCount(0, $this->sentMessages());
     }
 
-    public function test_asignar_al_editar_envia_correo_y_reasignar_avisa_al_nuevo(): void
+    public function test_asignar_sin_hilo_espera_y_sale_despues_del_correo_de_creacion(): void
     {
         $project = $this->project();
 
-        // Asignar por primera vez
+        // Sin hilo todavía: se guarda el ingeniero pero no sale correo
         $this->putJson("/api/projects/{$project->id}", ['desarrollador_id' => $this->engineer->id])->assertOk();
+        $this->assertSame($this->engineer->id, (int) $project->fresh()->desarrollador_id);
+        $this->assertCount(0, $this->sentMessages());
+
+        // Al enviar la creación: primero el correo de creación (abre el hilo)
+        // y enseguida el de asignación como respuesta dentro del hilo
+        $this->postJson("/api/projects/{$project->id}/send-creation")->assertOk();
+        $this->assertCount(2, $this->sentMessages());
+
+        $project->refresh();
+        $creacion   = $this->sentMessages()->first()->getOriginalMessage();
+        $asignacion = $this->sentMessages()->last()->getOriginalMessage();
+
+        $this->assertStringContainsString('Nuevo proyecto', $creacion->getSubject());
+        $this->assertSame(['ingeniero@finearom.co'], $this->addresses($asignacion->getTo()));
+        // En copia la lista "Proyectos", no la ejecutiva
+        $this->assertSame(['lab@finearom.co'], $this->addresses($asignacion->getCc()));
+        $this->assertSame('Re: ' . $project->email_thread_subject, $asignacion->getSubject());
+        $this->assertSame('<' . $project->email_thread_message_id . '>', $asignacion->getHeaders()->get('In-Reply-To')->getBodyAsString());
+        $this->assertStringContainsString('Ing. Prueba', $asignacion->getHtmlBody());
+    }
+
+    public function test_reenviar_la_creacion_no_repite_el_aviso_al_ingeniero(): void
+    {
+        $project = $this->project(['desarrollador_id' => $this->engineer->id]);
+
+        $this->postJson("/api/projects/{$project->id}/send-creation")->assertOk();
+        $this->assertCount(2, $this->sentMessages());
+
+        // Segundo envío de la creación: solo el correo de creación
+        $this->postJson("/api/projects/{$project->id}/send-creation")->assertOk();
+        $this->assertCount(3, $this->sentMessages());
+        $this->assertStringNotContainsString('ingeniero@finearom.co', implode(',', $this->addresses($this->sentMessages()->last()->getOriginalMessage()->getTo())));
+    }
+
+    public function test_asignar_con_hilo_envia_correo_en_el_hilo_y_reasignar_avisa_al_nuevo(): void
+    {
+        $project = $this->project();
+        $this->postJson("/api/projects/{$project->id}/send-creation")->assertOk();
         $this->assertCount(1, $this->sentMessages());
-        $this->assertSame(
-            ['ingeniero@finearom.co'],
-            $this->addresses($this->sentMessages()->first()->getOriginalMessage()->getTo())
-        );
+        $project->refresh();
+
+        // Asignar con el hilo abierto: sale enseguida como Re: del hilo
+        $this->putJson("/api/projects/{$project->id}", ['desarrollador_id' => $this->engineer->id])->assertOk();
+        $this->assertCount(2, $this->sentMessages());
+        $asignacion = $this->sentMessages()->last()->getOriginalMessage();
+        $this->assertSame(['ingeniero@finearom.co'], $this->addresses($asignacion->getTo()));
+        $this->assertSame('Re: ' . $project->email_thread_subject, $asignacion->getSubject());
 
         // Editar otra cosa sin tocar el ingeniero: NO correo
         $this->putJson("/api/projects/{$project->id}", ['tipo_etiquetado' => 'SGA'])->assertOk();
-        $this->assertCount(1, $this->sentMessages());
+        $this->assertCount(2, $this->sentMessages());
 
         // Reasignar: correo al nuevo ingeniero
         $otro = User::create(['name' => 'Ing. Dos', 'email' => 'ing2@finearom.co', 'password' => bcrypt('x')]);
         $this->putJson("/api/projects/{$project->id}", ['desarrollador_id' => $otro->id])->assertOk();
-        $this->assertCount(2, $this->sentMessages());
+        $this->assertCount(3, $this->sentMessages());
         $this->assertSame(
             ['ing2@finearom.co'],
             $this->addresses($this->sentMessages()->last()->getOriginalMessage()->getTo())

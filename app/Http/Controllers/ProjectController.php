@@ -243,11 +243,6 @@ class ProjectController extends Controller
         // El correo de creación no sale al crear: lo dispara el botón
         // "Enviar creación de proyecto" (sendCreation), que abre el hilo.
 
-        // Si la comercial asignó el ingeniero en la creación, avisarle (silencioso)
-        if ($project->desarrollador_id && ($engineer = User::find($project->desarrollador_id))) {
-            $this->projectMailService->sendEngineerAssigned($project, $engineer);
-        }
-
         return response()->json([
             'success' => true,
             'data'    => $project->load(['client', 'product', 'sample', 'application', 'evaluation', 'marketingYCalidad', 'envelopeTypes']),
@@ -311,8 +306,11 @@ class ProjectController extends Controller
             return $project;
         });
 
-        // Asignación o cambio de ingeniero: correo aparte al nuevo ingeniero (silencioso)
+        // Asignación o cambio de ingeniero: correo al nuevo ingeniero dentro del
+        // hilo (silencioso). Sin hilo no sale: se envía después del correo de
+        // creación, en sendCreation
         if ($project->desarrollador_id
+            && $project->email_thread_message_id
             && (int) $project->desarrollador_id !== (int) $desarrolladorAntes
             && ($engineer = User::find($project->desarrollador_id))) {
             $this->projectMailService->sendEngineerAssigned($project, $engineer);
@@ -433,6 +431,7 @@ class ProjectController extends Controller
             ], 403);
         }
 
+        $abreHilo = !$project->email_thread_message_id;
         $sent = $this->projectMailService->send($project, 'created');
 
         if (!$sent) {
@@ -440,6 +439,12 @@ class ProjectController extends Controller
                 'success' => false,
                 'message' => 'No se envió: no hay destinatarios configurados para "Proyecto: creación" o el correo falló (ver log).',
             ], 422);
+        }
+
+        // Ingeniero asignado antes de abrir el hilo: su aviso sale ahora, como
+        // respuesta al correo de creación (solo la primera vez, no en reenvíos)
+        if ($abreHilo && $project->desarrollador_id && ($engineer = User::find($project->desarrollador_id))) {
+            $this->projectMailService->sendEngineerAssigned($project, $engineer);
         }
 
         return response()->json([
