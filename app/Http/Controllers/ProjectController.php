@@ -174,6 +174,12 @@ class ProjectController extends Controller
                 }
             }
 
+            // Factor vacío ("Auto") sin default del cliente: que aplique el
+            // DEFAULT de la columna (NOT NULL), no un null en el insert
+            if (($data['factor'] ?? null) === null) {
+                unset($data['factor']);
+            }
+
             $project = Project::create(array_merge(
                 $data,
                 [
@@ -288,6 +294,11 @@ class ProjectController extends Controller
             unset($validated['envelope_type_ids']);
 
             $this->resolveProductType($validated);
+
+            // Factor vacío: se conserva el actual (la columna es NOT NULL)
+            if (array_key_exists('factor', $validated) && $validated['factor'] === null) {
+                unset($validated['factor']);
+            }
 
             // Si viene ejecutivo_id, resolver el nombre del usuario
             if (!empty($validated['ejecutivo_id'])) {

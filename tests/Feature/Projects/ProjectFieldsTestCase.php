@@ -178,7 +178,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->boolean('internacional')->default(false);
             $t->string('tipo_producto')->nullable();
             $t->decimal('trm', 12, 2)->nullable();
-            $t->decimal('factor', 12, 4)->nullable();
+            $t->decimal('factor', 10, 4)->default(1); // igual que producción: NOT NULL DEFAULT 1
             $t->date('fecha_requerida')->nullable();
             $t->date('fecha_creacion')->nullable();
             $t->date('fecha_calculada')->nullable();
