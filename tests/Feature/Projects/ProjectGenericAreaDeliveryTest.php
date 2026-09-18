@@ -33,7 +33,7 @@ class ProjectGenericAreaDeliveryTest extends ProjectMailTestCase
 
     public function test_entregar_regulatoria_con_notas_y_adjuntos(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/regulatoria/entregar", [
             'notas'    => '<p>Documentación <strong>INVIMA</strong> completa</p>',
@@ -52,7 +52,7 @@ class ProjectGenericAreaDeliveryTest extends ProjectMailTestCase
 
     public function test_reentregar_regulatoria_envia_actualizacion_con_diff(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/regulatoria/entregar", ['notas' => '<p>V1</p>'])->assertOk();
         $this->postJson("/api/projects/{$project->id}/regulatoria/entregar", ['notas' => '<p>V2</p>'])->assertOk();
@@ -66,7 +66,7 @@ class ProjectGenericAreaDeliveryTest extends ProjectMailTestCase
 
     public function test_entregar_especiales_sin_notas_ni_adjuntos(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/especiales/entregar", [])->assertOk();
 
@@ -76,7 +76,7 @@ class ProjectGenericAreaDeliveryTest extends ProjectMailTestCase
 
     public function test_las_notas_de_areas_genericas_no_se_mezclan_entre_si(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/regulatoria/entregar", ['notas' => '<p>Nota regulatoria</p>'])->assertOk();
         $this->postJson("/api/projects/{$project->id}/especiales/entregar", ['notas' => '<p>Nota especiales</p>'])->assertOk();

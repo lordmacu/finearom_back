@@ -26,7 +26,7 @@ class ProjectMarketingDeliveryTest extends ProjectMailTestCase
 
     public function test_entregar_marketing_con_notas_y_adjuntos_envia_el_correo(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/marketing/entregar", [
             'notas'    => '<p><strong>Piezas listas</strong> para revisión</p>',
@@ -46,7 +46,7 @@ class ProjectMarketingDeliveryTest extends ProjectMailTestCase
 
     public function test_reentregar_marketing_envia_actualizacion_con_diff_de_notas(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/marketing/entregar", [
             'notas' => '<p>Versión 1</p>',
@@ -68,7 +68,7 @@ class ProjectMarketingDeliveryTest extends ProjectMailTestCase
     public function test_los_adjuntos_de_marketing_no_se_mezclan_con_los_de_evaluaciones(): void
     {
         $this->template('project_evaluation_delivered', 'Evaluaciones listas — proyecto #|project_id|', '|delivered_by||notas_entrega|');
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/evaluaciones/entregar", [
             'adjuntos' => [UploadedFile::fake()->create('eval.pdf', 100, 'application/pdf')],

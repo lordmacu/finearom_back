@@ -26,7 +26,7 @@ class ProjectEvaluationDeliveryTest extends ProjectMailTestCase
 
     public function test_entregar_evaluaciones_con_notas_y_adjuntos_envia_el_correo(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/evaluaciones/entregar", [
             'notas'     => 'Panel completado con 12 jueces',
@@ -46,7 +46,7 @@ class ProjectEvaluationDeliveryTest extends ProjectMailTestCase
 
     public function test_reentregar_envia_actualizacion_con_diff_de_notas_y_solo_sus_adjuntos(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/evaluaciones/entregar", [
             'notas'    => 'Nota original',
@@ -79,7 +79,7 @@ class ProjectEvaluationDeliveryTest extends ProjectMailTestCase
 
     public function test_rechaza_cuando_el_total_de_adjuntos_supera_25mb(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/evaluaciones/entregar", [
             'adjuntos' => [
@@ -97,7 +97,7 @@ class ProjectEvaluationDeliveryTest extends ProjectMailTestCase
     public function test_sin_permiso_de_entrega_no_puede_entregar_evaluaciones(): void
     {
         $this->givePermissions(['project list']);
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/evaluaciones/entregar", [
             'notas' => 'Intento',
@@ -106,7 +106,7 @@ class ProjectEvaluationDeliveryTest extends ProjectMailTestCase
 
     public function test_show_devuelve_notas_y_adjuntos_previos(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/evaluaciones/entregar", [
             'notas'    => 'Nota previa',

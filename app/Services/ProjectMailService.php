@@ -27,6 +27,9 @@ use Illuminate\Support\Str;
  */
 class ProjectMailService
 {
+    /** Las entregas solo se registran con el hilo abierto por el correo de creación. */
+    public const SIN_HILO_ENTREGA = 'Primero la ejecutiva debe enviar la creación del proyecto: las entregas van en ese mismo hilo de correo.';
+
     public function __construct(
         private readonly EmailTemplateService $templates,
     ) {}
@@ -269,12 +272,16 @@ class ProjectMailService
             $threadId = $project->email_thread_message_id;
             $subject  = $threadId ? 'Re: ' . $project->email_thread_subject : $rendered['subject'];
 
-            // Los correos de NOTIFICACIÓN puntual (asignación del ingeniero,
-            // recordatorio del cron) nunca abren el hilo: si salen antes que
-            // el de creación (p. ej. ingeniero elegido en el formulario de
-            // creación), van standalone con su propio asunto y no le roban
-            // la raíz ni el asunto al hilo del proyecto.
-            $opensThread = !$threadId && !in_array($action, ['engineer_assigned', 'engineer_reminder'], true);
+            // Un solo hilo por proyecto y lo abre SOLO el correo de creación:
+            // cualquier otro correo sin hilo no sale (ni suelto ni como raíz)
+            $opensThread = !$threadId && $action === 'created';
+            if (!$threadId && !$opensThread) {
+                Log::info('Correo de proyecto omitido: el hilo aún no existe (solo la creación lo abre)', [
+                    'project_id' => $project->id,
+                    'action'     => $action,
+                ]);
+                return false;
+            }
 
             // Al abrir el hilo fijamos nosotros el Message-ID: getMessageId()
             // del SentMessage queda sobreescrito por el id de cola del servidor

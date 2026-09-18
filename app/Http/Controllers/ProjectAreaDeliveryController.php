@@ -6,6 +6,7 @@ use App\Http\Requests\Project\ProjectAreaDeliverRequest;
 use App\Models\Project;
 use App\Models\ProjectAreaDeliveryLog;
 use App\Services\ProjectAreaDeliveryService;
+use App\Services\ProjectMailService;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -84,6 +85,10 @@ class ProjectAreaDeliveryController extends Controller
 
     private function deliverArea(ProjectAreaDeliverRequest $request, Project $project, string $area): JsonResponse
     {
+        if (!$project->email_thread_message_id) {
+            return response()->json(['success' => false, 'message' => ProjectMailService::SIN_HILO_ENTREGA], 422);
+        }
+
         $log = $this->deliveryService->deliver(
             $project,
             $area,

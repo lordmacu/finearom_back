@@ -111,6 +111,21 @@ abstract class ProjectMailTestCase extends ProjectFieldsTestCase
         ], $attrs));
     }
 
+    /**
+     * Proyecto al que ya se le envió la creación (hilo abierto): las entregas
+     * y demás correos solo salen dentro de ese hilo.
+     */
+    protected function threadedProject(array $attrs = []): Project
+    {
+        $project = $this->project($attrs);
+        $project->forceFill([
+            'email_thread_message_id' => "project-{$project->id}-test@finearom.co",
+            'email_thread_subject'    => "Nuevo proyecto #{$project->id} — {$project->nombre}",
+        ])->save();
+
+        return $project;
+    }
+
     /** Correos capturados por el mailer `array` (instancias de Symfony SentMessage). */
     protected function sentMessages(): Collection
     {

@@ -15,7 +15,8 @@ class ProjectEngineerReminderTest extends ProjectMailTestCase
 
     private function projectSinIngeniero(array $attrs = []): \App\Models\Project
     {
-        return $this->project(array_merge([
+        // Con hilo: el recordatorio solo sale dentro del hilo del proyecto
+        return $this->threadedProject(array_merge([
             'fecha_creacion'  => today()->subDays(2),
             'estado_externo'  => 'En espera',
             'estado_interno'  => 'En proceso',
@@ -37,7 +38,8 @@ class ProjectEngineerReminderTest extends ProjectMailTestCase
         $email = $this->sentMessages()->first()->getOriginalMessage();
         // El recordatorio va a la lista "Proyectos", no a la ejecutiva
         $this->assertSame(['lab@finearom.co'], $this->addresses($email->getTo()));
-        $this->assertStringContainsString('Falta asignar ingeniero de desarrollo', $email->getSubject());
+        $this->assertStringStartsWith('Re: Nuevo proyecto', $email->getSubject());
+        $this->assertSame('project_engineer_reminder', \App\Models\EmailLog::latest('id')->value('process_type'));
     }
 
     public function test_dry_run_no_envia_nada(): void

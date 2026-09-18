@@ -34,7 +34,7 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
 
     public function test_la_entrega_parcial_queda_en_la_bitacora_con_su_correo_y_el_area_sigue_en_proceso(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->entregar($project, [
             'tipo'     => 'parcial',
@@ -46,7 +46,8 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
         $this->assertSame('En proceso', $project->fresh()->estado_interno);
 
         $email = $this->sentMessages()->last()->getOriginalMessage();
-        $this->assertStringContainsString('Aplicaciones parcial', $email->getSubject());
+        // Va como respuesta en el hilo de la creación, no con asunto propio
+        $this->assertSame('Re: ' . $project->fresh()->email_thread_subject, $email->getSubject());
         $this->assertStringContainsString('Primer lote de aplicaciones', $email->getHtmlBody());
         $this->assertCount(1, $email->getAttachments());
         $this->assertSame('project_applications_partial', EmailLog::latest('id')->first()->process_type);
@@ -56,7 +57,7 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
 
     public function test_varias_parciales_y_la_final_se_acumulan_cada_una_con_sus_adjuntos(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->entregar($project, ['tipo' => 'parcial', 'notas' => 'Parcial 1', 'adjuntos' => [UploadedFile::fake()->create('p1.pdf', 50, 'application/pdf')]])->assertOk();
         $this->entregar($project, ['tipo' => 'parcial', 'notas' => 'Parcial 2'])->assertOk();
@@ -87,7 +88,7 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
 
     public function test_despues_de_la_final_cada_entrega_es_una_actualizacion(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->entregar($project, ['tipo' => 'final', 'notas' => 'Cierre'])->assertOk();
         // Aunque llegue como parcial, el área ya está entregada
@@ -101,7 +102,7 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
 
     public function test_parciales_final_y_actualizacion_van_en_el_mismo_hilo_del_proyecto(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
         app(ProjectMailService::class)->send($project, 'created');
         $rootId      = $project->fresh()->email_thread_message_id;
         $rootSubject = $project->fresh()->email_thread_subject;
@@ -123,7 +124,7 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
 
     public function test_sin_tipo_se_toma_como_entrega_final(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->entregar($project, ['notas' => 'Sin tipo'])->assertOk();
 
@@ -133,7 +134,7 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
 
     public function test_la_parcial_vacia_se_rechaza_y_no_deja_rastro(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->entregar($project, ['tipo' => 'parcial', 'notas' => '<p>&nbsp;</p>'])
             ->assertStatus(422)->assertJsonValidationErrors('notas');

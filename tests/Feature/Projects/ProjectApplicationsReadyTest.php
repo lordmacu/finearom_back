@@ -31,7 +31,7 @@ class ProjectApplicationsReadyTest extends ProjectMailTestCase
 
     public function test_entregar_aplicaciones_con_notas_y_adjuntos_envia_el_correo(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/aplicaciones/entregar", [
             'notas'    => '<p>Aplicadas en <strong>jabón</strong> y crema</p>',
@@ -51,7 +51,7 @@ class ProjectApplicationsReadyTest extends ProjectMailTestCase
 
     public function test_notas_y_adjuntos_son_opcionales(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/aplicaciones/entregar", [])->assertOk();
 
@@ -62,7 +62,7 @@ class ProjectApplicationsReadyTest extends ProjectMailTestCase
 
     public function test_reentregar_aplicaciones_envia_actualizacion_con_diff(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/aplicaciones/entregar", [
             'notas' => '<p>Primera tanda</p>',
@@ -81,7 +81,7 @@ class ProjectApplicationsReadyTest extends ProjectMailTestCase
 
     public function test_el_patch_de_entregar_ya_no_envia_correo_para_aplicaciones(): void
     {
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->patchJson("/api/projects/{$project->id}/entregar", ['department' => 'laboratorio'])
             ->assertOk();
@@ -94,7 +94,7 @@ class ProjectApplicationsReadyTest extends ProjectMailTestCase
     {
         // Un registro antiguo con tipo por acción no se usa: solo cuenta la lista "proyectos"
         Process::create(['name' => 'Aplicaciones', 'email' => 'aplicaciones@finearom.co', 'process_type' => 'project_applications_ready']);
-        $project = $this->project(['estado_interno' => 'En proceso']);
+        $project = $this->threadedProject(['estado_interno' => 'En proceso']);
 
         $this->postJson("/api/projects/{$project->id}/aplicaciones/entregar", [])->assertOk();
 

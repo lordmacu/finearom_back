@@ -35,7 +35,7 @@ class ProjectDevelopmentDeliveredTest extends ProjectMailTestCase
 
     private function projectConVariantes(array $attrs = []): \App\Models\Project
     {
-        $project = $this->project(array_merge(['desarrollador_id' => $this->engineer->id], $attrs));
+        $project = $this->threadedProject(array_merge(['desarrollador_id' => $this->engineer->id], $attrs));
         $variant = ProjectMarketingVariant::create(['project_id' => $project->id, 'nombre' => 'Var Premium', 'claims' => 'Sin parabenos']);
         ProjectMarketingVariantReference::create([
             'variant_id' => $variant->id, 'referencia' => 'Ref Aroma 123', 'codigo' => 'A-123', 'aplicacion' => 'Shampoo', 'dosis' => 0.8,

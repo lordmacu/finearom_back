@@ -58,6 +58,10 @@ class ProjectWorkflowController extends Controller
             }
         }
 
+        if (!$project->email_thread_message_id) {
+            return response()->json(['success' => false, 'message' => ProjectMailService::SIN_HILO_ENTREGA], 422);
+        }
+
         // Re-entrega de desarrollo: el correo sale como "actualización"
         $wasDelivered = $request->department === 'desarrollo' && (bool) $project->estado_desarrollo;
 

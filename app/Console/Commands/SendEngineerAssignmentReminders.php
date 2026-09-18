@@ -18,6 +18,8 @@ class SendEngineerAssignmentReminders extends Command
         // spam masivo en el primer run. Solo proyectos recientes sin ingeniero.
         $query = Project::with('ejecutivoUser')
             ->whereNull('desarrollador_id')
+            // Solo proyectos con hilo: el recordatorio va dentro del hilo
+            ->whereNotNull('email_thread_message_id')
             ->where('fecha_creacion', '<=', now()->subDay())
             ->where('fecha_creacion', '>=', today()->subDays(30))
             ->whereNotIn('estado_externo', ['Ganado', 'Perdido'])

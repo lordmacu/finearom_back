@@ -136,7 +136,7 @@ class ProjectMailThreadTest extends ProjectMailTestCase
         $this->assertCount(0, $this->sentMessages());
     }
 
-    public function test_la_asignacion_del_ingeniero_antes_de_la_creacion_no_abre_el_hilo(): void
+    public function test_la_asignacion_del_ingeniero_antes_de_la_creacion_no_sale_ni_abre_el_hilo(): void
     {
         Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
         $this->template('project_engineer_assigned', 'Se asignó ingeniero — proyecto #|project_id|', '|engineer_name|');
@@ -146,8 +146,8 @@ class ProjectMailThreadTest extends ProjectMailTestCase
         // La asignación sale ANTES del correo de creación (ingeniero elegido en el formulario)
         app(ProjectMailService::class)->sendEngineerAssigned($project, $engineer);
 
-        // Sale standalone: NO abre el hilo ni le roba el asunto
-        $this->assertCount(1, $this->sentMessages());
+        // Todo va en un solo hilo que abre la creación: sin hilo no sale
+        $this->assertCount(0, $this->sentMessages());
         $this->assertNull($project->fresh()->email_thread_message_id);
         $this->assertNull($project->fresh()->email_thread_subject);
 
