@@ -86,6 +86,21 @@ class ProjectOwnershipTest extends ProjectMailTestCase
             ->assertJsonPath('can_manage', false);
     }
 
+    public function test_una_comercial_que_tambien_es_admin_edita_cualquier_proyecto(): void
+    {
+        $this->other->assignRole(Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']));
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $this->actingAs($this->other, 'sanctum');
+
+        $this->putJson("/api/projects/{$this->project->id}", ['tipo_etiquetado' => 'SGA'])->assertOk();
+        $this->putJson("/api/projects/{$this->project->id}/sample", ['cantidad' => 3])->assertOk();
+
+        $this->getJson("/api/projects/{$this->project->id}")
+            ->assertOk()
+            ->assertJsonPath('can_manage', true);
+    }
+
     public function test_un_rol_no_comercial_con_permiso_edita_cualquier_proyecto(): void
     {
         // El usuario Tester del TestCase (sin rol Comercial) no tiene restricción de dueño

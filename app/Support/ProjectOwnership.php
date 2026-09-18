@@ -12,9 +12,12 @@ use App\Models\User;
  */
 class ProjectOwnership
 {
+    public const ADMIN_ROLES = ['admin', 'super-admin', 'Administrador'];
+
     public static function canManage(User $user, Project $project): bool
     {
-        if (!$user->hasRole('Comercial')) {
+        // Un admin que además es Comercial no queda limitado a sus proyectos
+        if (!$user->hasRole('Comercial') || $user->hasRole(self::ADMIN_ROLES)) {
             return true;
         }
 
