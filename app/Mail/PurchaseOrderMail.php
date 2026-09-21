@@ -11,6 +11,7 @@ use Illuminate\Queue\SerializesModels;
 use App\Models\ConfigSystem;
 use App\Models\BranchOffice;
 use App\Services\EmailTemplateService;
+use App\Support\PurchaseOrderFreightNotice;
 
 class PurchaseOrderMail extends Mailable
 {
@@ -106,15 +107,13 @@ class PurchaseOrderMail extends Mailable
         // Inyectar aviso de pronóstico antes de "Nota:" si hay productos que exceden
         $avisoPronostico = $this->buildForecastExceedancesBlock();
         if ($avisoPronostico !== '') {
-            // Buscar "Nota:" (case-insensitive) y meter el bloque justo antes
-            $pos = stripos($templateContent, 'nota:');
-            if ($pos !== false) {
-                $templateContent = substr($templateContent, 0, $pos)
-                    . $avisoPronostico
-                    . substr($templateContent, $pos);
-            } else {
-                $templateContent .= $avisoPronostico;
-            }
+            $templateContent = $this->insertarAntesDeNota($templateContent, $avisoPronostico);
+        }
+
+        // Aviso de flete: solo en órdenes de menos de $10.000.000 COP y de
+        // clientes que no sean AA ni A (ver PurchaseOrderFreightNotice).
+        if (PurchaseOrderFreightNotice::debeMostrarse($this->purchaseOrder)) {
+            $templateContent = $this->insertarAntesDeNota($templateContent, PurchaseOrderFreightNotice::html());
         }
 
         $variables['template_content'] = $templateContent;
@@ -124,6 +123,18 @@ class PurchaseOrderMail extends Mailable
             view: 'emails.template',
             with: $rendered
         );
+    }
+
+    /** Mete un bloque justo antes del "Nota:" del template; si no hay, al final. */
+    private function insertarAntesDeNota(string $template, string $bloque): string
+    {
+        $pos = stripos($template, 'nota:');
+
+        if ($pos === false) {
+            return $template . $bloque;
+        }
+
+        return substr($template, 0, $pos) . $bloque . substr($template, $pos);
     }
 
     private function buildForecastExceedancesBlock(): string
