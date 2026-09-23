@@ -31,14 +31,24 @@ class CampaignPlaceholdersTest extends TestCase
         );
     }
 
-    public function test_reemplaza_el_resto_de_placeholders(): void
+    public function test_reemplaza_la_ejecutiva(): void
     {
-        $html = '|ciudad| / |direccion| / |ejecutiva| / |contacto|';
+        $this->assertSame('Atte. carolina.uribe', PH::replace('Atte. |ejecutiva|', $this->cliente()));
+    }
 
+    /**
+     * Ciudad, dirección y contacto están desactivados por ahora (esos campos
+     * vienen vacíos en buena parte de los clientes). Mientras lo estén, el
+     * texto se deja intacto en vez de reemplazarlo por nada.
+     */
+    public function test_los_placeholders_desactivados_no_se_reemplazan(): void
+    {
         $this->assertSame(
-            'Medellín / Carrera 43 # 1-50 / carolina.uribe / Ana Gómez',
-            PH::replace($html, $this->cliente()),
+            '|ciudad| |direccion| |contacto|',
+            PH::replace('|ciudad| |direccion| |contacto|', $this->cliente()),
         );
+
+        $this->assertSame(['company', 'nit', 'ejecutiva'], array_keys(PH::MAPA));
     }
 
     /**
@@ -74,9 +84,9 @@ class CampaignPlaceholdersTest extends TestCase
 
     public function test_campo_vacio_en_el_cliente_no_deja_el_placeholder_visible(): void
     {
-        $c = $this->cliente(['city' => null, 'nit' => '']);
+        $c = $this->cliente(['executive' => null, 'nit' => '']);
 
-        $salida = PH::replace('[|ciudad|][|nit|]', $c);
+        $salida = PH::replace('[|ejecutiva|][|nit|]', $c);
 
         $this->assertSame('[][]', $salida);
         $this->assertStringNotContainsString('|', $salida);
@@ -97,10 +107,14 @@ class CampaignPlaceholdersTest extends TestCase
 
     public function test_el_correo_de_prueba_usa_valores_de_muestra(): void
     {
-        $salida = PH::replaceWithSample('|company| — |nit|');
+        $salida = PH::replaceWithSample('|company| — |nit| — |ejecutiva|');
 
-        $this->assertSame('CLIENTE DE PRUEBA S.A.S. — 900.123.456-7', $salida);
+        $this->assertSame('CLIENTE DE PRUEBA S.A.S. — 900.123.456-7 — Ejecutiva de prueba', $salida);
         $this->assertStringNotContainsString('|', $salida);
+
+        // La muestra sigue al MAPA: si un placeholder está desactivado, la
+        // prueba tampoco lo reemplaza.
+        $this->assertSame(array_keys(PH::MAPA), array_keys(PH::sampleValues()));
     }
 
     public function test_el_catalogo_trae_los_botones_del_formulario(): void

@@ -23,12 +23,25 @@ final class CampaignPlaceholders
      * el formulario lo ofrece como botón, sin tocar nada más.
      */
     public const MAPA = [
-        'company'   => ['client_name',             'Nombre del cliente'],
-        'nit'       => ['nit',                     'NIT'],
-        'ciudad'    => ['city',                    'Ciudad'],
-        'direccion' => ['address',                 'Dirección'],
-        'ejecutiva' => ['executive',               'Ejecutiva asignada'],
-        'contacto'  => ['purchasing_contact_name', 'Contacto de compras'],
+        'company'   => ['client_name', 'Nombre del cliente'],
+        'nit'       => ['nit',         'NIT'],
+        'ejecutiva' => ['executive',   'Ejecutiva asignada'],
+
+        // Desactivados temporalmente: esos campos están vacíos en buena parte
+        // de los clientes. Para volver a ofrecerlos basta con descomentarlos.
+        // 'ciudad'    => ['city',                    'Ciudad'],
+        // 'direccion' => ['address',                 'Dirección'],
+        // 'contacto'  => ['purchasing_contact_name', 'Contacto de compras'],
+    ];
+
+    /** Valores de muestra del correo de prueba, por placeholder. */
+    private const MUESTRAS = [
+        'company'   => 'CLIENTE DE PRUEBA S.A.S.',
+        'nit'       => '900.123.456-7',
+        'ejecutiva' => 'Ejecutiva de prueba',
+        'ciudad'    => 'Bogotá',
+        'direccion' => 'Calle 100 # 10-20',
+        'contacto'  => 'Contacto de prueba',
     ];
 
     /** Qué se pone cuando el envío no tiene cliente (correos escritos a mano). */
@@ -82,14 +95,15 @@ final class CampaignPlaceholders
      */
     public static function sampleValues(): array
     {
-        return [
-            'company'   => 'CLIENTE DE PRUEBA S.A.S.',
-            'nit'       => '900.123.456-7',
-            'ciudad'    => 'Bogotá',
-            'direccion' => 'Calle 100 # 10-20',
-            'ejecutiva' => 'Ejecutiva de prueba',
-            'contacto'  => 'Contacto de prueba',
-        ];
+        $valores = [];
+
+        // Solo los placeholders activos: si uno se desactiva en MAPA, el correo
+        // de prueba deja de reemplazarlo, igual que el envío real.
+        foreach (array_keys(self::MAPA) as $clave) {
+            $valores[$clave] = self::MUESTRAS[$clave] ?? '';
+        }
+
+        return $valores;
     }
 
     /** Reemplazo con los valores de muestra (solo para el envío de prueba). */
