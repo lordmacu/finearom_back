@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Mail\CampaignMail;
+use App\Support\CampaignPlaceholders;
 use App\Models\EmailCampaignLog;
 use Exception;
 use Illuminate\Bus\Queueable;
@@ -43,9 +44,11 @@ class SendCampaignEmailCustom implements ShouldQueue
                 throw new Exception('No se encontraron emails para enviar');
             }
 
+            // Mismo criterio que SendCampaignEmail: se resuelve con el cliente
+            // de ESTE log, sobre copias locales.
             Mail::to($emails)->send(new CampaignMail(
-                $this->customSubject,
-                $this->customBody,
+                CampaignPlaceholders::replace($this->customSubject, $log->client),
+                CampaignPlaceholders::replace($this->customBody, $log->client),
                 $this->attachments,
                 $this->logId
             ));

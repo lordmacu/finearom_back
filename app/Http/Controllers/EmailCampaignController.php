@@ -13,6 +13,7 @@ use App\Jobs\SendCampaignEmailCustom;
 use App\Mail\CampaignMail;
 use App\Models\Client;
 use App\Models\EmailCampaign;
+use App\Support\CampaignPlaceholders;
 use App\Models\EmailCampaignLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -103,6 +104,15 @@ class EmailCampaignController extends Controller
                 ['label' => 'Email Compras', 'value' => 'compras_email'],
                 ['label' => 'Email Logística', 'value' => 'logistics_email'],
             ],
+        ]);
+    }
+
+    /** Placeholders que el formulario ofrece como botones sobre el editor. */
+    public function placeholders(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data'    => CampaignPlaceholders::catalogo(),
         ]);
     }
 
@@ -311,9 +321,11 @@ class EmailCampaignController extends Controller
         try {
             $processedBody = $this->processInlineImages($request->validated()['body']);
 
+            // En la prueba no hay cliente: se usan valores de muestra para que se
+            // vea como queda el reemplazo antes de enviarle a nadie.
             Mail::to($request->validated()['test_email'])->send(new CampaignMail(
-                '[PRUEBA] ' . $request->validated()['subject'],
-                $processedBody,
+                '[PRUEBA] ' . CampaignPlaceholders::replaceWithSample($request->validated()['subject']),
+                CampaignPlaceholders::replaceWithSample($processedBody),
                 $request->validated()['attachments'] ?? [],
                 null
             ));

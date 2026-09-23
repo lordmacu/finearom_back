@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Mail\CampaignMail;
+use App\Support\CampaignPlaceholders;
 use App\Models\EmailCampaignLog;
 use Exception;
 use Illuminate\Bus\Queueable;
@@ -61,9 +62,16 @@ class SendCampaignEmail implements ShouldQueue
                 'attach_count'  => count($attachments),
             ]);
 
+            // Los placeholders se resuelven AQUI, con el cliente de ESTE envio, y
+            // sobre copias locales. La campana guardada no se toca: si se
+            // reemplazara alli, el segundo destinatario recibiria los datos del
+            // primero.
+            $asunto = CampaignPlaceholders::replace($campaign->subject, $client);
+            $cuerpo = CampaignPlaceholders::replace((string) $campaign->body, $client);
+
             Mail::to($emails)->send(new CampaignMail(
-                $campaign->subject,
-                (string) $campaign->body,
+                $asunto,
+                $cuerpo,
                 $attachments,
                 $this->logId
             ));
