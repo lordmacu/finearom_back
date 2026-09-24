@@ -78,7 +78,9 @@ class ProjectCreationMailTest extends ProjectMailTestCase
         $html = $this->sentMessages()->first()->getOriginalMessage()->getHtmlBody();
         $this->assertStringContainsString('Información general', $html);
         $this->assertStringContainsString('Aroma Test', $html);
-        $this->assertStringContainsString('Máx. variantes permitidas', $html);
+        $this->assertStringNotContainsString('Máx. variantes', $html);
+        $this->assertStringContainsString('Cantidad: 5,00 g · Copias: 2 unidades', $html);
+        $this->assertStringContainsString('Dosis: 1,50 % · Cantidad: 10 unidades', $html);
         $this->assertStringContainsString('15/12/2026', $html);
         $this->assertStringContainsString('Desarrollo', $html);
         $this->assertStringContainsString('Muestra aceite', $html);

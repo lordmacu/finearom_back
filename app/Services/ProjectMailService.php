@@ -32,11 +32,17 @@ class ProjectMailService
      * Filas que salieron del correo pero siguen en snapshots viejos. 'Campo'
      * aplica a cualquier sección; 'Sección: Campo' solo a esa sección.
      */
+    /** Filas renombradas: en snapshots viejos se leen con el nombre nuevo. */
+    private const CAMPOS_RENOMBRADOS = ['Rango' => 'Rango de precio'];
+
+    /** Secciones que salieron del correo (en snapshots viejos no cuentan como cambio). */
+    private const SECCIONES_RETIRADAS = ['Estado comercial'];
+
     private const CAMPOS_RETIRADOS = [
         'Volumen (Kg/año)', 'Factor', 'Observaciones aplicación', 'Tipo de envase', 'Marketing: Observaciones',
         // Sin campo en el formulario: no se pueden ver ni editar (Precio: ahora se usa el rango)
         'Precio (USD)',
-        'Internacional', 'Costo perfumación específico (USD)', 'Evaluaciones: Metodología', 'Evaluaciones: Referencia benchmark',
+        'Internacional', 'Costo perfumación específico (USD)', 'Máx. variantes permitidas', 'Evaluaciones: Metodología', 'Evaluaciones: Referencia benchmark',
     ];
 
     public const SIN_HILO_ENTREGA = 'Primero la ejecutiva debe enviar la creación del proyecto: las entregas van en ese mismo hilo de correo.';
@@ -439,10 +445,10 @@ class ProjectMailService
 
     /**
      * Ficha completa del proyecto agrupada por las áreas del formulario
-     * (Información general, Desarrollo, Evaluaciones, Regulatoria, Marketing,
-     * Estado comercial): área => [etiqueta => valor listo para mostrar].
-     * Cubre todos los campos del formulario; omite filas sin dato y áreas no
-     * marcadas en `secciones_visibles` (general y comercial van siempre).
+     * (Información general, Desarrollo, Evaluaciones, Regulatoria, Marketing):
+     * área => [etiqueta => valor listo para mostrar]. Omite filas sin dato y
+     * áreas no marcadas en `secciones_visibles` (general va siempre). El
+     * estado comercial no va en los correos.
      * Es la fuente única del correo de creación, del `email_snapshot`
      * y del diff del correo de modificación.
      */
@@ -493,26 +499,29 @@ class ProjectMailService
             'Fecha calculada'     => $project->fecha_calculada?->format('d/m/Y'),
             'Potencial anual (Kg)'  => $number($project->potencial_anual_kg),
             'Potencial anual (USD)' => $number($project->potencial_anual_usd),
-            'Rango'               => $range,
+            'Rango de precio'     => $range,
             'TRM'                 => $number($project->trm),
             'Dosis (%)'           => $number($project->dosis),
             'Fecha de entrega'    => $project->fecha_entrega?->format('d/m/Y'),
             'Costo perfumación (USD/ton)' => $number($project->costo_perfumacion_tonelada),
-            'Máx. variantes permitidas' => $project->max_variantes !== null ? (string) $project->max_variantes : null,
         ]);
 
         if (in_array('desarrollo', $visible, true)) {
             $sample = $project->sample;
             $application = $project->application;
 
+            $unidades = fn ($n) => $n . ((int) $n === 1 ? ' unidad' : ' unidades');
+
+            // Muestra en gramos y copias en unidades
             $muestra = $sample?->cantidad !== null
-                ? 'Cantidad: ' . $number($sample->cantidad)
-                    . ($sample->cantidad_copias ? ' · Copias: ' . $sample->cantidad_copias : '')
+                ? 'Cantidad: ' . $number($sample->cantidad) . ' g'
+                    . ($sample->cantidad_copias ? ' · Copias: ' . $unidades($sample->cantidad_copias) : '')
                 : null;
 
+            // Dosis en porcentaje y cantidad en unidades
             $aplicacion = $application?->dosis !== null
-                ? 'Dosis: ' . $number($application->dosis)
-                    . ($application->cantidad_aplicacion ? ' · Cantidad: ' . $application->cantidad_aplicacion : '')
+                ? 'Dosis: ' . $number($application->dosis) . ' %'
+                    . ($application->cantidad_aplicacion ? ' · Cantidad: ' . $unidades($application->cantidad_aplicacion) : '')
                 : null;
 
             $refName = fn ($ref) => $ref ? trim(($ref->codigo ?? '') . ' ' . ($ref->nombre ?? '')) : null;
@@ -617,14 +626,7 @@ class ProjectMailService
             ]);
         }
 
-        $sections['Estado comercial'] = $filled([
-            // Todo proyecto nace "Cancelado" (antes "En espera"): solo se informa Ganado / Perdido
-            'Estado externo'    => $project->estado_externo === 'Cancelado' ? null : $project->estado_externo,
-            'Estado interno'    => $project->estado_interno,
-            'Ejecutivo externo' => $project->ejecutivo_externo,
-            'Fecha estado externo' => $project->fecha_externo?->format('d/m/Y'),
-            'Razón de pérdida'  => $project->razon_perdida,
-        ]);
+        // El estado comercial no va en los correos del proyecto
 
         return $sections;
     }
@@ -664,7 +666,13 @@ class ProjectMailService
 
         $areas = array_unique(array_merge(array_keys($before), array_keys($current)));
         foreach ($areas as $area) {
-            $oldRows = $before[$area] ?? [];
+            if (in_array($area, self::SECCIONES_RETIRADAS, true)) {
+                continue;
+            }
+            $oldRows = [];
+            foreach ($before[$area] ?? [] as $label => $value) {
+                $oldRows[self::CAMPOS_RENOMBRADOS[$label] ?? $label] = $value;
+            }
             $newRows = $current[$area] ?? [];
 
             $labels = array_unique(array_merge(array_keys($oldRows), array_keys($newRows)));
@@ -674,12 +682,8 @@ class ProjectMailService
                     continue;
                 }
                 $old = $oldRows[$label] ?? null;
-                // Snapshots de antes del cambio: "En espera" equivale al estado inicial, que ya no se muestra
-                if ($label === 'Estado externo' && $old === 'En espera') {
-                    $old = null;
-                }
                 $new = $newRows[$label] ?? null;
-                if ($old === $new) {
+                if ($old === $new || $this->mismoSinUnidades($label, $old, $new)) {
                     continue;
                 }
                 $changes[$area][] = ['campo' => $label, 'valor' => $new];
@@ -687,6 +691,20 @@ class ProjectMailService
         }
 
         return $changes;
+    }
+
+    /**
+     * Muestra y Aplicación empezaron a llevar unidades (g, %, unidades): un
+     * snapshot viejo sin unidades con los mismos números no es un cambio.
+     */
+    private function mismoSinUnidades(string $label, ?string $old, ?string $new): bool
+    {
+        if (!in_array($label, ['Muestra aceite', 'Aplicación'], true) || $old === null || $new === null) {
+            return false;
+        }
+        $limpiar = fn (string $v) => preg_replace('/ (g|%|unidades|unidad)(?= ·|$)/u', '', $v);
+
+        return $limpiar($old) === $limpiar($new);
     }
 
     /** Cambios en HTML por área: Campo / Cómo quedó (variable |changes_table|). */

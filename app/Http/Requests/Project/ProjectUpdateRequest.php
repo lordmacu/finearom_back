@@ -64,7 +64,7 @@ class ProjectUpdateRequest extends FormRequest
             'tipo_etiquetado'              => 'nullable|in:Estandar,SGA',
             'envelope_type_ids'            => 'nullable|array',
             'envelope_type_ids.*'          => 'integer|exists:envelope_types,id',
-            'max_variantes'                => 'nullable|integer|min:1|max:50',
+            // max_variantes ya no se administra (sin límite de variantes)
             'base_cliente'    => 'nullable|boolean',
             'proactivo'       => 'nullable|boolean',
             'homologacion'    => 'nullable|boolean',
