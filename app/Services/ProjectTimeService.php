@@ -23,7 +23,6 @@ class ProjectTimeService
     private const DIAS_HOMOLOGACION = ['cromatografia' => 15, 'olfativa' => 3];
     private const DIAS_DESARROLLO = ['desde_cero' => 3, 'ajuste_formula' => 2, 'piramides_olfativas' => 1];
     private const DIAS_AREA_APLICACION = ['pesaje_aceites' => 2, 'aplicaciones_liquidas' => 2, 'aplicaciones_jabon' => 8, 'montaje_estabilidad' => 20];
-    private const DIAS_AREA_EVALUACIONES = ['evaluacion_laundry' => 3, 'evaluacion_cabinas' => 2];
 
     private const CALIDAD_BASICO = ['MSDS', 'FDS', 'IFRA', 'Ficha Técnica', 'Certificados Alergenos', 'Certificado de análisis'];
     private const CALIDAD_ESPECIALES = ['CARB', 'Libre Alérgenos', 'Reglamento Europeo', 'PSA Essity'];
@@ -44,12 +43,12 @@ class ProjectTimeService
             : (self::DIAS_DESARROLLO[$project->tipo_desarrollo ?? ''] ?? 0);
 
         $diasAplicacion = self::DIAS_AREA_APLICACION[$project->area_aplicacion ?? ''] ?? 0;
-        $diasEvaluacion = self::DIAS_AREA_EVALUACIONES[$project->area_evaluaciones ?? ''] ?? 0;
 
         $diasRegulatoria = $this->diasCalidad($project->marketingYCalidad?->calidad);
         $diasMarketing = $this->diasMarketing($project->marketingYCalidad?->marketing);
 
-        $totalDias = $diasDesarrollo + $diasAplicacion + $diasEvaluacion + max($diasRegulatoria, $diasMarketing);
+        // El área de evaluaciones ya no existe: no suma días
+        $totalDias = $diasDesarrollo + $diasAplicacion + max($diasRegulatoria, $diasMarketing);
 
         $fechaBase = $project->fecha_creacion ? Carbon::parse($project->fecha_creacion) : now();
 

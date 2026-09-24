@@ -574,6 +574,7 @@ class ProjectMailService
             $sections['Desarrollo'] = $filled([
                 'Envase'                 => $project->envelopeTypes->pluck('name')->implode(', ') ?: null,
                 'Selección de envase para aplicación' => $project->seleccion_envase_aplicacion ? 'Sí' : null,
+                'Requiere creación de pirámides' => $project->requiere_piramides ? 'Sí' : null,
                 'Tipo de etiquetado'     => $project->tipo_etiquetado,
                 'Muestra aceite'         => $muestra,
                 'Observaciones muestra'  => $sample?->observaciones,

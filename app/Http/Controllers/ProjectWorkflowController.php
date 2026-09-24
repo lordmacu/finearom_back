@@ -246,7 +246,7 @@ class ProjectWorkflowController extends Controller
         }
 
         $estadoAntes = collect([
-            $project->estado_externo !== 'Cancelado' ? $project->estado_externo : null,
+            $project->estado_externo !== 'Sin definir' ? $project->estado_externo : null,
             $project->estado_interno,
         ])->filter()->implode(' · ');
 

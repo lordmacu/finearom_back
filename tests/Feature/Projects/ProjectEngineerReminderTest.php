@@ -18,7 +18,7 @@ class ProjectEngineerReminderTest extends ProjectMailTestCase
         // Con hilo: el recordatorio solo sale dentro del hilo del proyecto
         return $this->threadedProject(array_merge([
             'fecha_creacion'  => today()->subDays(2),
-            'estado_externo'  => 'Cancelado',
+            'estado_externo'  => 'Sin definir',
             'estado_interno'  => 'En proceso',
         ], $attrs));
     }

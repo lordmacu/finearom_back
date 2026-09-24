@@ -24,7 +24,7 @@ class SendProjectUrgencyAlerts extends Command
         $projects = Project::with(['client', 'ejecutivoUser'])
             ->whereNotNull('fecha_requerida')
             ->whereBetween('fecha_requerida', [$today->toDateString(), $targetDate->toDateString()])
-            ->whereNotIn('estado_externo', ['Ganado', 'Perdido'])
+            ->whereNotIn('estado_externo', ['Ganado', 'Perdido', 'Cancelado'])
             ->where('estado_interno', '!=', 'Entregado')
             ->get();
 

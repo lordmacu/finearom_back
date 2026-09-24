@@ -22,7 +22,7 @@ class SendEngineerAssignmentReminders extends Command
             ->whereNotNull('email_thread_message_id')
             ->where('fecha_creacion', '<=', now()->subDay())
             ->where('fecha_creacion', '>=', today()->subDays(30))
-            ->whereNotIn('estado_externo', ['Ganado', 'Perdido'])
+            ->whereNotIn('estado_externo', ['Ganado', 'Perdido', 'Cancelado'])
             ->where('estado_interno', '!=', 'Entregado');
 
         $total = (clone $query)->count();

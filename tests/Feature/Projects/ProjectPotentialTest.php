@@ -34,7 +34,7 @@ class ProjectPotentialTest extends ProjectMailTestCase
             'tipo'             => 'Desarrollo',
             'nombre_prospecto' => 'Prospecto P',
             'ejecutivo'        => $ejecutivo,
-            'estado_externo'   => 'Cancelado',
+            'estado_externo'   => 'Sin definir',
             'fecha_creacion'   => today(),
         ], $attrs));
 
@@ -291,7 +291,7 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->assertEquals(['kg' => 1200, 'usd' => 16500], $res->json('data.suma_referencias'));
         $this->assertStringContainsString('2 referencia(s) seleccionada(s)', ProjectStatusHistory::first()->descripcion);
         // El estado de la referencia no toca el del proyecto
-        $this->assertSame('Cancelado', $project->estado_externo);
+        $this->assertSame('Sin definir', $project->estado_externo);
     }
 
     public function test_deseleccionar_borra_los_datos_de_la_referencia(): void

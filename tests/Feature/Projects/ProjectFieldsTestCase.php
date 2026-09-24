@@ -175,6 +175,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->string('tipo_desarrollo', 30)->nullable();
             $t->string('area_aplicacion', 30)->nullable();
             $t->boolean('seleccion_envase_aplicacion')->default(false);
+            $t->boolean('requiere_piramides')->default(false);
             $t->string('area_evaluaciones', 30)->nullable();
             $t->boolean('internacional')->default(false);
             $t->string('tipo_producto')->nullable();

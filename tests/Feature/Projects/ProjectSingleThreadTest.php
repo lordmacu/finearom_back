@@ -81,7 +81,7 @@ class ProjectSingleThreadTest extends ProjectMailTestCase
 
     public function test_el_recordatorio_de_ingeniero_solo_sale_en_proyectos_con_hilo(): void
     {
-        $attrs = ['fecha_creacion' => today()->subDays(3), 'estado_externo' => 'Cancelado', 'estado_interno' => 'En proceso'];
+        $attrs = ['fecha_creacion' => today()->subDays(3), 'estado_externo' => 'Sin definir', 'estado_interno' => 'En proceso'];
         $this->project($attrs);
         $conHilo = $this->threadedProject($attrs);
 

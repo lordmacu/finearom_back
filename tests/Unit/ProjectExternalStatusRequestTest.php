@@ -14,8 +14,8 @@ class ProjectExternalStatusRequestTest extends TestCase
     }
 
     /**
-     * El estado externo solo puede ser Cancelado, Ganado o Perdido.
-     * 'Cancelado' (antes "En espera") es además el estado inicial de todo proyecto.
+     * El resultado comercial que se marca a mano: Cancelado, Ganado o Perdido.
+     * 'Sin definir' es el estado inicial y no se elige a mano.
      *
      * @dataProvider estadosDeLaInterfaz
      */
@@ -32,6 +32,7 @@ class ProjectExternalStatusRequestTest extends TestCase
     public function test_rechaza_un_estado_desconocido(): void
     {
         $this->assertFalse($this->valida(['status' => 'En espera']));
+        $this->assertFalse($this->valida(['status' => 'Sin definir']));
     }
 
     public function test_exige_el_estado(): void

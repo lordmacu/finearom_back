@@ -72,7 +72,8 @@ class ProjectUpdateRequest extends FormRequest
             'tipo_desarrollo' => 'nullable|in:desde_cero,ajuste_formula,piramides_olfativas',
             'area_aplicacion' => 'nullable|in:pesaje_aceites,aplicaciones_liquidas,aplicaciones_jabon,montaje_estabilidad',
             'seleccion_envase_aplicacion' => 'sometimes|boolean',
-            'area_evaluaciones' => 'nullable|in:evaluacion_laundry,evaluacion_cabinas',
+            'requiere_piramides'          => 'sometimes|boolean',
+            // area_evaluaciones ya no se usa (se quitó del formulario y del cálculo de tiempos)
             'nuevo_tipo_producto' => 'nullable|string|max:200',
             'internacional'   => 'nullable|boolean',
             'fecha_requerida' => 'nullable|date',

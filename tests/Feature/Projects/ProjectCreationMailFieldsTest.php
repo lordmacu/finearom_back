@@ -29,7 +29,7 @@ class ProjectCreationMailFieldsTest extends ProjectMailTestCase
     {
         $html = $this->correoDeCreacion([
             'volumen' => 500, 'factor' => 1.8, 'internacional' => true, 'costo_perfumacion_especifico' => 12,
-            'estado_externo' => 'Cancelado', 'potencial_anual_kg' => 100, 'precio' => 5, 'rango_min' => 3, 'rango_max' => 5,
+            'estado_externo' => 'Sin definir', 'potencial_anual_kg' => 100, 'precio' => 5, 'rango_min' => 3, 'rango_max' => 5,
         ]);
 
         foreach (['Volumen', 'Factor', 'Internacional', 'Costo perfumación específico', 'Estado externo', 'Cancelado', 'Precio'] as $retirado) {

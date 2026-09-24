@@ -18,7 +18,7 @@ class ProjectPotentialExportRequest extends FormRequest
         // Los mismos filtros del listado; sin ejecutiva se descargan todas
         return array_merge($this->yearRules(), [
             'ejecutivo'      => ['nullable', 'string', 'max:255'],
-            'estado_externo' => ['nullable', 'in:Cancelado,Ganado,Perdido'],
+            'estado_externo' => ['nullable', 'in:Sin definir,Cancelado,Ganado,Perdido'],
         ]);
     }
 }
