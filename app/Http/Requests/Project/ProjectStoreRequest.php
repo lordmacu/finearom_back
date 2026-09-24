@@ -18,6 +18,11 @@ class ProjectStoreRequest extends FormRequest
             if (!$this->client_id && !$this->nombre_prospecto) {
                 $v->errors()->add('client_id', 'Ingresa un cliente del sistema o el nombre del prospecto.');
             }
+            $min = $this->input('rango_min');
+            $max = $this->input('rango_max');
+            if (is_numeric($min) && is_numeric($max) && (float) $max < (float) $min) {
+                $v->errors()->add('rango_max', 'El rango máximo debe ser mayor o igual al mínimo.');
+            }
         });
     }
 
@@ -45,9 +50,10 @@ class ProjectStoreRequest extends FormRequest
             'secciones_visibles'   => 'nullable|array',
             'secciones_visibles.*' => 'in:desarrollo,evaluaciones,regulatoria,marketing,comercial',
             'rango_min'       => 'nullable|numeric|min:0',
-            'rango_max'       => 'nullable|numeric|min:0|gte:rango_min',
+            // Solo se compara con el mínimo cuando vienen los dos (withValidator)
+            'rango_max'       => 'nullable|numeric|min:0',
             'volumen'         => 'nullable|numeric|min:0',
-            'precio'          => 'nullable|numeric|min:0',
+            // precio ya no se usa: el potencial USD se calcula con el rango máximo
             'dosis'           => 'nullable|numeric|min:0|max:100',
             'trm'             => 'nullable|numeric|min:0',
             'factor'                       => 'nullable|numeric|min:0',

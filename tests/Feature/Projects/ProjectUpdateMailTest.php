@@ -82,11 +82,11 @@ class ProjectUpdateMailTest extends ProjectMailTestCase
         $project->update(['potencial_anual_kg' => 200]);
         $this->postJson("/api/projects/{$project->id}/send-update")->assertOk();
 
-        $project->update(['precio' => 50]);
+        $project->update(['dosis' => 50]);
         $this->postJson("/api/projects/{$project->id}/send-update")->assertOk();
 
         $html = $this->sentMessages()->last()->getOriginalMessage()->getHtmlBody();
-        $this->assertStringContainsString('Precio (USD)', $html);
+        $this->assertStringContainsString('Dosis (%)', $html);
         $this->assertStringContainsString('50,00', $html);
         // El cambio de potencial en Kg ya se reportó en el correo anterior
         $this->assertStringNotContainsString('Potencial anual (Kg)', $html);

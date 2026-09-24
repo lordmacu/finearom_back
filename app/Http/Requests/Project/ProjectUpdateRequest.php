@@ -14,6 +14,18 @@ class ProjectUpdateRequest extends FormRequest
         return ProjectOwnership::canManage($this->user(), $this->route('project'));
     }
 
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($v) {
+            $project = $this->route('project');
+            $min = $this->has('rango_min') ? $this->input('rango_min') : $project?->rango_min;
+            $max = $this->has('rango_max') ? $this->input('rango_max') : $project?->rango_max;
+            if (is_numeric($min) && is_numeric($max) && (float) $max < (float) $min) {
+                $v->errors()->add('rango_max', 'El rango máximo debe ser mayor o igual al mínimo.');
+            }
+        });
+    }
+
     protected function prepareForValidation(): void
     {
         // tipo_homologacion solo aplica cuando la característica es Homologación.
@@ -40,9 +52,10 @@ class ProjectUpdateRequest extends FormRequest
             'secciones_visibles'   => 'nullable|array',
             'secciones_visibles.*' => 'in:desarrollo,evaluaciones,regulatoria,marketing,comercial',
             'rango_min'       => 'nullable|numeric|min:0',
-            'rango_max'       => 'nullable|numeric|min:0|gte:rango_min',
+            // Se compara con el mínimo (el enviado o el guardado) en withValidator
+            'rango_max'       => 'nullable|numeric|min:0',
             'volumen'         => 'nullable|numeric|min:0',
-            'precio'          => 'nullable|numeric|min:0',
+            // precio ya no se usa: el potencial USD se calcula con el rango máximo
             'dosis'           => 'nullable|numeric|min:0|max:100',
             'trm'             => 'nullable|numeric|min:0',
             'factor'                       => 'nullable|numeric|min:0',

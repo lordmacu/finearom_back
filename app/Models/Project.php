@@ -140,16 +140,16 @@ class Project extends Model
 
     protected static function booted(): void
     {
-        // Potencial anual (USD) = Precio (USD) × Potencial anual (Kg). Siempre se
-        // calcula aquí: lo que llegue del cliente se ignora. Solo se recalcula si
-        // cambia uno de los dos, para no borrar el USD manual de proyectos viejos.
+        // Potencial anual (USD) = Rango máximo (USD/Kg) × Potencial anual (Kg).
+        // Siempre se calcula aquí: lo que llegue del cliente se ignora. Solo se
+        // recalcula si cambia uno de los dos, para no tocar proyectos viejos.
         static::saving(function (Project $project) {
-            if ($project->exists && !$project->isDirty(['precio', 'potencial_anual_kg'])) {
+            if ($project->exists && !$project->isDirty(['rango_max', 'potencial_anual_kg'])) {
                 $project->potencial_anual_usd = $project->getOriginal('potencial_anual_usd');
                 return;
             }
 
-            $project->potencial_anual_usd = self::calcularPotencialUsd($project->precio, $project->potencial_anual_kg);
+            $project->potencial_anual_usd = self::calcularPotencialUsd($project->rango_max, $project->potencial_anual_kg);
         });
     }
 
@@ -165,13 +165,13 @@ class Project extends Model
         return $data;
     }
 
-    public static function calcularPotencialUsd($precio, $kg): ?float
+    public static function calcularPotencialUsd($rangoMax, $kg): ?float
     {
-        if ($precio === null || $kg === null) {
+        if ($rangoMax === null || $kg === null) {
             return null;
         }
 
-        return round((float) $precio * (float) $kg, 2);
+        return round((float) $rangoMax * (float) $kg, 2);
     }
 
     public function client(): BelongsTo

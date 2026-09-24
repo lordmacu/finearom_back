@@ -356,7 +356,7 @@ class ProjectPotentialTest extends ProjectMailTestCase
 
     public function test_el_potencial_kg_manual_recalcula_el_usd_y_se_conserva_al_guardar_referencias(): void
     {
-        $project = $this->proyecto(attrs: ['precio' => 15]);
+        $project = $this->proyecto(attrs: ['rango_max' => 15]);
 
         $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => 800])
             ->assertOk()

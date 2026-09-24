@@ -32,7 +32,12 @@ class ProjectMailService
      * Filas que salieron del correo pero siguen en snapshots viejos. 'Campo'
      * aplica a cualquier sección; 'Sección: Campo' solo a esa sección.
      */
-    private const CAMPOS_RETIRADOS = ['Volumen (Kg/año)', 'Factor', 'Observaciones aplicación', 'Tipo de envase', 'Marketing: Observaciones'];
+    private const CAMPOS_RETIRADOS = [
+        'Volumen (Kg/año)', 'Factor', 'Observaciones aplicación', 'Tipo de envase', 'Marketing: Observaciones',
+        // Sin campo en el formulario: no se pueden ver ni editar (Precio: ahora se usa el rango)
+        'Precio (USD)',
+        'Internacional', 'Costo perfumación específico (USD)', 'Evaluaciones: Metodología', 'Evaluaciones: Referencia benchmark',
+    ];
 
     public const SIN_HILO_ENTREGA = 'Primero la ejecutiva debe enviar la creación del proyecto: las entregas van en ese mismo hilo de correo.';
 
@@ -445,7 +450,7 @@ class ProjectMailService
     {
         $project->loadMissing([
             'client', 'prospect', 'product', 'productCategory', 'envelopeTypes',
-            'sample', 'application', 'evaluation', 'evaluation.benchmarkReference',
+            'sample', 'application', 'evaluation',
             'marketingYCalidad', 'marketingVariants.references',
             'variants.benchmarkReference', 'variants.proposals.finearomReference',
             'fragrances.fineFragrance', 'desarrollador',
@@ -483,19 +488,16 @@ class ProjectMailService
             'Tipo de producto'    => $project->product?->nombre ?? $project->tipo_producto,
             'Origen'              => $origen,
             'Base del cliente'    => $project->base_cliente ? 'Sí' : null,
-            'Internacional'       => $project->internacional ? 'Sí' : null,
             'Fecha de creación'   => $project->fecha_creacion?->format('d/m/Y'),
             'Fecha requerida'     => $project->fecha_requerida?->format('d/m/Y'),
             'Fecha calculada'     => $project->fecha_calculada?->format('d/m/Y'),
             'Potencial anual (Kg)'  => $number($project->potencial_anual_kg),
             'Potencial anual (USD)' => $number($project->potencial_anual_usd),
             'Rango'               => $range,
-            'Precio (USD)'        => $number($project->precio),
             'TRM'                 => $number($project->trm),
             'Dosis (%)'           => $number($project->dosis),
             'Fecha de entrega'    => $project->fecha_entrega?->format('d/m/Y'),
             'Costo perfumación (USD/ton)' => $number($project->costo_perfumacion_tonelada),
-            'Costo perfumación específico (USD)' => $number($project->costo_perfumacion_especifico),
             'Máx. variantes permitidas' => $project->max_variantes !== null ? (string) $project->max_variantes : null,
         ]);
 
@@ -568,11 +570,7 @@ class ProjectMailService
 
             $sections['Evaluaciones'] = $filled([
                 'Tipos de evaluación' => !empty($evaluation?->tipos) ? implode(', ', $evaluation->tipos) : null,
-                'Metodología'         => $evaluation?->metodologia,
                 'Benchmark'           => $evaluation?->bench_text,
-                'Referencia benchmark' => $evaluation?->benchmarkReference
-                    ? trim(($evaluation->benchmarkReference->codigo ?? '') . ' ' . ($evaluation->benchmarkReference->nombre ?? ''))
-                    : null,
                 'Observación'         => $evaluation?->observacion,
             ]);
         }
@@ -620,7 +618,8 @@ class ProjectMailService
         }
 
         $sections['Estado comercial'] = $filled([
-            'Estado externo'    => $project->estado_externo,
+            // Todo proyecto nace "Cancelado" (antes "En espera"): solo se informa Ganado / Perdido
+            'Estado externo'    => $project->estado_externo === 'Cancelado' ? null : $project->estado_externo,
             'Estado interno'    => $project->estado_interno,
             'Ejecutivo externo' => $project->ejecutivo_externo,
             'Fecha estado externo' => $project->fecha_externo?->format('d/m/Y'),
@@ -675,6 +674,10 @@ class ProjectMailService
                     continue;
                 }
                 $old = $oldRows[$label] ?? null;
+                // Snapshots de antes del cambio: "En espera" equivale al estado inicial, que ya no se muestra
+                if ($label === 'Estado externo' && $old === 'En espera') {
+                    $old = null;
+                }
                 $new = $newRows[$label] ?? null;
                 if ($old === $new) {
                     continue;
