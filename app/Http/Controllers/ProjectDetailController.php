@@ -14,9 +14,11 @@ use App\Models\ProjectRequest as ProjectRequestModel;
 use App\Models\ProjectVariant;
 use App\Models\FinearomReference;
 use App\Services\ProjectTimeService;
+use App\Services\ProjectVariantMarketingSync;
 use Illuminate\Http\Request;
 use App\Support\ProjectFactorPermission;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -25,6 +27,7 @@ class ProjectDetailController extends Controller
 {
     public function __construct(
         private readonly ProjectTimeService $timeService,
+        private readonly ProjectVariantMarketingSync $marketingSync,
     ) {
         $this->middleware('can:project edit')->except(['evaluationBenchImage']);
         $this->middleware('can:project list')->only(['evaluationBenchImage']);
@@ -146,7 +149,13 @@ class ProjectDetailController extends Controller
             }
         }
 
-        $variant = $project->variants()->create($request->validated());
+        // La variante se crea también en Marketing (solo el nombre)
+        $variant = DB::transaction(function () use ($project, $request) {
+            $variant = $project->variants()->create($request->validated());
+            $this->marketingSync->created($variant);
+
+            return $variant;
+        });
 
         return response()->json(['success' => true, 'data' => $variant, 'message' => 'Variante creada'], 201);
     }
@@ -154,7 +163,10 @@ class ProjectDetailController extends Controller
     public function updateVariant(ProjectVariantRequest $request, Project $project, ProjectVariant $variant): JsonResponse
     {
         abort_if($variant->project_id !== $project->id, 404);
-        $variant->update($request->validated());
+        DB::transaction(function () use ($variant, $request) {
+            $variant->update($request->validated());
+            $this->marketingSync->updated($variant);
+        });
 
         return response()->json(['success' => true, 'data' => $variant->fresh(), 'message' => 'Variante actualizada']);
     }
@@ -162,7 +174,10 @@ class ProjectDetailController extends Controller
     public function destroyVariant(Project $project, ProjectVariant $variant): JsonResponse
     {
         abort_if($variant->project_id !== $project->id, 404);
-        $variant->delete();
+        DB::transaction(function () use ($variant) {
+            $this->marketingSync->deleting($variant);
+            $variant->delete();
+        });
 
         return response()->json(['success' => true, 'message' => 'Variante eliminada']);
     }

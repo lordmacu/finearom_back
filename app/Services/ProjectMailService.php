@@ -28,8 +28,11 @@ use Illuminate\Support\Str;
 class ProjectMailService
 {
     /** Las entregas solo se registran con el hilo abierto por el correo de creación. */
-    /** Filas que salieron del correo pero siguen en snapshots viejos. */
-    private const CAMPOS_RETIRADOS = ['Volumen (Kg/año)', 'Factor', 'Observaciones aplicación', 'Tipo de envase'];
+    /**
+     * Filas que salieron del correo pero siguen en snapshots viejos. 'Campo'
+     * aplica a cualquier sección; 'Sección: Campo' solo a esa sección.
+     */
+    private const CAMPOS_RETIRADOS = ['Volumen (Kg/año)', 'Factor', 'Observaciones aplicación', 'Tipo de envase', 'Marketing: Observaciones'];
 
     public const SIN_HILO_ENTREGA = 'Primero la ejecutiva debe enviar la creación del proyecto: las entregas van en ese mismo hilo de correo.';
 
@@ -612,7 +615,6 @@ class ProjectMailService
                 'Marca'                => $marketing?->marca,
                 'Descripción detallada' => $marketing?->descripcion_detallada,
                 'Fecha entrega marketing' => $marketing?->fecha_entrega_marketing?->format('d/m/Y'),
-                'Observaciones'        => $marketing?->obs_marketing,
                 'Variantes de marketing' => $variantesMarketing ?: null,
             ]);
         }
@@ -669,7 +671,7 @@ class ProjectMailService
             $labels = array_unique(array_merge(array_keys($oldRows), array_keys($newRows)));
             foreach ($labels as $label) {
                 // Campos que ya no se muestran: no son un cambio del proyecto
-                if (in_array($label, self::CAMPOS_RETIRADOS, true)) {
+                if (in_array($label, self::CAMPOS_RETIRADOS, true) || in_array("{$area}: {$label}", self::CAMPOS_RETIRADOS, true)) {
                     continue;
                 }
                 $old = $oldRows[$label] ?? null;

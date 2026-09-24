@@ -281,6 +281,11 @@ abstract class ProjectFieldsTestCase extends TestCase
         Schema::create('project_variants', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('project_id');
+            $t->string('nombre')->nullable();
+            $t->string('categoria', 100)->nullable();
+            $t->text('observaciones')->nullable();
+            $t->text('descripcion')->nullable();
+            $t->unsignedBigInteger('benchmark_reference_id')->nullable();
             $t->timestamps();
         });
 
@@ -313,6 +318,7 @@ abstract class ProjectFieldsTestCase extends TestCase
         Schema::create('project_marketing_variants', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('project_id');
+            $t->unsignedBigInteger('project_variant_id')->nullable();
             $t->string('nombre', 200)->nullable();
             $t->text('claims')->nullable();
             $t->string('color_etiqueta', 50)->nullable();
