@@ -17,7 +17,7 @@ class ProjectPotentialIndexRequest extends FormRequest
     {
         return array_merge($this->yearRules(), [
             'ejecutivo'      => ['required', 'string', 'max:255'],
-            'estado_externo' => ['nullable', 'in:En espera,Ganado,Perdido'],
+            'estado_externo' => ['nullable', 'in:Cancelado,Ganado,Perdido'],
         ]);
     }
 

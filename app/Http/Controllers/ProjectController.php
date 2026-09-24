@@ -59,6 +59,16 @@ class ProjectController extends Controller
         ]);
     }
 
+    private function fechaFiltro(mixed $valor): ?string
+    {
+        if (!is_string($valor)) {
+            return null;
+        }
+        $fecha = \DateTime::createFromFormat('!Y-m-d', $valor);
+
+        return $fecha && $fecha->format('Y-m-d') === $valor ? $valor : null;
+    }
+
     private function buildQuery(Request $request): \Illuminate\Database\Eloquent\Builder
     {
         $query = Project::query()->with(['client:id,client_name', 'prospect:id,nombre', 'product:id,nombre', 'desarrollador:id,name']);
@@ -74,6 +84,14 @@ class ProjectController extends Controller
         }
         if ($ejecutivo = $request->query('ejecutivo')) {
             $query->where('ejecutivo', $ejecutivo);
+        }
+        // Rango por fecha de creación (Y-m-d) para acotar el listado; una fecha
+        // mal formada se ignora
+        if ($desde = $this->fechaFiltro($request->query('desde'))) {
+            $query->whereDate('fecha_creacion', '>=', $desde);
+        }
+        if ($hasta = $this->fechaFiltro($request->query('hasta'))) {
+            $query->whereDate('fecha_creacion', '<=', $hasta);
         }
         if ($search = $request->query('search')) {
             $query->where(function ($q) use ($search) {
@@ -191,7 +209,7 @@ class ProjectController extends Controller
                 $data,
                 [
                     'fecha_creacion' => $request->fecha_creacion ?? today(),
-                    'estado_externo' => 'En espera',
+                    'estado_externo' => 'Cancelado',
                     'estado_interno' => 'En proceso',
                 ]
             ));
@@ -429,7 +447,7 @@ class ProjectController extends Controller
             $attrs['nombre']         = $attrs['nombre'] . ' (copia)';
             $attrs['fecha_creacion'] = today();
             $attrs['ejecutivo']      = auth()->user()->name;
-            $attrs['estado_externo'] = 'En espera';
+            $attrs['estado_externo'] = 'Cancelado';
             $attrs['estado_interno'] = 'En proceso';
 
             $newProject = Project::create($attrs);
@@ -617,7 +635,7 @@ class ProjectController extends Controller
             'total'      => $base()->count(),
             'ganados'    => $base()->where('estado_externo', 'Ganado')->count(),
             'perdidos'   => $base()->where('estado_externo', 'Perdido')->count(),
-            'en_espera'  => $base()->where('estado_externo', 'En espera')->count(),
+            'cancelado'  => $base()->where('estado_externo', 'Cancelado')->count(),
             'entregados' => $base()->where('estado_interno', 'Entregado')->count(),
             'en_proceso' => $base()->where('estado_interno', 'En proceso')->count(),
         ];
@@ -638,7 +656,7 @@ class ProjectController extends Controller
             ->get();
 
         $potencialPorProbabilidad = $base()
-            ->where('estado_externo', 'En espera')
+            ->where('estado_externo', 'Cancelado')
             ->whereNotNull('probabilidad_cierre')
             ->selectRaw('probabilidad_cierre, SUM(potencial_anual_usd) as total_usd, SUM(potencial_anual_kg) as total_kg, COUNT(*) as cantidad')
             ->groupBy('probabilidad_cierre')
@@ -646,7 +664,7 @@ class ProjectController extends Controller
             ->keyBy('probabilidad_cierre');
 
         $pronosticoAnual = $base()
-            ->where('estado_externo', 'En espera')
+            ->where('estado_externo', 'Cancelado')
             ->whereNotNull('probabilidad_cierre')
             ->whereNotNull('potencial_anual_usd')
             ->get(['probabilidad_cierre', 'potencial_anual_usd'])
@@ -663,7 +681,7 @@ class ProjectController extends Controller
         // Pronóstico del año en curso: basado en fecha_cierre_estimada + frecuencia_compra_estimada
         // Calcula cuántos despachos caben en el año desde la fecha estimada de cierre
         $pronosticoAnioCurso = $base()
-            ->where('estado_externo', 'En espera')
+            ->where('estado_externo', 'Cancelado')
             ->whereNotNull('fecha_cierre_estimada')
             ->whereNotNull('frecuencia_compra_estimada')
             ->whereNotNull('potencial_anual_usd')
@@ -678,9 +696,9 @@ class ProjectController extends Controller
                 return $despachosPosibles * $ingresoPorDespacho;
             });
 
-        // Potencial total en KG (proyectos en espera)
+        // Potencial total en KG (proyectos cancelados, antes "En espera")
         $potencialKgTotal = $base()
-            ->where('estado_externo', 'En espera')
+            ->where('estado_externo', 'Cancelado')
             ->whereNotNull('potencial_anual_kg')
             ->sum('potencial_anual_kg');
 
@@ -756,7 +774,7 @@ class ProjectController extends Controller
 
     /**
      * Pipeline de alta probabilidad, desglosado por cliente: solo proyectos
-     * `probabilidad_cierre = alto` aún en espera, con su fecha de cierre
+     * `probabilidad_cierre = alto` aún cancelados (antes "En espera"), con su fecha de cierre
      * estimada y el potencial en USD — más su equivalente en COP a la TRM
      * elegida (por defecto, la de hoy).
      */
@@ -768,7 +786,7 @@ class ProjectController extends Controller
 
         $projects = Project::query()
             ->where('probabilidad_cierre', 'alto')
-            ->where('estado_externo', 'En espera')
+            ->where('estado_externo', 'Cancelado')
             ->when($ejecutivo, fn ($q) => $q->where('ejecutivo', $ejecutivo))
             ->with('client:id,client_name')
             ->orderBy('fecha_cierre_estimada')

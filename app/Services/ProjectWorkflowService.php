@@ -152,11 +152,11 @@ class ProjectWorkflowService
     }
 
     /**
-     * Reabre un proyecto cerrado, reseteando estados a En espera / En proceso.
+     * Reabre un proyecto cerrado, reseteando estados a Cancelado / En proceso.
      */
     public function reabrir(Project $project, string $executive): void
     {
-        $project->estado_externo    = 'En espera';
+        $project->estado_externo    = 'Cancelado';
         $project->estado_interno    = 'En proceso';
         $project->fecha_externo     = null;
         $project->ejecutivo_externo = null;

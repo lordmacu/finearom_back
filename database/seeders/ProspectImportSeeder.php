@@ -468,7 +468,7 @@ class ProspectImportSeeder extends Seeder
         return match (trim($estado)) {
             'Ganado'  => 'Ganado',
             'Perdido' => 'Perdido',
-            default   => 'En espera',
+            default   => 'Cancelado',
         };
     }
 

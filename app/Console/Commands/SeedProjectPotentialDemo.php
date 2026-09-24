@@ -110,7 +110,7 @@ class SeedProjectPotentialDemo extends Command
         $propios = $base()->where('ejecutivo', $legacy)->limit($cantidad)->get();
 
         return $propios->concat(
-            $base()->whereNotIn('id', $propios->pluck('id'))->where('estado_externo', 'En espera')
+            $base()->whereNotIn('id', $propios->pluck('id'))->where('estado_externo', 'Cancelado')
                 ->limit($cantidad - $propios->count())->get()
         )->values();
     }

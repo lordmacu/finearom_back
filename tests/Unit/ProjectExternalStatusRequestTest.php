@@ -14,8 +14,8 @@ class ProjectExternalStatusRequestTest extends TestCase
     }
 
     /**
-     * El menú de estado externo de ProjectShow ofrece estos tres valores y
-     * 'En espera' es además el estado inicial de todo proyecto.
+     * El estado externo solo puede ser Cancelado, Ganado o Perdido.
+     * 'Cancelado' (antes "En espera") es además el estado inicial de todo proyecto.
      *
      * @dataProvider estadosDeLaInterfaz
      */
@@ -26,12 +26,12 @@ class ProjectExternalStatusRequestTest extends TestCase
 
     public static function estadosDeLaInterfaz(): array
     {
-        return [['En espera'], ['Ganado'], ['Perdido']];
+        return [['Cancelado'], ['Ganado'], ['Perdido']];
     }
 
     public function test_rechaza_un_estado_desconocido(): void
     {
-        $this->assertFalse($this->valida(['status' => 'Cancelado']));
+        $this->assertFalse($this->valida(['status' => 'En espera']));
     }
 
     public function test_exige_el_estado(): void
