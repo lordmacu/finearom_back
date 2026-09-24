@@ -42,6 +42,8 @@ use App\Http\Controllers\ProjectFileController;
 use App\Http\Controllers\ProjectLabelController;
 use App\Http\Controllers\ProjectWorkflowController;
 use App\Http\Controllers\ProjectCatalogController;
+use App\Http\Controllers\ProjectCatalogItemAdminController;
+use App\Http\Controllers\ProjectCatalogItemController;
 use App\Http\Controllers\ProjectDetailController;
 use App\Http\Controllers\ProjectEngineerController;
 use App\Http\Controllers\ProjectAreaDeliveryController;
@@ -512,6 +514,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/envelope-types', [EnvelopeTypeController::class, 'index']);
     Route::get('/envelope-types/{envelopeType}/photo', [EnvelopeTypeController::class, 'photo']);
+
+    // Catálogos de diseños de etiqueta y pirámides ({tipo}: etiqueta | piramide)
+    Route::get('/project-catalog-items/{tipo}', [ProjectCatalogItemController::class, 'index'])->whereIn('tipo', ['etiqueta', 'piramide']);
+    Route::get('/project-catalog-items/item/{item}/photo', [ProjectCatalogItemController::class, 'photo']);
+    Route::put('/projects/{project}/catalog-items/{tipo}', [ProjectCatalogItemController::class, 'sync'])->whereIn('tipo', ['etiqueta', 'piramide']);
+    Route::get('/admin/project-catalog-items/{tipo}', [ProjectCatalogItemAdminController::class, 'index'])->whereIn('tipo', ['etiqueta', 'piramide']);
+    Route::post('/admin/project-catalog-items', [ProjectCatalogItemAdminController::class, 'store']);
+    Route::put('/admin/project-catalog-items/{item}', [ProjectCatalogItemAdminController::class, 'update']);
+    Route::delete('/admin/project-catalog-items/{item}', [ProjectCatalogItemAdminController::class, 'destroy']);
 
     // Admin CRUD para envelope types
     Route::get('/admin/envelope-types', [EnvelopeTypeAdminController::class, 'index']);

@@ -191,6 +191,13 @@ class Project extends Model
             ->withTimestamps();
     }
 
+    /** Diseños de etiqueta y pirámides elegidos de los catálogos de Marketing. */
+    public function catalogItems(): BelongsToMany
+    {
+        return $this->belongsToMany(ProjectCatalogItem::class, 'project_catalog_item_project', 'project_id', 'catalog_item_id')
+            ->withTimestamps();
+    }
+
     public function prospect(): BelongsTo
     {
         return $this->belongsTo(Prospect::class, 'prospect_id');

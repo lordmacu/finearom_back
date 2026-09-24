@@ -296,6 +296,7 @@ class ProjectController extends Controller
             'product',
             'productCategory',
             'envelopeTypes',
+            'catalogItems',
             'sample',
             'application',
             'evaluation',

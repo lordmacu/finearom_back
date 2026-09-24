@@ -469,7 +469,7 @@ class ProjectMailService
             'sample', 'application', 'evaluation',
             'marketingYCalidad', 'marketingVariants.references',
             'variants.proposals.finearomReference',
-            'fragrances.fineFragrance', 'desarrollador',
+            'fragrances.fineFragrance', 'desarrollador', 'catalogItems',
         ]);
 
         $number = fn ($value) => ($value === null || $value === '')
@@ -632,6 +632,8 @@ class ProjectMailService
                 'Marca'                => $marketing?->marca,
                 'Descripción detallada' => $marketing?->descripcion_detallada,
                 'Fecha entrega marketing' => $marketing?->fecha_entrega_marketing?->format('d/m/Y'),
+                'Diseños de etiqueta'  => $project->catalogItems->where('tipo', 'etiqueta')->pluck('name')->implode(', ') ?: null,
+                'Pirámides'            => $project->catalogItems->where('tipo', 'piramide')->pluck('name')->implode(', ') ?: null,
                 'Variantes de marketing' => $variantesMarketing ?: null,
             ]);
         }

@@ -305,6 +305,23 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->timestamps();
         });
 
+        Schema::create('project_catalog_items', function (Blueprint $t) {
+            $t->id();
+            $t->string('tipo', 20);
+            $t->string('name', 100);
+            $t->string('category', 100)->nullable();
+            $t->string('photo_path')->nullable();
+            $t->boolean('active')->default(true);
+            $t->timestamps();
+        });
+
+        Schema::create('project_catalog_item_project', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('project_id');
+            $t->unsignedBigInteger('catalog_item_id');
+            $t->timestamps();
+        });
+
         Schema::create('project_fragrances', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('project_id');
