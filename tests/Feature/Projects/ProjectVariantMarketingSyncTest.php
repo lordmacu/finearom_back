@@ -70,4 +70,19 @@ class ProjectVariantMarketingSyncTest extends ProjectMailTestCase
         $this->assertSame(['Con claims', 'Con referencias'], $restantes->pluck('nombre')->all());
         $this->assertTrue($restantes->every(fn ($mv) => $mv->project_variant_id === null));
     }
+
+    public function test_marketing_no_borra_las_variantes_que_vienen_de_desarrollo(): void
+    {
+        $project = $this->project();
+        $id = $this->crearVariante($project, 'De Desarrollo');
+        $sincronizada = ProjectMarketingVariant::where('project_variant_id', $id)->first();
+        $propia = ProjectMarketingVariant::create(['project_id' => $project->id, 'nombre' => 'Propia', 'orden' => 9]);
+
+        $this->deleteJson("/api/projects/{$project->id}/marketing-variants/{$sincronizada->id}")->assertStatus(422);
+        $this->assertNotNull($sincronizada->fresh());
+
+        // Las que Marketing creó por su cuenta sí se borran
+        $this->deleteJson("/api/projects/{$project->id}/marketing-variants/{$propia->id}")->assertOk();
+        $this->assertNull($propia->fresh());
+    }
 }

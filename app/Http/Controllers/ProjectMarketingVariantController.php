@@ -69,6 +69,13 @@ class ProjectMarketingVariantController extends Controller
     {
         abort_if($variant->project_id !== $project->id, 404);
 
+        // Las variantes creadas desde Desarrollo solo se borran desde Desarrollo
+        if ($variant->project_variant_id) {
+            return response()->json([
+                'message' => 'Esta variante se creó desde Desarrollo: solo se puede borrar desde allá.',
+            ], 422);
+        }
+
         DB::transaction(function () use ($variant) {
             $variant->references()->delete();
             $variant->delete();
