@@ -135,6 +135,30 @@ class Project extends Model
         'frecuencia_compra_estimada'  => 'integer',
     ];
 
+    protected static function booted(): void
+    {
+        // Potencial anual (USD) = Precio (USD) × Potencial anual (Kg). Siempre se
+        // calcula aquí: lo que llegue del cliente se ignora. Solo se recalcula si
+        // cambia uno de los dos, para no borrar el USD manual de proyectos viejos.
+        static::saving(function (Project $project) {
+            if ($project->exists && !$project->isDirty(['precio', 'potencial_anual_kg'])) {
+                $project->potencial_anual_usd = $project->getOriginal('potencial_anual_usd');
+                return;
+            }
+
+            $project->potencial_anual_usd = self::calcularPotencialUsd($project->precio, $project->potencial_anual_kg);
+        });
+    }
+
+    public static function calcularPotencialUsd($precio, $kg): ?float
+    {
+        if ($precio === null || $kg === null) {
+            return null;
+        }
+
+        return round((float) $precio * (float) $kg, 2);
+    }
+
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class, 'client_id');

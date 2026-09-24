@@ -354,26 +354,30 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $this->patchJson("/api/project-potential/references/{$ref}", ['precio' => 30])->assertNotFound();
     }
 
-    public function test_el_potencial_manual_se_conserva_al_guardar_referencias(): void
+    public function test_el_potencial_kg_manual_recalcula_el_usd_y_se_conserva_al_guardar_referencias(): void
     {
-        $project = $this->proyecto();
+        $project = $this->proyecto(attrs: ['precio' => 15]);
 
-        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_usd' => 12345.67])
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => 800])
             ->assertOk()
-            ->assertJsonPath('data.potencial_anual_usd', 12345.67)
-            ->assertJsonPath('data.potencial_anual_kg', null);
-        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => 800])->assertOk();
-
-        $project->refresh();
-        $this->assertEquals(12345.67, $project->potencial_anual_usd);
-        $this->assertEquals(800, $project->potencial_anual_kg);
-        $this->assertStringContainsString('Potencial anual (USD) (manual)', ProjectStatusHistory::orderBy('id')->first()->descripcion);
+            ->assertJsonPath('data.potencial_anual_kg', 800)
+            ->assertJsonPath('data.potencial_anual_usd', 12000);
+        $this->assertStringContainsString('Potencial anual (Kg) (manual)', ProjectStatusHistory::orderBy('id')->first()->descripcion);
 
         // Guardar referencias no pisa lo editado: la suma queda aparte
         $res = $this->guardar($project, [$this->seleccion($this->refId($project, 'Ref B'), ['kg_anio' => 10])])->assertOk();
         $this->assertEquals(800, $project->fresh()->potencial_anual_kg);
-        $this->assertEquals(12345.67, $project->fresh()->potencial_anual_usd);
+        $this->assertEquals(12000, $project->fresh()->potencial_anual_usd);
         $this->assertEquals(['kg' => 10, 'usd' => 200], $res->json('data.suma_referencias'));
+    }
+
+    public function test_el_potencial_usd_no_se_edita_a_mano(): void
+    {
+        $project = $this->proyecto();
+
+        $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_usd' => 12345.67])
+            ->assertStatus(422)->assertJsonValidationErrors('potencial_anual_kg');
+        $this->assertNull($project->fresh()->potencial_anual_usd);
     }
 
     public function test_el_ajuste_manual_valida_y_respeta_permisos(): void
@@ -381,7 +385,7 @@ class ProjectPotentialTest extends ProjectMailTestCase
         $project = $this->proyecto();
 
         $this->patchJson("/api/project-potential/projects/{$project->id}", [])
-            ->assertStatus(422)->assertJsonValidationErrors(['potencial_anual_usd', 'potencial_anual_kg']);
+            ->assertStatus(422)->assertJsonValidationErrors('potencial_anual_kg');
         $this->patchJson("/api/project-potential/projects/{$project->id}", ['potencial_anual_kg' => -1])
             ->assertStatus(422)->assertJsonValidationErrors('potencial_anual_kg');
 

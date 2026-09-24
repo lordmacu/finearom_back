@@ -413,7 +413,7 @@ class ProjectMailService
             'created_by'      => auth()->user()?->name,
             'required_date'   => $project->fecha_requerida?->format('d/m/Y'),
             'calculated_date' => $project->fecha_calculada?->format('d/m/Y'),
-            'volume'          => $number($project->volumen),
+            'volume'          => $number($project->potencial_anual_kg),
             'range'           => $range,
             'project_url'     => rtrim((string) config('app.frontend_url'), '/') . '/projects/' . $project->id,
         ];
@@ -481,7 +481,8 @@ class ProjectMailService
             'Fecha de creación'   => $project->fecha_creacion?->format('d/m/Y'),
             'Fecha requerida'     => $project->fecha_requerida?->format('d/m/Y'),
             'Fecha calculada'     => $project->fecha_calculada?->format('d/m/Y'),
-            'Volumen (Kg/año)'    => $number($project->volumen),
+            'Potencial anual (Kg)'  => $number($project->potencial_anual_kg),
+            'Potencial anual (USD)' => $number($project->potencial_anual_usd),
             'Rango'               => $range,
             'Precio (USD)'        => $number($project->precio),
             'TRM'                 => $number($project->trm),

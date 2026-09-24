@@ -118,16 +118,15 @@ class ProjectPotentialService
     }
 
     /**
-     * Ajuste manual del potencial anual del proyecto (el mismo dato que se
-     * escribe al crearlo o en su detalle). Nada lo recalcula.
+     * Ajuste manual del potencial anual en Kg del proyecto (el mismo dato que
+     * se escribe al crearlo o en su detalle). El USD lo recalcula el modelo.
      *
-     * @param array<string, float|null> $valores potencial_anual_usd y/o potencial_anual_kg
+     * @param array<string, float|null> $valores potencial_anual_kg
      */
     public function updatePotential(Project $project, array $valores, string $executive): Project
     {
         $etiquetas = [
-            'potencial_anual_usd' => 'Potencial anual (USD)',
-            'potencial_anual_kg'  => 'Potencial anual (Kg)',
+            'potencial_anual_kg' => 'Potencial anual (Kg)',
         ];
 
         $antes = $project->only(array_keys($valores));

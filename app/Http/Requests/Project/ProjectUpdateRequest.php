@@ -75,7 +75,6 @@ class ProjectUpdateRequest extends FormRequest
             'obs_esp'         => 'nullable|string',
             'obs_ext'         => 'nullable|string',
             'fecha_cierre_estimada'      => 'nullable|date',
-            'potencial_anual_usd'        => 'nullable|numeric|min:0',
             'potencial_anual_kg'         => 'nullable|numeric|min:0',
             'probabilidad_cierre'        => 'nullable|in:alto,medio,bajo',
             'frecuencia_compra_estimada' => 'nullable|integer|min:1|max:999',
