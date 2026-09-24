@@ -15,9 +15,11 @@ use App\Models\ProjectVariant;
 use App\Models\FinearomReference;
 use App\Services\ProjectTimeService;
 use Illuminate\Http\Request;
+use App\Support\ProjectFactorPermission;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+
 
 class ProjectDetailController extends Controller
 {
@@ -321,6 +323,9 @@ class ProjectDetailController extends Controller
     // ─── Cambiar factor y recalcular propuestas ────────────────────────────────
     public function updateFactor(Request $request, Project $project): JsonResponse
     {
+        // Cambiar el factor exige también poder verlo (Mónica y Desarrollo)
+        abort_unless(ProjectFactorPermission::canView($request->user()), 403);
+
         $data = $request->validate(['factor' => 'required|numeric|min:0.0001']);
 
         $factorNuevo = (float) $data['factor'];

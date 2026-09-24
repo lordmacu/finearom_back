@@ -5,6 +5,8 @@ namespace Tests\Feature\Projects;
 use App\Models\Process;
 use App\Models\Project;
 use App\Models\User;
+use App\Models\ProjectStatusHistory;
+use App\Support\ProjectEngineerPermission;
 use Spatie\Permission\Models\Role;
 
 class ProjectEngineerAssignmentTest extends ProjectMailTestCase
@@ -22,6 +24,14 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
         $role = Role::firstOrCreate(['name' => 'Desarrollo', 'guard_name' => 'web']);
         $this->engineer = User::create(['name' => 'Ing. Prueba', 'email' => 'ingeniero@finearom.co', 'password' => bcrypt('x')]);
         $this->engineer->assignRole($role);
+
+        // Quien asigna es otro ingeniero (permiso del rol Desarrollo)
+        $this->givePermissions(['project list', 'project edit', 'project create', 'project send creation', ProjectEngineerPermission::ASSIGN]);
+    }
+
+    private function asignar(Project $project, int $engineerId)
+    {
+        return $this->patchJson("/api/projects/{$project->id}/ingeniero", ['desarrollador_id' => $engineerId]);
     }
 
     public function test_el_endpoint_lista_solo_usuarios_con_rol_desarrollo(): void
@@ -52,7 +62,7 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
         $project = $this->project();
 
         // Sin hilo todavía: se guarda el ingeniero pero no sale correo
-        $this->putJson("/api/projects/{$project->id}", ['desarrollador_id' => $this->engineer->id])->assertOk();
+        $this->asignar($project, $this->engineer->id)->assertOk();
         $this->assertSame($this->engineer->id, (int) $project->fresh()->desarrollador_id);
         $this->assertCount(0, $this->sentMessages());
 
@@ -95,7 +105,7 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
         $project->refresh();
 
         // Asignar con el hilo abierto: sale enseguida como Re: del hilo
-        $this->putJson("/api/projects/{$project->id}", ['desarrollador_id' => $this->engineer->id])->assertOk();
+        $this->asignar($project, $this->engineer->id)->assertOk();
         $this->assertCount(2, $this->sentMessages());
         $asignacion = $this->sentMessages()->last()->getOriginalMessage();
         $this->assertSame(['ingeniero@finearom.co'], $this->addresses($asignacion->getTo()));
@@ -107,7 +117,11 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
 
         // Reasignar: correo al nuevo ingeniero
         $otro = User::create(['name' => 'Ing. Dos', 'email' => 'ing2@finearom.co', 'password' => bcrypt('x')]);
-        $this->putJson("/api/projects/{$project->id}", ['desarrollador_id' => $otro->id])->assertOk();
+        $otro->assignRole(ProjectEngineerPermission::ROLE);
+        $this->asignar($project, $otro->id)->assertOk();
+
+        // Reasignar al mismo: sin correo repetido
+        $this->asignar($project, $otro->id)->assertOk();
         $this->assertCount(3, $this->sentMessages());
         $this->assertSame(
             ['ing2@finearom.co'],
@@ -146,5 +160,36 @@ class ProjectEngineerAssignmentTest extends ProjectMailTestCase
 
         $email = $this->sentMessages()->first()->getOriginalMessage();
         $this->assertNotContains('ingeniero@finearom.co', $this->addresses($email->getCc()));
+    }
+
+    public function test_asignar_deja_rastro_en_el_historial(): void
+    {
+        $project = $this->project();
+
+        $this->asignar($project, $this->engineer->id)->assertOk()
+            ->assertJsonPath('data.desarrollador.name', 'Ing. Prueba');
+
+        $this->assertStringContainsString('Ing. Prueba', ProjectStatusHistory::latest('id')->value('descripcion'));
+    }
+
+    public function test_la_comercial_no_asigna_ingeniero(): void
+    {
+        $project = $this->project();
+        $this->givePermissions(['project list', 'project edit']);
+
+        $this->asignar($project, $this->engineer->id)->assertForbidden();
+
+        // Tampoco al editar el proyecto: el campo se ignora
+        $this->putJson("/api/projects/{$project->id}", ['desarrollador_id' => $this->engineer->id])->assertOk();
+        $this->assertNull($project->fresh()->desarrollador_id);
+    }
+
+    public function test_solo_se_asignan_usuarios_con_rol_desarrollo(): void
+    {
+        $project = $this->project();
+
+        $this->asignar($project, $this->user->id)->assertStatus(422)->assertJsonValidationErrors('desarrollador_id');
+        $this->patchJson("/api/projects/{$project->id}/ingeniero", [])->assertStatus(422);
+        $this->assertNull($project->fresh()->desarrollador_id);
     }
 }

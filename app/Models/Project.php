@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use App\Models\ProductCategory;
+use App\Support\ProjectFactorPermission;
 
 class Project extends Model
 {
@@ -148,6 +149,18 @@ class Project extends Model
 
             $project->potencial_anual_usd = self::calcularPotencialUsd($project->precio, $project->potencial_anual_kg);
         });
+    }
+
+    /** El factor solo viaja en el JSON a quien puede verlo. */
+    public function toArray(): array
+    {
+        $data = parent::toArray();
+
+        if (!ProjectFactorPermission::canView(auth()->user())) {
+            unset($data['factor']);
+        }
+
+        return $data;
     }
 
     public static function calcularPotencialUsd($precio, $kg): ?float

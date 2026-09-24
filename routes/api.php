@@ -43,6 +43,7 @@ use App\Http\Controllers\ProjectLabelController;
 use App\Http\Controllers\ProjectWorkflowController;
 use App\Http\Controllers\ProjectCatalogController;
 use App\Http\Controllers\ProjectDetailController;
+use App\Http\Controllers\ProjectEngineerController;
 use App\Http\Controllers\ProjectAreaDeliveryController;
 use App\Http\Controllers\ProjectNotificationController;
 use App\Http\Controllers\ProjectPotentialController;
@@ -352,6 +353,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/projects/{project}/send-creation', [ProjectController::class, 'sendCreation']);
     Route::post('/projects/{project}/send-update', [ProjectController::class, 'sendUpdate']);
     Route::patch('/projects/{project}/link-client', [ProjectController::class, 'linkClient']);
+    Route::patch('/projects/{project}/ingeniero', [ProjectEngineerController::class, 'update']);
     Route::patch('/projects/{project}/estado-externo', [ProjectWorkflowController::class, 'setExternalStatus']);
     Route::patch('/projects/{project}/entregar', [ProjectWorkflowController::class, 'deliver']);
     Route::get('/projects/{project}/cotizacion', [ProjectWorkflowController::class, 'quotation']);

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\Project\ProjectStoreRequest;
 use App\Http\Requests\Project\ProjectUpdateRequest;
 use App\Models\Client;
+use App\Models\ContributionMargin;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\ProjectApplication;
@@ -17,6 +18,7 @@ use App\Models\ProjectProductType;
 use App\Services\GoogleTaskService;
 use App\Services\ProjectMailService;
 use App\Services\ProjectTimeService;
+use App\Support\ProjectFactorPermission;
 use App\Support\ProjectOwnership;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -59,7 +61,7 @@ class ProjectController extends Controller
 
     private function buildQuery(Request $request): \Illuminate\Database\Eloquent\Builder
     {
-        $query = Project::query()->with(['client:id,client_name', 'prospect:id,nombre', 'product:id,nombre']);
+        $query = Project::query()->with(['client:id,client_name', 'prospect:id,nombre', 'product:id,nombre', 'desarrollador:id,name']);
 
         if ($tipo = $request->query('tipo')) {
             $query->where('tipo', $tipo);
@@ -164,6 +166,11 @@ class ProjectController extends Controller
             } elseif (empty($data['ejecutivo'])) {
                 $data['ejecutivo'] = auth()->user()->name;
                 $data['ejecutivo_id'] = auth()->id();
+            }
+
+            // Quien no ve el factor tampoco lo escribe: queda el automático
+            if (!ProjectFactorPermission::canView($request->user())) {
+                unset($data['factor']);
             }
 
             // Auto-poblar factor desde el default_factor del cliente si no se envió explícitamente
@@ -286,8 +293,6 @@ class ProjectController extends Controller
 
     public function update(ProjectUpdateRequest $request, Project $project): JsonResponse
     {
-        $desarrolladorAntes = $project->desarrollador_id;
-
         $project = DB::transaction(function () use ($request, $project) {
             $validated = $request->validated();
             $envelopeTypeIds = array_key_exists('envelope_type_ids', $validated) ? $validated['envelope_type_ids'] : null;
@@ -298,6 +303,16 @@ class ProjectController extends Controller
             // Factor vacío: se conserva el actual (la columna es NOT NULL)
             if (array_key_exists('factor', $validated) && $validated['factor'] === null) {
                 unset($validated['factor']);
+            }
+
+            // Quien no ve el factor tampoco lo escribe; si cambia el potencial en
+            // Kg se recalcula solo, como hace el formulario de quien sí lo ve
+            if (!ProjectFactorPermission::canView($request->user())) {
+                unset($validated['factor']);
+                $factorAuto = $this->factorAutomatico($project, $validated);
+                if ($factorAuto !== null) {
+                    $validated['factor'] = $factorAuto;
+                }
             }
 
             // Si viene ejecutivo_id, resolver el nombre del usuario
@@ -317,21 +332,36 @@ class ProjectController extends Controller
             return $project;
         });
 
-        // Asignación o cambio de ingeniero: correo al nuevo ingeniero dentro del
-        // hilo (silencioso). Sin hilo no sale: se envía después del correo de
-        // creación, en sendCreation
-        if ($project->desarrollador_id
-            && $project->email_thread_message_id
-            && (int) $project->desarrollador_id !== (int) $desarrolladorAntes
-            && ($engineer = User::find($project->desarrollador_id))) {
-            $this->projectMailService->sendEngineerAssigned($project, $engineer);
-        }
-
         return response()->json([
             'success' => true,
             'data'    => $project->fresh()->load('envelopeTypes'),
             'message' => 'Proyecto actualizado',
         ]);
+    }
+
+    /**
+     * Factor por márgenes de contribución (tipo de cliente + Kg/año) o, si
+     * ningún rango aplica, el default del cliente. Null si el Kg no cambió.
+     */
+    private function factorAutomatico(Project $project, array $validated): ?float
+    {
+        if (!array_key_exists('potencial_anual_kg', $validated) || !$validated['potencial_anual_kg']) {
+            return null;
+        }
+        if ((float) $validated['potencial_anual_kg'] === (float) $project->potencial_anual_kg) {
+            return null;
+        }
+
+        $client = Client::find($validated['client_id'] ?? $project->client_id);
+        if (!$client) {
+            return null;
+        }
+
+        $factor = $client->client_type
+            ? ContributionMargin::getFactorFor($client->client_type, (int) $validated['potencial_anual_kg'])
+            : null;
+
+        return $factor ?? ($client->default_factor ? (float) $client->default_factor : null);
     }
 
     public function destroy(Project $project): JsonResponse

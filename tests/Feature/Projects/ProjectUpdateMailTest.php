@@ -107,4 +107,19 @@ class ProjectUpdateMailTest extends ProjectMailTestCase
         $this->assertStringContainsString('—', $html);
         $this->assertStringNotContainsString('100,00', $html);
     }
+
+    public function test_campos_retirados_del_correo_no_cuentan_como_cambio(): void
+    {
+        $project = $this->project();
+        $this->postJson("/api/projects/{$project->id}/send-creation")->assertOk();
+
+        // Snapshot de antes de quitar Volumen y Factor del correo
+        $snapshot = $project->fresh()->email_snapshot;
+        $area = array_key_first($snapshot);
+        $snapshot[$area]['Volumen (Kg/año)'] = '100,00';
+        $snapshot[$area]['Factor'] = '1.8000';
+        $project->forceFill(['email_snapshot' => $snapshot])->saveQuietly();
+
+        $this->postJson("/api/projects/{$project->id}/send-update")->assertStatus(422);
+    }
 }

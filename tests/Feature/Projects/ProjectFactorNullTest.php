@@ -3,6 +3,7 @@
 namespace Tests\Feature\Projects;
 
 use App\Models\Project;
+use App\Support\ProjectFactorPermission;
 
 /**
  * El campo Factor del formulario ("Auto") puede llegar vacío (null); la
@@ -10,6 +11,14 @@ use App\Models\Project;
  */
 class ProjectFactorNullTest extends ProjectMailTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Solo quien ve el factor lo escribe
+        $this->givePermissions(['project list', 'project edit', 'project create', ProjectFactorPermission::VIEW]);
+    }
+
     public function test_crear_con_factor_vacio_usa_el_factor_por_defecto(): void
     {
         $this->postJson('/api/projects', [

@@ -66,7 +66,7 @@ class ProjectUpdateRequest extends FormRequest
             'fecha_entrega'   => 'nullable|date',
             'tipo_producto'   => 'nullable|string|max:200',
             'ejecutivo_id'    => 'nullable|integer|exists:users,id',
-            'desarrollador_id' => 'nullable|integer|exists:users,id',
+            // desarrollador_id no va aquí: lo asigna un ingeniero (PATCH /projects/{id}/ingeniero)
             'ejecutivo'       => 'nullable|string|max:200',
             'obs_lab'         => 'nullable|string',
             'obs_des'         => 'nullable|string',
