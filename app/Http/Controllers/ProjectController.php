@@ -85,6 +85,13 @@ class ProjectController extends Controller
         if ($ejecutivo = $request->query('ejecutivo')) {
             $query->where('ejecutivo', $ejecutivo);
         }
+        // Ingeniero de desarrollo asignado: id del usuario o "sin_asignar"
+        $desarrollador = $request->query('desarrollador_id');
+        if ($desarrollador === 'sin_asignar') {
+            $query->whereNull('desarrollador_id');
+        } elseif (ctype_digit((string) $desarrollador)) {
+            $query->where('desarrollador_id', (int) $desarrollador);
+        }
         // Rango por fecha de creación (Y-m-d) para acotar el listado; una fecha
         // mal formada se ignora
         if ($desde = $this->fechaFiltro($request->query('desde'))) {
