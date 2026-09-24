@@ -144,4 +144,19 @@ class ProjectAreaDeliveryLogTest extends ProjectMailTestCase
         $this->assertSame(0, DB::table('project_area_delivery_logs')->count());
         $this->assertCount(0, $this->sentMessages());
     }
+
+    public function test_acepta_los_tipos_de_archivo_habituales_y_rechaza_otros_en_espanol(): void
+    {
+        $project = $this->threadedProject();
+
+        $this->entregar($project, ['tipo' => 'parcial', 'notas' => '<p>Tipos</p>', 'adjuntos' => [
+            UploadedFile::fake()->image('foto.webp'),
+            UploadedFile::fake()->createWithContent('datos.csv', "a,b\n1,2\n"),
+            UploadedFile::fake()->createWithContent('nota.txt', 'hola'),
+        ]])->assertOk();
+
+        $this->entregar($project, ['tipo' => 'parcial', 'notas' => '<p>x</p>', 'adjuntos' => [
+            UploadedFile::fake()->createWithContent('script.sh', "#!/bin/bash\necho hola\n"),
+        ]])->assertStatus(422)->assertJsonPath('message', fn ($m) => str_contains($m, 'no es de un tipo permitido'));
+    }
 }
