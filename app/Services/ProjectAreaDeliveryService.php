@@ -30,6 +30,7 @@ class ProjectAreaDeliveryService
      * departamento del workflow.
      */
     public const AREAS = [
+        'desarrollo'   => ['relation' => null,                'estado' => 'estado_desarrollo',   'departamento' => 'desarrollo',   'label' => 'Desarrollo'],
         'aplicaciones' => ['relation' => 'application',       'estado' => 'estado_laboratorio',  'departamento' => 'laboratorio',  'label' => 'Aplicaciones'],
         'evaluaciones' => ['relation' => 'evaluation',        'estado' => 'estado_evaluaciones', 'departamento' => 'evaluaciones', 'label' => 'Evaluaciones'],
         'marketing'    => ['relation' => 'marketingYCalidad', 'estado' => 'estado_mercadeo',     'departamento' => 'mercadeo',     'label' => 'Marketing'],

@@ -7,11 +7,12 @@ use App\Models\Project;
 use App\Models\ProjectAreaDeliveryLog;
 use App\Services\ProjectAreaDeliveryService;
 use App\Services\ProjectMailService;
+use App\Support\ProjectOwnership;
 use Illuminate\Http\JsonResponse;
 
 /**
- * Entregas de las áreas con modal de notas + adjuntos (aplicaciones,
- * evaluaciones, marketing, regulatoria, especiales). Cada entrega (parcial,
+ * Entregas de las áreas con modal de notas + adjuntos (desarrollo,
+ * aplicaciones, evaluaciones, marketing, regulatoria, especiales). Cada entrega (parcial,
  * final o actualización) queda en la bitácora con sus adjuntos y su correo;
  * la lógica vive en ProjectAreaDeliveryService.
  */
@@ -20,8 +21,13 @@ class ProjectAreaDeliveryController extends Controller
     public function __construct(
         private readonly ProjectAreaDeliveryService $deliveryService,
     ) {
-        $this->middleware('can:project list')->only(['showAplicaciones', 'showEvaluaciones', 'showMarketing', 'showRegulatoria', 'showEspeciales']);
-        $this->middleware('can:project deliver')->only(['deliverAplicaciones', 'deliverEvaluaciones', 'deliverMarketing', 'deliverRegulatoria', 'deliverEspeciales']);
+        $this->middleware('can:project list')->only(['showDesarrollo', 'showAplicaciones', 'showEvaluaciones', 'showMarketing', 'showRegulatoria', 'showEspeciales']);
+        $this->middleware('can:project deliver')->only(['deliverDesarrollo', 'deliverAplicaciones', 'deliverEvaluaciones', 'deliverMarketing', 'deliverRegulatoria', 'deliverEspeciales']);
+    }
+
+    public function showDesarrollo(Project $project): JsonResponse
+    {
+        return $this->showArea($project, 'desarrollo');
     }
 
     public function showAplicaciones(Project $project): JsonResponse
@@ -47,6 +53,19 @@ class ProjectAreaDeliveryController extends Controller
     public function showEspeciales(Project $project): JsonResponse
     {
         return $this->showArea($project, 'especiales');
+    }
+
+    public function deliverDesarrollo(ProjectAreaDeliverRequest $request, Project $project): JsonResponse
+    {
+        // Un ingeniero (rol Desarrollo, no admin) solo entrega proyectos asignados a él
+        if (!ProjectOwnership::canDeliverDevelopment($request->user(), $project)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Solo puedes entregar el área de desarrollo en proyectos asignados a ti.',
+            ], 403);
+        }
+
+        return $this->deliverArea($request, $project, 'desarrollo');
     }
 
     public function deliverAplicaciones(ProjectAreaDeliverRequest $request, Project $project): JsonResponse

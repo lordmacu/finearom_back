@@ -182,6 +182,7 @@ class ProjectMailService
     public function sendAreaDelivered(Project $project, string $area, ProjectAreaDeliveryLog $log, ?string $notasAntes = null): bool
     {
         $cfg = match ($area) {
+            'desarrollo'   => ['prefix' => 'development',  'delivered' => 'development_delivered', 'label' => 'Desarrollo'],
             'marketing'    => ['prefix' => 'marketing',    'delivered' => 'marketing_delivered',   'label' => 'Marketing'],
             'aplicaciones' => ['prefix' => 'applications', 'delivered' => 'applications_ready',    'label' => 'Aplicaciones'],
             'regulatoria'  => ['prefix' => 'regulatoria',  'delivered' => 'regulatoria_delivered', 'label' => 'Regulatoria'],
@@ -224,6 +225,15 @@ class ProjectMailService
             $extra['changes_table'] = $notasAntes !== $notas && !HtmlText::isBlank($notas)
                 ? '<p style="font-size:13px;color:#6b7280;">Se actualizaron las notas de entrega; abajo están como quedaron.</p>'
                 : '<p style="font-size:13px;color:#6b7280;">Las notas no cambiaron; esta actualización trae nuevos adjuntos.</p>';
+        }
+
+        // Desarrollo lleva además quién entregó y la tabla de variantes/referencias
+        if ($area === 'desarrollo') {
+            $extra['engineer_name']  = $log->ejecutivo;
+            $extra['variants_table'] = $this->variantsDeliveredTable($project);
+            if ($log->tipo === ProjectAreaDeliveryLog::ACTUALIZACION) {
+                $extra['changes_table'] = $this->referencesChangedNotice($project) . $extra['changes_table'];
+            }
         }
 
         $attachments = $log->files

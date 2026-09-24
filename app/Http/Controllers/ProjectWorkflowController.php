@@ -12,6 +12,7 @@ use App\Services\GoogleDriveService;
 use App\Services\ProjectMailService;
 use App\Services\ProjectWorkflowService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use App\Support\ProjectOwnership;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -48,9 +49,9 @@ class ProjectWorkflowController extends Controller
 
         // Un ingeniero (rol Desarrollo, no admin) solo entrega el área de
         // desarrollo y solo en proyectos donde está asignado
-        if ($user->hasRole('Desarrollo') && !$user->hasRole(['admin', 'super-admin', 'Administrador'])) {
+        if ($user->hasRole('Desarrollo') && !$user->hasRole(ProjectOwnership::ADMIN_ROLES)) {
             if ($request->department !== 'desarrollo'
-                || (int) $project->desarrollador_id !== (int) $user->id) {
+                || !ProjectOwnership::canDeliverDevelopment($user, $project)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Solo puedes entregar el área de desarrollo en proyectos asignados a ti.',

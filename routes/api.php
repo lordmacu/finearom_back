@@ -378,6 +378,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/projects/{project}/evaluation/bench-image', [ProjectDetailController::class, 'evaluationBenchImage']);
     // Entrega de Aplicaciones, Evaluaciones, Marketing, Regulatoria y P. Especiales:
     // modal con notas + adjuntos (van en el correo del hilo)
+    Route::get('/projects/{project}/desarrollo/entrega', [ProjectAreaDeliveryController::class, 'showDesarrollo']);
+    Route::post('/projects/{project}/desarrollo/entregar', [ProjectAreaDeliveryController::class, 'deliverDesarrollo']);
     Route::get('/projects/{project}/aplicaciones/entrega', [ProjectAreaDeliveryController::class, 'showAplicaciones']);
     Route::post('/projects/{project}/aplicaciones/entregar', [ProjectAreaDeliveryController::class, 'deliverAplicaciones']);
     Route::get('/projects/{project}/evaluaciones/entrega', [ProjectAreaDeliveryController::class, 'showEvaluaciones']);

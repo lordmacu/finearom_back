@@ -23,4 +23,17 @@ class ProjectOwnership
 
         return (int) $project->ejecutivo_id === (int) $user->id;
     }
+
+    /**
+     * Un ingeniero (rol Desarrollo que no es admin) solo entrega el área de
+     * desarrollo en proyectos donde está asignado; el resto, por permisos.
+     */
+    public static function canDeliverDevelopment(User $user, Project $project): bool
+    {
+        if (!$user->hasRole('Desarrollo') || $user->hasRole(self::ADMIN_ROLES)) {
+            return true;
+        }
+
+        return (int) $project->desarrollador_id === (int) $user->id;
+    }
 }
