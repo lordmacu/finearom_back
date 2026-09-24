@@ -66,7 +66,7 @@ Lista paginada de proyectos.
 | Parámetro        | Tipo   | Descripción                                                  |
 |------------------|--------|--------------------------------------------------------------|
 | `tipo`           | string | `Colección` \| `Desarrollo` \| `Fine Fragances`              |
-| `estado_externo` | string | `Ganado` \| `Perdido` \| `En espera`                        |
+| `estado_externo` | string | `Cancelado` (inicial) \| `Ganado` \| `Perdido`               |
 | `estado_interno` | string | `Pendiente` \| `En proceso` \| `Entregado`                  |
 | `ejecutivo`      | string | Filtra por nombre del ejecutivo                              |
 | `search`         | string | Busca en nombre del proyecto y nombre del cliente/prospecto  |
@@ -81,7 +81,7 @@ Lista paginada de proyectos.
       "id": 1,
       "nombre": "Proyecto A",
       "tipo": "Desarrollo",
-      "estado_externo": "En espera",
+      "estado_externo": "Cancelado",
       "estado_interno": "Pendiente",
       "ejecutivo": "Ana Gómez",
       "ejecutivo_id": 3,

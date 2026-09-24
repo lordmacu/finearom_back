@@ -29,7 +29,7 @@ class ProjectMailService
 {
     /** Las entregas solo se registran con el hilo abierto por el correo de creación. */
     /** Filas que salieron del correo pero siguen en snapshots viejos. */
-    private const CAMPOS_RETIRADOS = ['Volumen (Kg/año)', 'Factor'];
+    private const CAMPOS_RETIRADOS = ['Volumen (Kg/año)', 'Factor', 'Observaciones aplicación', 'Tipo de envase'];
 
     public const SIN_HILO_ENTREGA = 'Primero la ejecutiva debe enviar la creación del proyecto: las entregas van en ese mismo hilo de correo.';
 
@@ -554,7 +554,6 @@ class ProjectMailService
                 'Muestra aceite'         => $muestra,
                 'Observaciones muestra'  => $sample?->observaciones,
                 'Aplicación'             => $aplicacion,
-                'Observaciones aplicación' => $application?->observaciones,
                 'Variantes'              => $variantes ?: null,
                 'Fragancias finas'       => $fragancias ?: null,
             ]);
@@ -610,7 +609,6 @@ class ProjectMailService
             $sections['Marketing'] = $filled([
                 'Entregables'          => !empty($marketing?->marketing) ? implode(', ', $marketing->marketing) : null,
                 'Marca'                => $marketing?->marca,
-                'Tipo de envase'       => $marketing?->tipo_envase,
                 'Descripción detallada' => $marketing?->descripcion_detallada,
                 'Fecha entrega marketing' => $marketing?->fecha_entrega_marketing?->format('d/m/Y'),
                 'Observaciones'        => $marketing?->obs_marketing,
