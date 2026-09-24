@@ -16,6 +16,8 @@ class RawMaterial extends Model
     protected $fillable = [
         'codigo',
         'nombre',
+        'cas',
+        'descriptores',
         'tipo',
         'unidad',
         'costo_unitario',

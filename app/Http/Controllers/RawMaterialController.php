@@ -62,7 +62,12 @@ class RawMaterialController extends Controller
 
     public function store(RawMaterialStoreRequest $request): JsonResponse
     {
-        $material = RawMaterial::create($request->validated());
+        // Este módulo solo crea materias primas; los corazones tienen su propia lógica
+        $material = RawMaterial::create([
+            ...$request->validated(),
+            'tipo'   => 'materia_prima',
+            'unidad' => 'kg',
+        ]);
 
         return response()->json([
             'data'    => $material,
@@ -94,12 +99,8 @@ class RawMaterialController extends Controller
 
     public function update(RawMaterialUpdateRequest $request, RawMaterial $rawMaterial): JsonResponse
     {
-        $data = $request->validated();
-
-        // costo_unitario no se actualiza por esta ruta; usar updateCost
-        unset($data['costo_unitario']);
-
-        $rawMaterial->update($data);
+        // costo_unitario no se actualiza por esta ruta; usar updateCost (guarda historial)
+        $rawMaterial->update($request->validated());
 
         return response()->json([
             'data'    => $rawMaterial->fresh(),
