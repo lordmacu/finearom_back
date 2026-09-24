@@ -14,6 +14,7 @@ use App\Models\ProjectRequest as ProjectRequestModel;
 use App\Models\ProjectVariant;
 use App\Models\FinearomReference;
 use App\Services\ProjectTimeService;
+use App\Services\ProjectVariantBenchmarkImage;
 use App\Services\ProjectVariantMarketingSync;
 use Illuminate\Http\Request;
 use App\Support\ProjectFactorPermission;
@@ -28,9 +29,10 @@ class ProjectDetailController extends Controller
     public function __construct(
         private readonly ProjectTimeService $timeService,
         private readonly ProjectVariantMarketingSync $marketingSync,
+        private readonly ProjectVariantBenchmarkImage $benchmarkImage,
     ) {
-        $this->middleware('can:project edit')->except(['evaluationBenchImage']);
-        $this->middleware('can:project list')->only(['evaluationBenchImage']);
+        $this->middleware('can:project edit')->except(['evaluationBenchImage', 'variantBenchmarkImage']);
+        $this->middleware('can:project list')->only(['evaluationBenchImage', 'variantBenchmarkImage']);
         $this->middleware('can:project factor edit')->only(['updateFactor']);
     }
 
@@ -107,6 +109,16 @@ class ProjectDetailController extends Controller
         return response()->download($absolutePath, basename($absolutePath));
     }
 
+    public function variantBenchmarkImage(Project $project, ProjectVariant $variant): BinaryFileResponse
+    {
+        abort_if($variant->project_id !== $project->id || !$variant->benchmark_imagen, 404, 'La variante no tiene imagen de benchmark');
+
+        $absolutePath = Storage::disk('local')->path($variant->benchmark_imagen);
+        abort_if(!file_exists($absolutePath), 404, 'Archivo no encontrado en el servidor');
+
+        return response()->download($absolutePath, basename($absolutePath));
+    }
+
     // ─── Marketing y Calidad ──────────────────────────────────────────────────
     public function updateMarketing(ProjectMarketingRequest $request, Project $project): JsonResponse
     {
@@ -142,7 +154,10 @@ class ProjectDetailController extends Controller
     {
         // La variante se crea también en Marketing (solo el nombre)
         $variant = DB::transaction(function () use ($project, $request) {
-            $variant = $project->variants()->create($request->validated());
+            $data = $this->benchmarkImage->apply(
+                $request->validated(), $project, null, $request->file('benchmark_imagen'), false,
+            );
+            $variant = $project->variants()->create($data);
             $this->marketingSync->created($variant);
 
             return $variant;
@@ -154,8 +169,12 @@ class ProjectDetailController extends Controller
     public function updateVariant(ProjectVariantRequest $request, Project $project, ProjectVariant $variant): JsonResponse
     {
         abort_if($variant->project_id !== $project->id, 404);
-        DB::transaction(function () use ($variant, $request) {
-            $variant->update($request->validated());
+        DB::transaction(function () use ($variant, $request, $project) {
+            $data = $this->benchmarkImage->apply(
+                $request->validated(), $project, $variant,
+                $request->file('benchmark_imagen'), $request->boolean('remove_benchmark_imagen'),
+            );
+            $variant->update($data);
             $this->marketingSync->updated($variant);
         });
 
@@ -169,6 +188,7 @@ class ProjectDetailController extends Controller
             $this->marketingSync->deleting($variant);
             $variant->delete();
         });
+        $this->benchmarkImage->delete($variant);
 
         return response()->json(['success' => true, 'message' => 'Variante eliminada']);
     }

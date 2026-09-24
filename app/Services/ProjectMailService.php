@@ -468,7 +468,7 @@ class ProjectMailService
             'client', 'prospect', 'product', 'productCategory', 'envelopeTypes',
             'sample', 'application', 'evaluation',
             'marketingYCalidad', 'marketingVariants.references',
-            'variants.benchmarkReference', 'variants.proposals.finearomReference',
+            'variants.proposals.finearomReference',
             'fragrances.fineFragrance', 'desarrollador',
         ]);
 
@@ -540,10 +540,9 @@ class ProjectMailService
                 ->map(function ($v) use ($number, $refName) {
                     $line = collect([
                         $v->nombre,
-                        $v->categoria,
                         $v->descripcion,
-                        $v->observaciones,
-                        $v->benchmarkReference ? 'Bench: ' . $refName($v->benchmarkReference) : null,
+                        $v->benchmark_descripcion ? 'Benchmark: ' . $v->benchmark_descripcion : null,
+                        $v->benchmark_imagen ? '(con imagen de benchmark)' : null,
                     ])->filter()->implode(' — ');
 
                     $proposals = $v->proposals

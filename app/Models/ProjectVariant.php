@@ -20,6 +20,8 @@ class ProjectVariant extends Model
         'observaciones',
         'descripcion',
         'benchmark_reference_id',
+        'benchmark_descripcion',
+        'benchmark_imagen',
     ];
 
     public function project(): BelongsTo

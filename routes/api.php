@@ -419,6 +419,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/projects/{project}/variants', [ProjectDetailController::class, 'storeVariant']);
     Route::put('/projects/{project}/variants/{variant}', [ProjectDetailController::class, 'updateVariant']);
     Route::delete('/projects/{project}/variants/{variant}', [ProjectDetailController::class, 'destroyVariant']);
+    Route::get('/projects/{project}/variants/{variant}/benchmark-image', [ProjectDetailController::class, 'variantBenchmarkImage']);
 
     // Propuestas (por variante)
     Route::post('/projects/{project}/variants/{variant}/proposals', [ProjectDetailController::class, 'storeProposal']);

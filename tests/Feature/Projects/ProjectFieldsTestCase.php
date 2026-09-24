@@ -289,6 +289,18 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->text('observaciones')->nullable();
             $t->text('descripcion')->nullable();
             $t->unsignedBigInteger('benchmark_reference_id')->nullable();
+            $t->text('benchmark_descripcion')->nullable();
+            $t->string('benchmark_imagen', 500)->nullable();
+            $t->timestamps();
+        });
+
+        Schema::create('project_proposals', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('variant_id');
+            $t->unsignedBigInteger('finearom_reference_id')->nullable();
+            $t->decimal('total_propuesta', 12, 2)->nullable();
+            $t->decimal('total_propuesta_cop', 14, 2)->nullable();
+            $t->boolean('definitiva')->default(false);
             $t->timestamps();
         });
 
