@@ -238,7 +238,25 @@ class ProjectWorkflowController extends Controller
 
     public function reabrir(Project $project): JsonResponse
     {
-        $this->workflowService->reabrir($project, auth()->user()->name);
+        $user = auth()->user();
+
+        // Misma regla de dueño que editar: una comercial solo reabre sus proyectos
+        if (!ProjectOwnership::canManage($user, $project)) {
+            return response()->json(['success' => false, 'message' => 'Solo puedes reabrir tus proyectos.'], 403);
+        }
+
+        $estadoAntes = collect([
+            $project->estado_externo !== 'Cancelado' ? $project->estado_externo : null,
+            $project->estado_interno,
+        ])->filter()->implode(' · ');
+
+        $this->workflowService->reabrir($project, $user->name);
+
+        // Aviso en el hilo del proyecto (sin hilo no sale; silencioso)
+        $this->projectMailService->send($project->fresh(), 'reopened', [
+            'reopened_by'    => $user->name,
+            'estado_anterior' => $estadoAntes ?: '—',
+        ]);
 
         return response()->json([
             'success' => true,

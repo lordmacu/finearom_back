@@ -190,6 +190,9 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->string('estado_externo')->nullable();
             $t->string('estado_interno')->nullable();
             $t->boolean('estado_desarrollo')->default(false);
+            $t->date('fecha_externo')->nullable();
+            $t->string('ejecutivo_externo')->nullable();
+            $t->string('razon_perdida', 500)->nullable();
             $t->date('fecha_desarrollo')->nullable();
             $t->string('ejecutivo_desarrollo')->nullable();
             $t->boolean('estado_laboratorio')->default(false);
