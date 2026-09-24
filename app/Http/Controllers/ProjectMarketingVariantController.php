@@ -56,7 +56,17 @@ class ProjectMarketingVariantController extends Controller
     {
         abort_if($variant->project_id !== $project->id, 404);
 
-        $variant->update($request->validated());
+        $data = $request->validated();
+
+        // El nombre de las variantes creadas desde Desarrollo solo se cambia desde Desarrollo
+        if ($variant->project_variant_id && array_key_exists('nombre', $data) && $data['nombre'] !== $variant->nombre) {
+            return response()->json([
+                'message' => 'Esta variante se creó desde Desarrollo: su nombre solo se cambia desde allá.',
+                'errors'  => ['nombre' => ['El nombre se cambia desde Desarrollo.']],
+            ], 422);
+        }
+
+        $variant->update($data);
 
         return response()->json([
             'success' => true,

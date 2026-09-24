@@ -14,7 +14,7 @@ class ProjectMarketingVariantRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'nombre'         => ['nullable', 'string', 'max:200'],
+            'nombre'         => ['nullable', 'string', 'max:255'],
             'claims'         => ['nullable', 'string', 'max:2000'],
             'color_etiqueta' => ['nullable', 'string', 'max:50'],
         ];

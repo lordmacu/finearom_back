@@ -319,7 +319,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->id();
             $t->unsignedBigInteger('project_id');
             $t->unsignedBigInteger('project_variant_id')->nullable();
-            $t->string('nombre', 200)->nullable();
+            $t->string('nombre', 255)->nullable();
             $t->text('claims')->nullable();
             $t->string('color_etiqueta', 50)->nullable();
             $t->integer('orden')->default(0);
