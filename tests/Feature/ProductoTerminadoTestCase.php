@@ -10,12 +10,13 @@ use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
- * Base para los tests del módulo Corazones. Igual que
- * Feature/Projects/ProjectFieldsTestCase: se arma a mano un esquema mínimo
- * sobre sqlite en memoria en vez de usar RefreshDatabase, porque
- * backend/.env apunta a DB_DATABASE=finearom_prod y no hay .env.testing.
+ * Base para los tests del módulo Producto Terminado. Mismo criterio que
+ * CorazonTestCase: esquema mínimo a mano sobre sqlite en memoria, nunca
+ * RefreshDatabase (backend/.env apunta a DB_DATABASE=finearom_prod).
+ * Incluye también las tablas necesarias para probar la cascada de costos
+ * de RawMaterialController::updateCost (Tarea 4).
  */
-abstract class CorazonTestCase extends TestCase
+abstract class ProductoTerminadoTestCase extends TestCase
 {
     protected User $user;
 
@@ -37,6 +38,8 @@ abstract class CorazonTestCase extends TestCase
         ]);
 
         $this->givePermissions([
+            'producto terminado list', 'producto terminado create',
+            'producto terminado edit', 'producto terminado delete',
             'raw material list', 'raw material create', 'raw material edit', 'raw material delete',
         ]);
         $this->actingAs($this->user, 'sanctum');
@@ -55,6 +58,29 @@ abstract class CorazonTestCase extends TestCase
         }
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();
+    }
+
+    protected function materiaPrima(array $overrides = []): \App\Models\RawMaterial
+    {
+        return \App\Models\RawMaterial::create(array_merge([
+            'codigo'  => 'MP-'.uniqid(),
+            'nombre'  => 'Bergamota',
+            'tipo'    => 'materia_prima',
+            'unidad'  => 'kg',
+            'activo'  => true,
+        ], $overrides));
+    }
+
+    protected function corazon(array $overrides = []): \App\Models\RawMaterial
+    {
+        return \App\Models\RawMaterial::create(array_merge([
+            'codigo'      => 'COR-'.uniqid(),
+            'nombre'      => 'Corazón',
+            'tipo'        => 'corazon',
+            'unidad'      => 'kg',
+            'descripcion' => 'x',
+            'activo'      => false,
+        ], $overrides));
     }
 
     private function buildSchema(): void
@@ -115,23 +141,21 @@ abstract class CorazonTestCase extends TestCase
             $t->timestamps();
         });
 
+        Schema::create('raw_material_price_history', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('raw_material_id');
+            $t->decimal('costo_anterior', 12, 4);
+            $t->decimal('costo_nuevo', 12, 4);
+            $t->unsignedBigInteger('changed_by')->nullable();
+            $t->timestamps();
+        });
+
         Schema::create('corazon_formula_lines', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('corazon_id');
             $t->unsignedBigInteger('raw_material_id');
             $t->decimal('porcentaje', 7, 4);
             $t->text('notas')->nullable();
-            $t->timestamps();
-        });
-
-        Schema::create('raw_material_stock_movements', function (Blueprint $t) {
-            $t->id();
-            $t->unsignedBigInteger('raw_material_id');
-            $t->string('tipo');
-            $t->decimal('cantidad', 12, 4);
-            $t->text('notas')->nullable();
-            $t->unsignedBigInteger('user_id')->nullable();
-            $t->date('fecha');
             $t->timestamps();
         });
 

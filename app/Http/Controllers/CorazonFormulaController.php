@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\CorazonFormulaLine;
+use App\Models\ProductoFormulaLine;
+use App\Models\ProductoTerminado;
 use App\Models\RawMaterial;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -81,6 +83,13 @@ class CorazonFormulaController extends Controller
             'Un corazón no puede ser ingrediente de sí mismo.'
         );
 
+        $ingrediente = RawMaterial::find($validated['raw_material_id']);
+        abort_if(
+            !$ingrediente || $ingrediente->tipo !== 'materia_prima',
+            422,
+            'Un corazón solo puede tener materias primas como ingredientes.'
+        );
+
         $line = CorazonFormulaLine::updateOrCreate(
             [
                 'corazon_id'      => $rawMaterial->id,
@@ -123,7 +132,8 @@ class CorazonFormulaController extends Controller
     }
 
     /**
-     * Recalculates and persists the costo_unitario of the corazon based on its current formula.
+     * Recalculates and persists the costo_unitario of the corazon based on its current formula,
+     * then propagates that change to any producto terminado that uses this corazón as an ingredient.
      */
     private function updateCorazonCosto(RawMaterial $corazon): void
     {
@@ -140,5 +150,40 @@ class CorazonFormulaController extends Controller
         }
 
         $corazon->update(['costo_unitario' => round($costoTotal, 4)]);
+
+        $this->recalculateProductoTerminadoCosts($corazon);
+    }
+
+    /**
+     * Recalculates the costo_unitario of all productos terminados that use this corazón as an ingredient.
+     */
+    private function recalculateProductoTerminadoCosts(RawMaterial $corazon): void
+    {
+        $affectedIds = ProductoFormulaLine::where('raw_material_id', $corazon->id)
+            ->pluck('producto_terminado_id')
+            ->unique();
+
+        foreach ($affectedIds as $productoId) {
+            $producto = ProductoTerminado::find($productoId);
+            if (!$producto) {
+                continue;
+            }
+
+            $lines = ProductoFormulaLine::where('producto_terminado_id', $productoId)
+                ->with('rawMaterial')
+                ->get();
+
+            $costoTotal = 0.0;
+            foreach ($lines as $line) {
+                $rm = $line->rawMaterial;
+                if (!$rm) {
+                    continue;
+                }
+                $factor      = $this->toKgFactor($rm->unidad);
+                $costoTotal += ((float) $line->porcentaje / 100) * ((float) $rm->costo_unitario / $factor);
+            }
+
+            $producto->update(['costo_unitario' => round($costoTotal, 4)]);
+        }
     }
 }

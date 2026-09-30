@@ -196,4 +196,73 @@ class CorazonControllerTest extends CorazonTestCase
             ->assertOk()
             ->assertJsonPath('data.activo', false);
     }
+
+    public function test_agregar_corazon_como_ingrediente_de_otro_corazon_falla(): void
+    {
+        $ingrediente = RawMaterial::create([
+            'codigo' => 'COR-060', 'nombre' => 'Corazón ingrediente', 'tipo' => 'corazon',
+            'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false,
+        ]);
+        $contenedor = RawMaterial::create([
+            'codigo' => 'COR-061', 'nombre' => 'Corazón contenedor', 'tipo' => 'corazon',
+            'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false,
+        ]);
+
+        $this->postJson("/api/raw-materials/{$contenedor->id}/corazon-formula", [
+            'raw_material_id' => $ingrediente->id,
+            'porcentaje'      => 30,
+        ])->assertStatus(422)
+          ->assertJsonPath('message', 'Un corazón solo puede tener materias primas como ingredientes.');
+
+        $this->assertDatabaseMissing('corazon_formula_lines', [
+            'corazon_id'      => $contenedor->id,
+            'raw_material_id' => $ingrediente->id,
+        ]);
+    }
+
+    public function test_destroy_bloquea_si_es_usado_como_ingrediente_de_producto_terminado(): void
+    {
+        $corazon = RawMaterial::create([
+            'codigo' => 'COR-070', 'nombre' => 'Usado en PT', 'tipo' => 'corazon',
+            'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false,
+        ]);
+        $producto = \App\Models\ProductoTerminado::create(['codigo' => 'PROD-100', 'nombre' => 'Usa corazón']);
+        \App\Models\ProductoFormulaLine::create([
+            'producto_terminado_id' => $producto->id,
+            'raw_material_id'       => $corazon->id,
+            'porcentaje'            => 40,
+        ]);
+
+        $this->deleteJson("/api/corazones/{$corazon->id}")
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'No se puede eliminar: este corazón se usa como ingrediente en otra fórmula.');
+
+        $this->assertDatabaseHas('raw_materials', ['id' => $corazon->id]);
+    }
+
+    public function test_editar_formula_de_corazon_recalcula_producto_terminado_que_lo_usa(): void
+    {
+        $mp = $this->materiaPrima(['costo_unitario' => 10, 'unidad' => 'kg']);
+        $corazon = RawMaterial::create([
+            'codigo' => 'COR-071', 'nombre' => 'Recalculo', 'tipo' => 'corazon',
+            'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false,
+        ]);
+        $producto = \App\Models\ProductoTerminado::create(['codigo' => 'PROD-101', 'nombre' => 'Depende de corazón']);
+        \App\Models\ProductoFormulaLine::create([
+            'producto_terminado_id' => $producto->id,
+            'raw_material_id'       => $corazon->id,
+            'porcentaje'            => 50,
+        ]);
+
+        $this->assertEquals(0.0, (float) $producto->fresh()->costo_unitario);
+
+        $this->postJson("/api/raw-materials/{$corazon->id}/corazon-formula", [
+            'raw_material_id' => $mp->id,
+            'porcentaje'      => 100,
+        ])->assertCreated();
+
+        // Corazón pasa a costar 10 (100% de una materia a 10); producto: 50% de 10 => 5.
+        $this->assertEquals(10.0, (float) $corazon->fresh()->costo_unitario);
+        $this->assertEquals(5.0, (float) $producto->fresh()->costo_unitario);
+    }
 }

@@ -133,7 +133,9 @@ class CorazonController extends Controller
     {
         abort_if($corazon->tipo !== 'corazon', 404);
 
-        $usedElsewhere = $corazon->usedInCorazones()->exists() || $corazon->formulaLines()->exists();
+        $usedElsewhere = $corazon->usedInCorazones()->exists()
+            || $corazon->formulaLines()->exists()
+            || $corazon->usedInProductosTerminados()->exists();
 
         if ($usedElsewhere) {
             return response()->json([

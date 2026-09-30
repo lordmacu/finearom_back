@@ -59,4 +59,10 @@ class RawMaterial extends Model
     {
         return $this->hasMany(CorazonFormulaLine::class, 'raw_material_id');
     }
+
+    /** Líneas de fórmula de producto terminado donde esta fila (materia prima o corazón) es ingrediente */
+    public function usedInProductosTerminados(): HasMany
+    {
+        return $this->hasMany(ProductoFormulaLine::class, 'raw_material_id');
+    }
 }

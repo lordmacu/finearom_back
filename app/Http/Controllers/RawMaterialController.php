@@ -7,6 +7,8 @@ use App\Http\Requests\RawMaterial\RawMaterialUpdateRequest;
 use App\Models\CorazonFormulaLine;
 use App\Models\FinearomPriceHistory;
 use App\Models\FinearomReference;
+use App\Models\ProductoFormulaLine;
+use App\Models\ProductoTerminado;
 use App\Models\RawMaterial;
 use App\Models\RawMaterialPriceHistory;
 use App\Models\RawMaterialStockMovement;
@@ -151,18 +153,23 @@ class RawMaterialController extends Controller
         // Cascade: update corazones that use this material, then their dependent references
         $updatedCorazonIds = $this->recalculateCorazonCosts($rawMaterial);
         $updatedCount      = $this->recalculateReferencePrices($rawMaterial);
+        $updatedProductos  = $this->recalculateProductoTerminadoCosts($rawMaterial);
 
-        // Also recalculate references that use the updated corazones
+        // Also recalculate references and productos terminados that use the updated corazones
         foreach ($updatedCorazonIds as $corazonId) {
             $corazonMaterial = RawMaterial::find($corazonId);
             if ($corazonMaterial) {
-                $updatedCount += $this->recalculateReferencePrices($corazonMaterial);
+                $updatedCount     += $this->recalculateReferencePrices($corazonMaterial);
+                $updatedProductos += $this->recalculateProductoTerminadoCosts($corazonMaterial);
             }
         }
 
         $message = 'Costo actualizado correctamente.';
         if ($updatedCount > 0) {
             $message .= " Se recalcularon {$updatedCount} referencia(s) afectadas.";
+        }
+        if ($updatedProductos > 0) {
+            $message .= " Se recalcularon {$updatedProductos} producto(s) terminado(s) afectados.";
         }
 
         return response()->json([
@@ -260,6 +267,50 @@ class RawMaterialController extends Controller
 
             $reference->update(['precio' => $costoTotal]);
             $updated++;
+        }
+
+        return $updated;
+    }
+
+    /**
+     * Recalculates the costo_unitario of all productos terminados that use the given raw material
+     * (directly, or through a corazón — the caller loops over affected corazones too).
+     * Returns how many productos terminados were updated.
+     */
+    private function recalculateProductoTerminadoCosts(RawMaterial $rawMaterial): int
+    {
+        $affectedIds = ProductoFormulaLine::where('raw_material_id', $rawMaterial->id)
+            ->pluck('producto_terminado_id')
+            ->unique();
+
+        $updated = 0;
+
+        foreach ($affectedIds as $productoId) {
+            $producto = ProductoTerminado::find($productoId);
+            if (!$producto) {
+                continue;
+            }
+
+            $lines = ProductoFormulaLine::where('producto_terminado_id', $productoId)
+                ->with('rawMaterial')
+                ->get();
+
+            $costoTotal = 0.0;
+            foreach ($lines as $line) {
+                $rm = $line->rawMaterial;
+                if (!$rm) {
+                    continue;
+                }
+                $factor      = $this->toKgFactor($rm->unidad);
+                $costoTotal += ((float) $line->porcentaje / 100) * ((float) $rm->costo_unitario / $factor);
+            }
+
+            $costoTotal = round($costoTotal, 4);
+
+            if (abs((float) $producto->costo_unitario - $costoTotal) >= 0.0001) {
+                $producto->update(['costo_unitario' => $costoTotal]);
+                $updated++;
+            }
         }
 
         return $updated;

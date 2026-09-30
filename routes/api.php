@@ -58,6 +58,8 @@ use App\Http\Controllers\CorazonController;
 use App\Http\Controllers\CorazonFormulaController;
 use App\Http\Controllers\RawMaterialController;
 use App\Http\Controllers\ReferenceFormulaController;
+use App\Http\Controllers\ProductoFormulaController;
+use App\Http\Controllers\ProductoTerminadoController;
 use App\Http\Controllers\ContributionMarginController;
 use Illuminate\Support\Facades\Route;
 
@@ -570,6 +572,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('corazones', CorazonController::class)->parameters(['corazones' => 'corazon']);
     Route::post('corazones/{corazon}/activate', [CorazonController::class, 'activate']);
     Route::post('corazones/{corazon}/deactivate', [CorazonController::class, 'deactivate']);
+
+    // ============================================================================
+    // PRODUCTO TERMINADO (mezclas de materias primas y/o corazones)
+    // ============================================================================
+    Route::apiResource('productos-terminados', ProductoTerminadoController::class)
+        ->parameters(['productos-terminados' => 'productoTerminado']);
+    Route::post('productos-terminados/{productoTerminado}/activate', [ProductoTerminadoController::class, 'activate']);
+    Route::post('productos-terminados/{productoTerminado}/deactivate', [ProductoTerminadoController::class, 'deactivate']);
+    Route::get('productos-terminados/{productoTerminado}/formula', [ProductoFormulaController::class, 'index']);
+    Route::post('productos-terminados/{productoTerminado}/formula', [ProductoFormulaController::class, 'store']);
+    Route::delete('productos-terminados/{productoTerminado}/formula/{productoFormulaLine}', [ProductoFormulaController::class, 'destroy']);
 
     // ============================================================================
     // FINE FRAGRANCES
