@@ -128,4 +128,72 @@ class CorazonControllerTest extends CorazonTestCase
 
         $this->assertDatabaseMissing('raw_materials', ['id' => $corazon->id]);
     }
+
+    private function corazonConIngredientes(float ...$porcentajes): RawMaterial
+    {
+        $corazon = RawMaterial::create([
+            'codigo' => 'COR-'.uniqid(), 'nombre' => 'Mezcla', 'tipo' => 'corazon',
+            'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false,
+        ]);
+
+        foreach ($porcentajes as $i => $pct) {
+            $ingrediente = $this->materiaPrima(['codigo' => 'MP-'.uniqid().$i, 'nombre' => "Ingrediente {$i}"]);
+            CorazonFormulaLine::create([
+                'corazon_id'      => $corazon->id,
+                'raw_material_id' => $ingrediente->id,
+                'porcentaje'      => $pct,
+            ]);
+        }
+
+        return $corazon;
+    }
+
+    public function test_activar_exitoso_con_suma_exacta_100(): void
+    {
+        $corazon = $this->corazonConIngredientes(33.34, 33.33, 33.33);
+
+        $this->postJson("/api/corazones/{$corazon->id}/activate")
+            ->assertOk()
+            ->assertJsonPath('data.activo', true);
+
+        $this->assertDatabaseHas('raw_materials', ['id' => $corazon->id, 'activo' => 1]);
+    }
+
+    public function test_activar_falla_con_suma_en_el_limite_99_99(): void
+    {
+        $corazon = $this->corazonConIngredientes(33.33, 33.33, 33.33);
+
+        $this->postJson("/api/corazones/{$corazon->id}/activate")
+            ->assertStatus(422);
+
+        $this->assertDatabaseHas('raw_materials', ['id' => $corazon->id, 'activo' => 0]);
+    }
+
+    public function test_activar_falla_sin_ingredientes(): void
+    {
+        $corazon = RawMaterial::create([
+            'codigo' => 'COR-050', 'nombre' => 'Vacío', 'tipo' => 'corazon',
+            'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false,
+        ]);
+
+        $this->postJson("/api/corazones/{$corazon->id}/activate")->assertStatus(422);
+    }
+
+    public function test_activate_deactivate_con_id_de_materia_prima_da_404(): void
+    {
+        $mp = $this->materiaPrima();
+
+        $this->postJson("/api/corazones/{$mp->id}/activate")->assertNotFound();
+        $this->postJson("/api/corazones/{$mp->id}/deactivate")->assertNotFound();
+    }
+
+    public function test_deactivate_no_valida_suma(): void
+    {
+        $corazon = $this->corazonConIngredientes(50);
+        $corazon->update(['activo' => true]);
+
+        $this->postJson("/api/corazones/{$corazon->id}/deactivate")
+            ->assertOk()
+            ->assertJsonPath('data.activo', false);
+    }
 }

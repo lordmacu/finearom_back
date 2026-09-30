@@ -54,6 +54,7 @@ use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\GoogleTaskController;
 use App\Http\Controllers\ProjectGoogleTaskConfigController;
 use App\Http\Controllers\OrderGoogleTaskConfigController;
+use App\Http\Controllers\CorazonController;
 use App\Http\Controllers\CorazonFormulaController;
 use App\Http\Controllers\RawMaterialController;
 use App\Http\Controllers\ReferenceFormulaController;
@@ -562,6 +563,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('raw-materials/{rawMaterial}/corazon-formula', [CorazonFormulaController::class, 'index']);
     Route::post('raw-materials/{rawMaterial}/corazon-formula', [CorazonFormulaController::class, 'store']);
     Route::delete('raw-materials/{rawMaterial}/corazon-formula/{corazonFormulaLine}', [CorazonFormulaController::class, 'destroy']);
+
+    // ============================================================================
+    // CORAZONES (mezclas de materias primas)
+    // ============================================================================
+    Route::apiResource('corazones', CorazonController::class)->parameters(['corazones' => 'corazon']);
+    Route::post('corazones/{corazon}/activate', [CorazonController::class, 'activate']);
+    Route::post('corazones/{corazon}/deactivate', [CorazonController::class, 'deactivate']);
 
     // ============================================================================
     // FINE FRAGRANCES
