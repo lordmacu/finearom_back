@@ -22,7 +22,7 @@ class RawMaterialController extends Controller
     {
         $this->middleware('can:raw material list')->only(['index', 'show']);
         $this->middleware('can:raw material create')->only(['store']);
-        $this->middleware('can:raw material edit')->only(['update', 'updateCost', 'addMovement']);
+        $this->middleware('can:raw material edit')->only(['update', 'updateCost', 'addMovement', 'reemplazarEquivalencias']);
         $this->middleware('can:raw material delete')->only(['destroy']);
     }
 
@@ -42,12 +42,18 @@ class RawMaterialController extends Controller
             $query->where('tipo', $request->tipo);
         }
 
+        // Provisionales 320/330 pendientes de cambiar por su equivalente 300
+        if ($request->boolean('pendiente')) {
+            $query->where('pendiente_equivalencia', true);
+        }
+
         $activo = $request->input('activo', 'true');
         if ($activo !== 'all') {
             $query->where('activo', filter_var($activo, FILTER_VALIDATE_BOOLEAN));
         }
 
-        $query->withCount('priceHistory')
+        $query->with('equivalente:id,codigo,nombre')
+              ->withCount('priceHistory')
               ->with(['stockMovements' => function ($q) {
                   $q->orderByDesc('created_at')->limit(3);
               }])
@@ -107,6 +113,19 @@ class RawMaterialController extends Controller
         return response()->json([
             'data'    => $rawMaterial->fresh(),
             'message' => 'Materia prima actualizada correctamente.',
+        ]);
+    }
+
+    /** Cambia los provisionales con equivalente asignado por su código 300 en todas las fórmulas. */
+    public function reemplazarEquivalencias(\App\Services\RawMaterialEquivalenciaService $service): JsonResponse
+    {
+        $r = $service->reemplazar();
+
+        return response()->json([
+            'data'    => $r,
+            'message' => $r['reemplazadas']
+                ? "Se reemplazaron {$r['reemplazadas']} materias primas en {$r['productos_recalculados']} productos terminados y {$r['corazones_recalculados']} corazones."
+                : 'No hay materias primas pendientes con equivalente asignado.',
         ]);
     }
 

@@ -36,7 +36,14 @@ class ProductoTerminadoController extends Controller
             $query->where('activo', filter_var($activo, FILTER_VALIDATE_BOOLEAN));
         }
 
-        $query->withSum('formulaLines', 'porcentaje')->orderBy('nombre');
+        // Productos que usan materias primas provisionales (320/330) a cambiar por su equivalente 300
+        if ($request->boolean('pendientes')) {
+            $query->whereHas('formulaLines.rawMaterial', fn ($q) => $q->where('pendiente_equivalencia', true));
+        }
+
+        $query->withSum('formulaLines', 'porcentaje')
+              ->withCount(['formulaLines as pendientes_count' => fn ($q) => $q->whereHas('rawMaterial', fn ($r) => $r->where('pendiente_equivalencia', true))])
+              ->orderBy('nombre');
 
         $perPage = min((int) $request->input('per_page', 30), 1000);
         $productos = $query->paginate($perPage);

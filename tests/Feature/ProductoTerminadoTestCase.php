@@ -138,6 +138,8 @@ abstract class ProductoTerminadoTestCase extends TestCase
             $t->text('descripcion')->nullable();
             $t->string('proveedor')->nullable();
             $t->boolean('activo')->default(true);
+            $t->boolean('pendiente_equivalencia')->default(false);
+            $t->unsignedBigInteger('equivalente_id')->nullable();
             $t->timestamps();
         });
 
@@ -147,6 +149,16 @@ abstract class ProductoTerminadoTestCase extends TestCase
             $t->decimal('costo_anterior', 12, 4);
             $t->decimal('costo_nuevo', 12, 4);
             $t->unsignedBigInteger('changed_by')->nullable();
+            $t->timestamps();
+        });
+
+        Schema::create('raw_material_stock_movements', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('raw_material_id');
+            $t->string('tipo');
+            $t->decimal('cantidad', 12, 4);
+            $t->text('notas')->nullable();
+            $t->unsignedBigInteger('user_id')->nullable();
             $t->timestamps();
         });
 
@@ -173,6 +185,7 @@ abstract class ProductoTerminadoTestCase extends TestCase
             $t->string('consecutivo', 20)->nullable()->unique();
             $t->string('codigo', 100)->unique();
             $t->string('nombre');
+            $t->text('observaciones')->nullable();
             $t->decimal('costo_unitario', 12, 4)->default(0);
             $t->boolean('activo')->default(false);
             $t->timestamps();

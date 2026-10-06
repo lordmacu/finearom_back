@@ -16,6 +16,7 @@ class ProductoTerminadoStoreRequest extends FormRequest
         return [
             'codigo' => ['required', 'string', 'max:100', 'unique:productos_terminados,codigo'],
             'nombre' => ['required', 'string', 'max:255'],
+            'observaciones' => ['nullable', 'string', 'max:5000'],
         ];
     }
 }

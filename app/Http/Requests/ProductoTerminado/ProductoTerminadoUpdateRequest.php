@@ -20,6 +20,7 @@ class ProductoTerminadoUpdateRequest extends FormRequest
                 Rule::unique('productos_terminados', 'codigo')->ignore($this->route('productoTerminado')),
             ],
             'nombre' => ['sometimes', 'required', 'string', 'max:255'],
+            'observaciones' => ['nullable', 'string', 'max:5000'],
         ];
     }
 }

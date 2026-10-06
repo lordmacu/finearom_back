@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -25,13 +26,22 @@ class RawMaterial extends Model
         'descripcion',
         'proveedor',
         'activo',
+        'pendiente_equivalencia',
+        'equivalente_id',
     ];
 
     protected $casts = [
         'costo_unitario'   => 'decimal:4',
         'stock_disponible' => 'decimal:4',
         'activo'           => 'boolean',
+        'pendiente_equivalencia' => 'boolean',
     ];
+
+    /** Materia prima código 300 por la que se reemplaza esta (cuando está pendiente de equivalencia). */
+    public function equivalente(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'equivalente_id');
+    }
 
     public function priceHistory(): HasMany
     {

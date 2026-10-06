@@ -112,6 +112,8 @@ abstract class CorazonTestCase extends TestCase
             $t->text('descripcion')->nullable();
             $t->string('proveedor')->nullable();
             $t->boolean('activo')->default(true);
+            $t->boolean('pendiente_equivalencia')->default(false);
+            $t->unsignedBigInteger('equivalente_id')->nullable();
             $t->timestamps();
         });
 

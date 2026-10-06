@@ -13,6 +13,7 @@ class ProductoTerminado extends Model
         'consecutivo',
         'codigo',
         'nombre',
+        'observaciones',
         'costo_unitario',
         'activo',
     ];

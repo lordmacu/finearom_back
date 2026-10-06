@@ -552,6 +552,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ============================================================================
     // MATERIAS PRIMAS
     // ============================================================================
+    Route::post('raw-materials/reemplazar-equivalencias', [RawMaterialController::class, 'reemplazarEquivalencias']);
     Route::apiResource('raw-materials', RawMaterialController::class);
     Route::post('raw-materials/{rawMaterial}/update-cost', [RawMaterialController::class, 'updateCost']);
     Route::post('raw-materials/{rawMaterial}/movements', [RawMaterialController::class, 'addMovement']);
