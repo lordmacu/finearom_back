@@ -104,11 +104,17 @@ class ImportarProductosTerminadosCsv extends Command
             $contenido = mb_convert_encoding($contenido, 'UTF-8', 'Windows-1252');
         }
 
-        $filas = array_map(fn ($l) => str_getcsv($l, ';'), preg_split('/\r\n|\n|\r/', trim($contenido)));
-        array_shift($filas);
-
+        // fgetcsv respeta campos entre comillas con saltos de línea (nombres multilínea)
+        $stream = fopen('php://temp', 'r+');
+        fwrite($stream, $contenido);
+        rewind($stream);
         $productos = [];
-        foreach ($filas as $f) {
+        $encabezado = true;
+        while (($f = fgetcsv($stream, 0, ';', '"', '\\')) !== false) {
+            if ($encabezado || $f === [null]) {
+                $encabezado = false;
+                continue;
+            }
             $f = array_pad($f, 34, '');
             $componentes = [];
             for ($k = 0; $k < 10; $k++) {
@@ -121,6 +127,7 @@ class ImportarProductosTerminadosCsv extends Command
             }
             $productos[] = ['codigo' => trim((string) $f[1]), 'nombre' => mb_substr(trim((string) $f[2]), 0, 255), 'componentes' => $componentes];
         }
+        fclose($stream);
 
         return $productos;
     }
