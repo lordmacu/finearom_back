@@ -172,8 +172,8 @@ class ProjectTimesController extends Controller
     {
         $data = $request->validate([
             'solicitud' => ['required', Rule::in([
-                'Descripción Olfativa', 'Pirámide Olfativa', 'Caja', 'Presentación',
-                'Presentación Cero', 'Dummie Digital', 'Dummie Fisico', 'Investigación De Mercado',
+                'Descripción Olfativa', 'Diagramación de pirámides', 'Caja', 'Presentación',
+                'Presentación Cero', 'Render digital', 'Dummie Fisico', 'Etiquetas para aplicación',
             ])],
             'grupo' => 'required|integer|min:1|max:4',
             'valor' => 'required|numeric|min:0',

@@ -29,7 +29,7 @@ class ProjectTimeService
     private const DIAS_CALIDAD_BASICO = 5;
     private const DIAS_CALIDAD_ESPECIALES = 15;
 
-    private const MARKETING_BASICO = ['Descripción Olfativa', 'Pirámide Olfativa', 'Caja', 'Presentación', 'Dummie Digital', 'Dummie Fisico', 'Investigación De Mercado'];
+    private const MARKETING_BASICO = ['Descripción Olfativa', 'Diagramación de pirámides', 'Caja', 'Presentación', 'Render digital', 'Dummie Fisico', 'Etiquetas para aplicación'];
     private const MARKETING_PRESENTACION_CERO = 'Presentación Cero';
     private const DIAS_MARKETING_BASICO = 5;
     private const DIAS_MARKETING_PRESENTACION_CERO = 15;

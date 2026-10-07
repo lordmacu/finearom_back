@@ -164,10 +164,10 @@ class ProjectTimesSeeder extends Seeder
             ['solicitud' => 'Descripción Olfativa',     'grupo' => 3, 'valor' => 1.5],
             ['solicitud' => 'Descripción Olfativa',     'grupo' => 4, 'valor' => 2.0],
 
-            ['solicitud' => 'Pirámide Olfativa',        'grupo' => 1, 'valor' => 1.0],
-            ['solicitud' => 'Pirámide Olfativa',        'grupo' => 2, 'valor' => 2.0],
-            ['solicitud' => 'Pirámide Olfativa',        'grupo' => 3, 'valor' => 3.0],
-            ['solicitud' => 'Pirámide Olfativa',        'grupo' => 4, 'valor' => 4.0],
+            ['solicitud' => 'Diagramación de pirámides', 'grupo' => 1, 'valor' => 1.0],
+            ['solicitud' => 'Diagramación de pirámides', 'grupo' => 2, 'valor' => 2.0],
+            ['solicitud' => 'Diagramación de pirámides', 'grupo' => 3, 'valor' => 3.0],
+            ['solicitud' => 'Diagramación de pirámides', 'grupo' => 4, 'valor' => 4.0],
 
             ['solicitud' => 'Caja',                     'grupo' => 1, 'valor' => 0.5],
             ['solicitud' => 'Caja',                     'grupo' => 2, 'valor' => 1.0],
@@ -184,20 +184,19 @@ class ProjectTimesSeeder extends Seeder
             ['solicitud' => 'Presentación Cero',        'grupo' => 3, 'valor' => 7.0],
             ['solicitud' => 'Presentación Cero',        'grupo' => 4, 'valor' => 8.0],
 
-            ['solicitud' => 'Dummie Digital',           'grupo' => 1, 'valor' => 1.5],
-            ['solicitud' => 'Dummie Digital',           'grupo' => 2, 'valor' => 2.0],
-            ['solicitud' => 'Dummie Digital',           'grupo' => 3, 'valor' => 2.5],
-            ['solicitud' => 'Dummie Digital',           'grupo' => 4, 'valor' => 3.0],
+            ['solicitud' => 'Render digital',           'grupo' => 1, 'valor' => 1.5],
+            ['solicitud' => 'Render digital',           'grupo' => 2, 'valor' => 2.0],
+            ['solicitud' => 'Render digital',           'grupo' => 3, 'valor' => 2.5],
+            ['solicitud' => 'Render digital',           'grupo' => 4, 'valor' => 3.0],
 
             ['solicitud' => 'Dummie Fisico',            'grupo' => 1, 'valor' => 0.5],
             ['solicitud' => 'Dummie Fisico',            'grupo' => 2, 'valor' => 1.0],
             ['solicitud' => 'Dummie Fisico',            'grupo' => 3, 'valor' => 1.5],
             ['solicitud' => 'Dummie Fisico',            'grupo' => 4, 'valor' => 2.0],
-
-            ['solicitud' => 'Investigación De Mercado', 'grupo' => 1, 'valor' => 20.0],
-            ['solicitud' => 'Investigación De Mercado', 'grupo' => 2, 'valor' => 0.0],
-            ['solicitud' => 'Investigación De Mercado', 'grupo' => 3, 'valor' => 0.0],
-            ['solicitud' => 'Investigación De Mercado', 'grupo' => 4, 'valor' => 0.0],
+            ['solicitud' => 'Etiquetas para aplicación', 'grupo' => 1, 'valor' => 0.5],
+            ['solicitud' => 'Etiquetas para aplicación', 'grupo' => 2, 'valor' => 1.0],
+            ['solicitud' => 'Etiquetas para aplicación', 'grupo' => 3, 'valor' => 1.5],
+            ['solicitud' => 'Etiquetas para aplicación', 'grupo' => 4, 'valor' => 2.0],
         ]);
 
         // ====================================================================
