@@ -176,12 +176,13 @@ class CorazonImportTest extends ProductoTerminadoTestCase
             ->assertOk()->assertJsonPath('data.actualizados', 1);
     }
 
-    public function test_requiere_permiso_de_creacion(): void
+    public function test_por_ahora_no_exige_permisos_especificos(): void
     {
-        $this->givePermissions(['raw material list']);
+        $this->givePermissions([]);
 
-        $this->subir($this->excel([['750001', 'UNO', '', '100000', 100]]))->assertForbidden();
-        $this->get('/api/corazones/import/template')->assertForbidden();
+        $this->get('/api/corazones/import/template')->assertOk();
         $this->get('/api/corazones/export')->assertOk();
+        $this->materiaPrima(['codigo' => '100000']);
+        $this->subir($this->excel([['750001', 'UNO', '', '100000', 100]]))->assertOk();
     }
 }

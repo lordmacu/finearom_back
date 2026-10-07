@@ -14,12 +14,10 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class CorazonImportController extends Controller
 {
+    // Sin middleware de permisos por ahora (decisión del negocio): basta con estar autenticado.
     public function __construct(
         private readonly CorazonImportService $service
-    ) {
-        $this->middleware('can:raw material create')->only(['import', 'template']);
-        $this->middleware('can:raw material list')->only(['export']);
-    }
+    ) {}
 
     /** Valida (dry_run) o importa el Excel de corazones. */
     public function import(CorazonImportRequest $request): JsonResponse
