@@ -57,7 +57,7 @@ class RawMaterialController extends Controller
               ->with(['stockMovements' => function ($q) {
                   $q->orderByDesc('created_at')->limit(3);
               }])
-              ->orderBy('nombre');
+              ->orderByRaw('CAST(codigo AS UNSIGNED), codigo');
 
         $perPage = min((int) $request->input('per_page', 30), 1000);
         $materials = $query->paginate($perPage);

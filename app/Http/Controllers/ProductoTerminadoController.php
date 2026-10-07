@@ -43,7 +43,7 @@ class ProductoTerminadoController extends Controller
 
         $query->withSum('formulaLines', 'porcentaje')
               ->withCount(['formulaLines as pendientes_count' => fn ($q) => $q->whereHas('rawMaterial', fn ($r) => $r->where('pendiente_equivalencia', true))])
-              ->orderBy('nombre');
+              ->orderByRaw('CAST(codigo AS UNSIGNED), codigo');
 
         $perPage = min((int) $request->input('per_page', 30), 1000);
         $productos = $query->paginate($perPage);

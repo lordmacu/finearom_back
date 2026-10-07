@@ -35,7 +35,7 @@ class CorazonController extends Controller
             $query->where('activo', filter_var($activo, FILTER_VALIDATE_BOOLEAN));
         }
 
-        $query->withSum('corazonComponents', 'porcentaje')->orderBy('nombre');
+        $query->withSum('corazonComponents', 'porcentaje')->orderByRaw('CAST(codigo AS UNSIGNED), codigo');
 
         $perPage = min((int) $request->input('per_page', 30), 1000);
         $corazones = $query->paginate($perPage);
