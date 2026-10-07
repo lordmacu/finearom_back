@@ -571,6 +571,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ============================================================================
     // CORAZONES (mezclas de materias primas)
     // ============================================================================
+    Route::get('corazones/export', [CorazonImportController::class, 'export']);
     Route::get('corazones/import/template', [CorazonImportController::class, 'template']);
     Route::post('corazones/import', [CorazonImportController::class, 'import']);
     Route::apiResource('corazones', CorazonController::class)->parameters(['corazones' => 'corazon']);

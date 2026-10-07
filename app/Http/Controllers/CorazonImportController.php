@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\Corazon\CorazonImportRequest;
 use App\Services\CorazonImportService;
+use App\Models\RawMaterial;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -15,7 +17,8 @@ class CorazonImportController extends Controller
     public function __construct(
         private readonly CorazonImportService $service
     ) {
-        $this->middleware('can:raw material create');
+        $this->middleware('can:raw material create')->only(['import', 'template']);
+        $this->middleware('can:raw material list')->only(['export']);
     }
 
     /** Valida (dry_run) o importa el Excel de corazones. */
@@ -35,6 +38,65 @@ class CorazonImportController extends Controller
             'data'    => $result['resumen'],
             'message' => $dryRun ? 'Archivo válido. Revisa el resumen y confirma la importación.' : 'Corazones importados correctamente.',
         ]);
+    }
+
+    /**
+     * Descarga los corazones (con su fórmula) en el mismo formato del importador,
+     * respetando los filtros del listado (search, activo). Una fila por ingrediente;
+     * un corazón sin fórmula sale con el ingrediente vacío.
+     */
+    public function export(Request $request): StreamedResponse
+    {
+        $query = RawMaterial::where('tipo', 'corazon')
+            ->with(['corazonComponents.rawMaterial:id,codigo'])
+            ->orderByRaw('CAST(codigo AS UNSIGNED), codigo');
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(fn ($q) => $q->where('codigo', 'like', "%{$search}%")->orWhere('nombre', 'like', "%{$search}%"));
+        }
+        $activo = $request->input('activo', 'all');
+        if ($activo !== 'all') {
+            $query->where('activo', filter_var($activo, FILTER_VALIDATE_BOOLEAN));
+        }
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Corazones');
+        $sheet->fromArray(CorazonImportService::HEADERS, null, 'A1');
+
+        $fila = 2;
+        foreach ($query->cursor() as $corazon) {
+            $base = [(string) $corazon->codigo, $corazon->nombre, $corazon->descripcion ?? ''];
+            $lineas = $corazon->corazonComponents->sortBy(fn ($l) => $l->rawMaterial?->codigo);
+            if ($lineas->isEmpty()) {
+                $sheet->fromArray([[...$base, '', '']], null, "A{$fila}");
+                $fila++;
+                continue;
+            }
+            foreach ($lineas as $l) {
+                $sheet->fromArray([[...$base, (string) ($l->rawMaterial?->codigo ?? ''), (float) $l->porcentaje]], null, "A{$fila}");
+                $fila++;
+            }
+        }
+
+        $sheet->getStyle('A1:E1')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1F2345']],
+        ]);
+        foreach (['A' => 18, 'B' => 32, 'C' => 40, 'D' => 22, 'E' => 14] as $col => $width) {
+            $sheet->getColumnDimension($col)->setWidth($width);
+        }
+        $sheet->getStyle('A:A')->getNumberFormat()->setFormatCode('@');
+        $sheet->getStyle('D:D')->getNumberFormat()->setFormatCode('@');
+        $sheet->freezePane('A2');
+
+        $writer = new Xlsx($spreadsheet);
+        $nombre = 'corazones_' . now()->format('Y-m-d') . '.xlsx';
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, $nombre, ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
     /** Excel de ejemplo con el formato exacto que acepta el importador. */

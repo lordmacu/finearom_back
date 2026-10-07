@@ -149,11 +149,39 @@ class CorazonImportTest extends ProductoTerminadoTestCase
         $this->subir($file, true)->assertOk()->assertJsonPath('data.creados', 2)->assertJsonPath('data.activos', 2);
     }
 
+    public function test_descarga_corazones_en_el_formato_del_importador(): void
+    {
+        $a = $this->materiaPrima(['codigo' => '100000']);
+        $b = $this->materiaPrima(['codigo' => '100004']);
+        $this->subir($this->excel([
+            ['750001', 'UNO', 'desc', '100000', 60],
+            ['750001', 'UNO', 'desc', '100004', 40],
+            ['750002', 'DOS', '', '100000', 50],
+        ]))->assertOk();
+
+        $res = $this->get('/api/corazones/export?search=UNO');
+        $res->assertOk();
+        $path = tempnam(sys_get_temp_dir(), 'exp') . '.xlsx';
+        file_put_contents($path, $res->streamedContent());
+        $hoja = \PhpOffice\PhpSpreadsheet\IOFactory::load($path)->getSheet(0);
+        $this->assertSame('CODIGO CORAZON', $hoja->getCell('A1')->getValue());
+        $this->assertSame('750001', (string) $hoja->getCell('A2')->getValue());
+        $this->assertSame('100000', (string) $hoja->getCell('D2')->getValue());
+        $this->assertEquals(60, $hoja->getCell('E2')->getValue());
+        $this->assertSame('100004', (string) $hoja->getCell('D3')->getValue());
+        $this->assertNull($hoja->getCell('A4')->getValue(), 'el filtro deja fuera al corazón DOS');
+
+        // Round-trip: lo descargado se puede volver a subir tal cual
+        $this->subir(new UploadedFile($path, 'corazones.xlsx', null, null, true), true)
+            ->assertOk()->assertJsonPath('data.actualizados', 1);
+    }
+
     public function test_requiere_permiso_de_creacion(): void
     {
         $this->givePermissions(['raw material list']);
 
         $this->subir($this->excel([['750001', 'UNO', '', '100000', 100]]))->assertForbidden();
         $this->get('/api/corazones/import/template')->assertForbidden();
+        $this->get('/api/corazones/export')->assertOk();
     }
 }
