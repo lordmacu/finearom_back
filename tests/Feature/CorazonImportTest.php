@@ -1,0 +1,159 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\CorazonFormulaLine;
+use App\Models\ProductoFormulaLine;
+use App\Models\ProductoTerminado;
+use App\Models\RawMaterial;
+use App\Services\CorazonImportService;
+use Illuminate\Http\UploadedFile;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+
+/**
+ * Importador de corazones desde Excel: formato estricto, todo o nada,
+ * crea/actualiza y activa solo si la fórmula suma 100%.
+ */
+class CorazonImportTest extends ProductoTerminadoTestCase
+{
+    private function excel(array $filas, ?array $encabezados = null, string $nombre = 'corazones.xlsx'): UploadedFile
+    {
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->getActiveSheet()->fromArray($encabezados ?? CorazonImportService::HEADERS, null, 'A1');
+        if ($filas) {
+            $spreadsheet->getActiveSheet()->fromArray($filas, null, 'A2');
+        }
+        $path = tempnam(sys_get_temp_dir(), 'cor') . '.xlsx';
+        (new Xlsx($spreadsheet))->save($path);
+
+        return new UploadedFile($path, $nombre, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+    }
+
+    private function subir(UploadedFile $file, bool $dry = false)
+    {
+        return $this->postJson('/api/corazones/import', ['file' => $file, 'dry_run' => $dry ? 1 : 0]);
+    }
+
+    public function test_importa_crea_corazon_activo_con_costo_y_ingredientes(): void
+    {
+        $a = $this->materiaPrima(['codigo' => '100000', 'costo_unitario' => 10]);
+        $b = $this->materiaPrima(['codigo' => '100004', 'costo_unitario' => 20]);
+
+        $res = $this->subir($this->excel([
+            [750001, 'CORAZON UNO', 'Notas de salida', 100000, 60],
+            [750001, 'CORAZON UNO', '', '100004', '40'],
+            ['750002', 'CORAZON DOS', '', '100000', 50],
+        ]));
+
+        $res->assertOk()->assertJsonPath('data.creados', 2)->assertJsonPath('data.activos', 1)->assertJsonPath('data.borrador', 1);
+
+        $uno = RawMaterial::where('codigo', '750001')->first();
+        $this->assertSame('corazon', $uno->tipo);
+        $this->assertTrue((bool) $uno->activo);
+        $this->assertSame('Notas de salida', $uno->descripcion);
+        $this->assertEqualsWithDelta(14.0, (float) $uno->costo_unitario, 0.0001); // 0.6*10 + 0.4*20
+        $this->assertSame(2, CorazonFormulaLine::where('corazon_id', $uno->id)->count());
+
+        $dos = RawMaterial::where('codigo', '750002')->first();
+        $this->assertFalse((bool) $dos->activo, 'suma 50% => borrador');
+    }
+
+    public function test_dry_run_valida_sin_escribir(): void
+    {
+        $this->materiaPrima(['codigo' => '100000']);
+
+        $this->subir($this->excel([['750001', 'UNO', '', '100000', 100]]), true)
+            ->assertOk()->assertJsonPath('data.creados', 1);
+
+        $this->assertSame(0, RawMaterial::where('tipo', 'corazon')->count());
+    }
+
+    public function test_rechaza_archivo_con_formato_distinto(): void
+    {
+        $this->materiaPrima(['codigo' => '100000']);
+
+        $this->subir($this->excel([['750001', 'UNO', '', '100000', 100]], ['CODIGO', 'NOMBRE', 'DESCRIPCION', 'INGREDIENTE', 'PORCENTAJE']))
+            ->assertStatus(422)->assertJsonPath('errors.0.fila', 1);
+
+        // columna extra también se rechaza
+        $this->subir($this->excel([['750001', 'UNO', '', '100000', 100, 'x']], [...CorazonImportService::HEADERS, 'EXTRA']))
+            ->assertStatus(422);
+
+        $this->assertSame(0, RawMaterial::where('tipo', 'corazon')->count());
+    }
+
+    public function test_todo_o_nada_con_errores_de_datos(): void
+    {
+        $this->materiaPrima(['codigo' => '100000']);
+        $corazonAjeno = $this->materiaPrima(['codigo' => '750009', 'tipo' => 'corazon']);
+        $this->materiaPrima(['codigo' => '100500', 'tipo' => 'materia_prima']);
+
+        $res = $this->subir($this->excel([
+            ['750001', 'BUENO', '', '100000', 100],            // fila 2 ok
+            ['750002', 'MALO', '', '999999', 50],              // fila 3: ingrediente no existe
+            ['750003', 'MALO', '', '100000', 'abc'],           // fila 4: porcentaje inválido
+            ['750004', 'MALO', '', '100000', 150],             // fila 5: > 100
+            ['100500', 'CHOQUE', '', '100000', 100],           // fila 6: código es materia prima
+            ['750005', 'DUP', '', '100000', 50],
+            ['750005', 'DUP', '', '100000', 50],               // fila 8: ingrediente repetido
+            ['750006', 'NOMBRE A', '', '100000', 50],
+            ['750006', 'NOMBRE B', '', '100000', 50],          // fila 10: nombres distintos
+            ['750007', 'ANIDADO', '', $corazonAjeno->codigo, 100], // fila 11: ingrediente es corazón
+            ['', '', '', '100000', 10],                        // fila 12: faltan código y nombre
+        ]));
+
+        $res->assertStatus(422);
+        $filas = collect($res->json('errors'))->pluck('fila')->all();
+        foreach ([3, 4, 5, 6, 8, 10, 11, 12] as $f) {
+            $this->assertContains($f, $filas, "falta error en fila {$f}");
+        }
+        $this->assertNotContains(2, $filas);
+        $this->assertSame(1, RawMaterial::where('tipo', 'corazon')->count(), 'solo existe el corazón ajeno: no se importó nada');
+    }
+
+    public function test_actualiza_corazon_existente_y_recalcula_productos(): void
+    {
+        $a = $this->materiaPrima(['codigo' => '100000', 'costo_unitario' => 10]);
+        $b = $this->materiaPrima(['codigo' => '100004', 'costo_unitario' => 30]);
+        $corazon = $this->materiaPrima(['codigo' => '750001', 'nombre' => 'VIEJO', 'tipo' => 'corazon', 'costo_unitario' => 10, 'descripcion' => 'ya tenia']);
+        CorazonFormulaLine::create(['corazon_id' => $corazon->id, 'raw_material_id' => $a->id, 'porcentaje' => 100]);
+        $producto = ProductoTerminado::create(['codigo' => '585001', 'nombre' => 'PT', 'costo_unitario' => 10]);
+        ProductoFormulaLine::create(['producto_terminado_id' => $producto->id, 'raw_material_id' => $corazon->id, 'porcentaje' => 100]);
+
+        $this->subir($this->excel([
+            ['750001', 'NUEVO NOMBRE', '', '100000', 50],
+            ['750001', 'NUEVO NOMBRE', '', '100004', 50],
+        ]))->assertOk()->assertJsonPath('data.actualizados', 1)->assertJsonPath('data.creados', 0);
+
+        $corazon->refresh();
+        $this->assertSame('NUEVO NOMBRE', $corazon->nombre);
+        $this->assertSame('ya tenia', $corazon->descripcion, 'descripción vacía en el Excel no borra la existente');
+        $this->assertSame(2, CorazonFormulaLine::where('corazon_id', $corazon->id)->count());
+        $this->assertEqualsWithDelta(20.0, (float) $corazon->costo_unitario, 0.0001);
+        $this->assertEqualsWithDelta(20.0, (float) $producto->fresh()->costo_unitario, 0.0001);
+    }
+
+    public function test_plantilla_se_descarga_y_es_aceptada_por_el_importador(): void
+    {
+        $this->materiaPrima(['codigo' => '100000']);
+        $this->materiaPrima(['codigo' => '100004']);
+
+        $res = $this->get('/api/corazones/import/template');
+        $res->assertOk();
+        $path = tempnam(sys_get_temp_dir(), 'tpl') . '.xlsx';
+        file_put_contents($path, $res->streamedContent());
+        $file = new UploadedFile($path, 'plantilla_corazones.xlsx', null, null, true);
+
+        // La plantilla tal cual (con sus ejemplos) es válida contra el importador
+        $this->subir($file, true)->assertOk()->assertJsonPath('data.creados', 2)->assertJsonPath('data.activos', 2);
+    }
+
+    public function test_requiere_permiso_de_creacion(): void
+    {
+        $this->givePermissions(['raw material list']);
+
+        $this->subir($this->excel([['750001', 'UNO', '', '100000', 100]]))->assertForbidden();
+        $this->get('/api/corazones/import/template')->assertForbidden();
+    }
+}
