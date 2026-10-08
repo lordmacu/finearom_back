@@ -113,22 +113,6 @@ abstract class ProjectFieldsTestCase extends TestCase
 
     private function buildSchema(): void
     {
-        Schema::create('envelope_types', function (Blueprint $t) {
-            $t->id();
-            $t->string('name', 100);
-            $t->string('category', 100)->nullable();
-            $t->string('photo_path')->nullable();
-            $t->boolean('active')->default(true);
-            $t->timestamps();
-        });
-
-        Schema::create('project_envelope_type', function (Blueprint $t) {
-            $t->id();
-            $t->unsignedBigInteger('project_id');
-            $t->unsignedBigInteger('envelope_type_id');
-            $t->timestamps();
-        });
-
         Schema::create('product_categories', function (Blueprint $t) {
             $t->id();
             $t->string('name');
@@ -305,9 +289,18 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->timestamps();
         });
 
+        Schema::create('project_catalog_folders', function (Blueprint $t) {
+            $t->id();
+            $t->string('tipo', 20);
+            $t->unsignedBigInteger('parent_id')->nullable();
+            $t->string('name', 100);
+            $t->timestamps();
+        });
+
         Schema::create('project_catalog_items', function (Blueprint $t) {
             $t->id();
             $t->string('tipo', 20);
+            $t->unsignedBigInteger('folder_id')->nullable();
             $t->string('name', 100);
             $t->string('category', 100)->nullable();
             $t->string('photo_path')->nullable();

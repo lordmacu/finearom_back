@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\Projects;
 
-use App\Models\EnvelopeType;
+use App\Models\ProjectCatalogItem;
 use App\Models\Project;
 use App\Models\ProjectApplication;
 use App\Models\ProjectSample;
@@ -67,7 +67,7 @@ class AplicacionesFieldsTest extends ProjectFieldsTestCase
     public function test_asigna_tipo_etiquetado_y_envase_al_proyecto(): void
     {
         $project = $this->project();
-        $envase  = EnvelopeType::create(['name' => 'Frasco 30ml', 'category' => 'Vidrio']);
+        $envase  = ProjectCatalogItem::create(['tipo' => 'envase', 'name' => 'Frasco 30ml', 'category' => 'Vidrio']);
 
         $this->putJson("/api/projects/{$project->id}", [
             'nombre'            => $project->nombre,
@@ -77,7 +77,7 @@ class AplicacionesFieldsTest extends ProjectFieldsTestCase
 
         $project->refresh();
         $this->assertSame('SGA', $project->tipo_etiquetado);
-        $this->assertSame([$envase->id], $project->envelopeTypes()->pluck('envelope_types.id')->all());
+        $this->assertSame([$envase->id], $project->envelopeTypes()->pluck('project_catalog_items.id')->all());
     }
 
     public function test_rechaza_tipo_etiquetado_fuera_del_enum(): void
@@ -96,18 +96,19 @@ class AplicacionesFieldsTest extends ProjectFieldsTestCase
      */
     public function test_existe_una_ruta_para_servir_la_foto_del_envase(): void
     {
-        $envase = EnvelopeType::create([
+        $envase = ProjectCatalogItem::create([
+            'tipo'       => 'envase',
             'name'       => 'Frasco 30ml',
             'photo_path' => 'envelope-photos/abc.png',
         ]);
 
         $rutas = collect(app('router')->getRoutes())
             ->map(fn ($r) => $r->uri())
-            ->filter(fn ($uri) => str_contains($uri, 'envelope-types'))
+            ->filter(fn ($uri) => str_contains($uri, 'project-catalog-items'))
             ->values()
             ->all();
 
-        $sirveFoto = collect($rutas)->contains(fn ($uri) => str_contains($uri, 'photo') || str_contains($uri, '{envelopeType}/image'));
+        $sirveFoto = collect($rutas)->contains(fn ($uri) => str_contains($uri, 'photo'));
 
         $this->assertTrue(
             $sirveFoto,
