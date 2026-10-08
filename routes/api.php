@@ -515,17 +515,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/project-catalogs/finearom-references/{finearomReference}', [ProjectCatalogController::class, 'destroyFinearomReference']);
     Route::get('/project-catalogs/finearom-references/{finearomReference}/price-history', [ProjectCatalogController::class, 'finearomPriceHistory']);
 
-    // Catálogos de Marketing con carpetas virtuales ({tipo}: envase | etiqueta | piramide)
-    Route::get('/project-catalog-items/{tipo}', [ProjectCatalogItemController::class, 'index'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
-    Route::get('/project-catalog-items/{tipo}/browse', [ProjectCatalogItemController::class, 'browse'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
+    // Catálogos de Marketing con carpetas virtuales ({tipo}: envase | etiqueta | piramide | presentacion)
+    Route::get('/project-catalog-items/{tipo}', [ProjectCatalogItemController::class, 'index'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide', 'presentacion']);
+    Route::get('/project-catalog-items/{tipo}/browse', [ProjectCatalogItemController::class, 'browse'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide', 'presentacion']);
     Route::get('/project-catalog-items/item/{item}/photo', [ProjectCatalogItemController::class, 'photo']);
-    Route::put('/projects/{project}/catalog-items/{tipo}', [ProjectCatalogItemController::class, 'sync'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
-    Route::get('/admin/project-catalog-items/{tipo}', [ProjectCatalogItemAdminController::class, 'index'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
-    Route::get('/admin/project-catalog-items/{tipo}/browse', [ProjectCatalogItemAdminController::class, 'browse'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
+    Route::put('/projects/{project}/catalog-items/{tipo}', [ProjectCatalogItemController::class, 'sync'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide', 'presentacion']);
+    Route::get('/admin/project-catalog-items/{tipo}', [ProjectCatalogItemAdminController::class, 'index'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide', 'presentacion']);
+    Route::get('/admin/project-catalog-items/{tipo}/browse', [ProjectCatalogItemAdminController::class, 'browse'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide', 'presentacion']);
     Route::post('/admin/project-catalog-items', [ProjectCatalogItemAdminController::class, 'store']);
     Route::put('/admin/project-catalog-items/{item}', [ProjectCatalogItemAdminController::class, 'update']);
     Route::delete('/admin/project-catalog-items/{item}', [ProjectCatalogItemAdminController::class, 'destroy']);
-    Route::get('/admin/project-catalog-folders/{tipo}', [ProjectCatalogFolderAdminController::class, 'index'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
+    Route::get('/admin/project-catalog-folders/{tipo}', [ProjectCatalogFolderAdminController::class, 'index'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide', 'presentacion']);
     Route::post('/admin/project-catalog-folders', [ProjectCatalogFolderAdminController::class, 'store']);
     Route::put('/admin/project-catalog-folders/{folder}', [ProjectCatalogFolderAdminController::class, 'update']);
     Route::delete('/admin/project-catalog-folders/{folder}', [ProjectCatalogFolderAdminController::class, 'destroy']);
