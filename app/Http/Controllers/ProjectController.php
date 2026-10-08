@@ -222,7 +222,7 @@ class ProjectController extends Controller
             ));
 
             if (!empty($envelopeTypeIds)) {
-                $project->envelopeTypes()->sync($envelopeTypeIds);
+                $project->syncCatalogItemsDeTipo('envase', $envelopeTypeIds);
             }
 
             ProjectSample::create(['project_id' => $project->id]);
@@ -350,7 +350,7 @@ class ProjectController extends Controller
             $project->update($validated);
 
             if ($envelopeTypeIds !== null) {
-                $project->envelopeTypes()->sync($envelopeTypeIds);
+                $project->syncCatalogItemsDeTipo('envase', $envelopeTypeIds);
             }
 
             $project->update(['fecha_calculada' => $this->timeService->calculate($project->fresh('marketingYCalidad'))]);
@@ -460,9 +460,9 @@ class ProjectController extends Controller
 
             $newProject = Project::create($attrs);
 
-            $envelopeTypeIds = $project->envelopeTypes()->pluck('envelope_types.id');
-            if ($envelopeTypeIds->isNotEmpty()) {
-                $newProject->envelopeTypes()->sync($envelopeTypeIds);
+            $catalogItemIds = $project->catalogItems()->pluck('project_catalog_items.id');
+            if ($catalogItemIds->isNotEmpty()) {
+                $newProject->catalogItems()->sync($catalogItemIds);
             }
 
             ProjectSample::create(['project_id' => $newProject->id]);

@@ -5,13 +5,14 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ProjectCatalogItem\ProjectCatalogSelectionRequest;
 use App\Models\Project;
 use App\Models\ProjectCatalogItem;
+use App\Services\CatalogBrowser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
- * Catálogos de diseños de etiqueta y pirámides vistos desde el proyecto:
+ * Catálogos de envases, diseños de etiqueta y pirámides vistos desde el proyecto:
  * buscar ítems activos (como "Buscar envase"), su foto y la selección del
  * proyecto. La administración vive en ProjectCatalogItemAdminController.
  */
@@ -19,7 +20,7 @@ class ProjectCatalogItemController extends Controller
 {
     public function __construct()
     {
-        $this->middleware('can:project list')->only(['index', 'photo']);
+        $this->middleware('can:project list')->only(['index', 'browse', 'photo']);
         $this->middleware('can:project edit')->only(['sync']);
     }
 
@@ -45,6 +46,14 @@ class ProjectCatalogItemController extends Controller
         ]);
     }
 
+    /** Carpetas e imágenes activas de una carpeta del catálogo (raíz si no se envía `folder_id`). */
+    public function browse(Request $request, string $tipo, CatalogBrowser $browser): JsonResponse
+    {
+        abort_unless(array_key_exists($tipo, ProjectCatalogItem::TIPOS), 404);
+
+        return response()->json($browser->browse($request, $tipo, true));
+    }
+
     /** La foto vive en el disco `local` (privado): solo sale por aquí. */
     public function photo(ProjectCatalogItem $item): BinaryFileResponse
     {
@@ -58,9 +67,7 @@ class ProjectCatalogItemController extends Controller
     {
         abort_unless(array_key_exists($tipo, ProjectCatalogItem::TIPOS), 404);
 
-        $validos = ProjectCatalogItem::tipo($tipo)->whereIn('id', $request->validated('item_ids'))->pluck('id');
-        $otros   = $project->catalogItems()->where('tipo', '!=', $tipo)->pluck('project_catalog_items.id');
-        $project->catalogItems()->sync($otros->merge($validos)->all());
+        $project->syncCatalogItemsDeTipo($tipo, $request->validated('item_ids'));
 
         return response()->json([
             'success' => true,

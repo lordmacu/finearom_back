@@ -10,8 +10,6 @@ use App\Http\Controllers\CarteraEstadoController;
 use App\Http\Controllers\EmailCampaignController;
 use App\Http\Controllers\EmailTemplateController;
 use App\Http\Controllers\ClientController;
-use App\Http\Controllers\EnvelopeTypeAdminController;
-use App\Http\Controllers\EnvelopeTypeController;
 use App\Http\Controllers\ProjectMarketingUploadController;
 use App\Http\Controllers\ProjectMarketingVariantController;
 use App\Http\Controllers\ProjectMarketingVariantReferenceController;
@@ -42,6 +40,7 @@ use App\Http\Controllers\ProjectFileController;
 use App\Http\Controllers\ProjectLabelController;
 use App\Http\Controllers\ProjectWorkflowController;
 use App\Http\Controllers\ProjectCatalogController;
+use App\Http\Controllers\ProjectCatalogFolderAdminController;
 use App\Http\Controllers\ProjectCatalogItemAdminController;
 use App\Http\Controllers\ProjectCatalogItemController;
 use App\Http\Controllers\ProjectDetailController;
@@ -516,23 +515,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/project-catalogs/finearom-references/{finearomReference}', [ProjectCatalogController::class, 'destroyFinearomReference']);
     Route::get('/project-catalogs/finearom-references/{finearomReference}/price-history', [ProjectCatalogController::class, 'finearomPriceHistory']);
 
-    Route::get('/envelope-types', [EnvelopeTypeController::class, 'index']);
-    Route::get('/envelope-types/{envelopeType}/photo', [EnvelopeTypeController::class, 'photo']);
-
-    // Catálogos de diseños de etiqueta y pirámides ({tipo}: etiqueta | piramide)
-    Route::get('/project-catalog-items/{tipo}', [ProjectCatalogItemController::class, 'index'])->whereIn('tipo', ['etiqueta', 'piramide']);
+    // Catálogos de Marketing con carpetas virtuales ({tipo}: envase | etiqueta | piramide)
+    Route::get('/project-catalog-items/{tipo}', [ProjectCatalogItemController::class, 'index'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
+    Route::get('/project-catalog-items/{tipo}/browse', [ProjectCatalogItemController::class, 'browse'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
     Route::get('/project-catalog-items/item/{item}/photo', [ProjectCatalogItemController::class, 'photo']);
-    Route::put('/projects/{project}/catalog-items/{tipo}', [ProjectCatalogItemController::class, 'sync'])->whereIn('tipo', ['etiqueta', 'piramide']);
-    Route::get('/admin/project-catalog-items/{tipo}', [ProjectCatalogItemAdminController::class, 'index'])->whereIn('tipo', ['etiqueta', 'piramide']);
+    Route::put('/projects/{project}/catalog-items/{tipo}', [ProjectCatalogItemController::class, 'sync'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
+    Route::get('/admin/project-catalog-items/{tipo}', [ProjectCatalogItemAdminController::class, 'index'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
+    Route::get('/admin/project-catalog-items/{tipo}/browse', [ProjectCatalogItemAdminController::class, 'browse'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
     Route::post('/admin/project-catalog-items', [ProjectCatalogItemAdminController::class, 'store']);
     Route::put('/admin/project-catalog-items/{item}', [ProjectCatalogItemAdminController::class, 'update']);
     Route::delete('/admin/project-catalog-items/{item}', [ProjectCatalogItemAdminController::class, 'destroy']);
-
-    // Admin CRUD para envelope types
-    Route::get('/admin/envelope-types', [EnvelopeTypeAdminController::class, 'index']);
-    Route::post('/admin/envelope-types', [EnvelopeTypeAdminController::class, 'store']);
-    Route::put('/admin/envelope-types/{envelopeType}', [EnvelopeTypeAdminController::class, 'update']);
-    Route::delete('/admin/envelope-types/{envelopeType}', [EnvelopeTypeAdminController::class, 'destroy']);
+    Route::get('/admin/project-catalog-folders/{tipo}', [ProjectCatalogFolderAdminController::class, 'index'])->whereIn('tipo', ['envase', 'etiqueta', 'piramide']);
+    Route::post('/admin/project-catalog-folders', [ProjectCatalogFolderAdminController::class, 'store']);
+    Route::put('/admin/project-catalog-folders/{folder}', [ProjectCatalogFolderAdminController::class, 'update']);
+    Route::delete('/admin/project-catalog-folders/{folder}', [ProjectCatalogFolderAdminController::class, 'destroy']);
 
     // Notificaciones internas de proyectos
     Route::get('/project-notifications', [ProjectNotificationController::class, 'index']);

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\ProjectCatalogItem\ProjectCatalogItemRequest;
 use App\Models\ProjectCatalogItem;
+use App\Services\CatalogBrowser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -11,8 +12,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
- * Administración de los catálogos de diseños de etiqueta y pirámides. Mismo
- * permiso que el catálogo de envases.
+ * Administración de los catálogos de envases, diseños de etiqueta y pirámides.
  */
 class ProjectCatalogItemAdminController extends Controller
 {
@@ -41,6 +41,14 @@ class ProjectCatalogItemAdminController extends Controller
                 'total'        => $items->total(),
             ],
         ]);
+    }
+
+    /** Carpetas e imágenes (incluidas las inactivas) de una carpeta del catálogo. */
+    public function browse(Request $request, string $tipo, CatalogBrowser $browser): JsonResponse
+    {
+        abort_unless(array_key_exists($tipo, ProjectCatalogItem::TIPOS), 404);
+
+        return response()->json($browser->browse($request, $tipo, false));
     }
 
     public function store(ProjectCatalogItemRequest $request): JsonResponse

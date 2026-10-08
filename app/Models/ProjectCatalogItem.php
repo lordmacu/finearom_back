@@ -4,15 +4,18 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
- * Ítem de los catálogos de Marketing (diseños de etiqueta y pirámides).
+ * Ítem de los catálogos de Marketing (envases, diseños de etiqueta y pirámides).
+ * Cada ítem puede vivir en una carpeta virtual (`folder_id`, null = raíz).
  */
 class ProjectCatalogItem extends Model
 {
     /** tipo => nombre del catálogo */
     public const TIPOS = [
+        'envase'   => 'Catálogo Envases',
         'etiqueta' => 'Catálogo Diseño Etiquetas',
         'piramide' => 'Catálogo Pirámides',
     ];
@@ -21,6 +24,7 @@ class ProjectCatalogItem extends Model
 
     protected $fillable = [
         'tipo',
+        'folder_id',
         'name',
         'category',
         'photo_path',
@@ -35,6 +39,11 @@ class ProjectCatalogItem extends Model
     {
         return $this->belongsToMany(Project::class, 'project_catalog_item_project', 'catalog_item_id', 'project_id')
             ->withTimestamps();
+    }
+
+    public function folder(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCatalogFolder::class, 'folder_id');
     }
 
     public function scopeTipo(Builder $query, string $tipo): Builder

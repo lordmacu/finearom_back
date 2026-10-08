@@ -185,13 +185,24 @@ class Project extends Model
         return $this->belongsTo(ProductCategory::class, 'product_category_id');
     }
 
+    /** Envases elegidos: ítems del catálogo con tipo 'envase'. */
     public function envelopeTypes(): BelongsToMany
     {
-        return $this->belongsToMany(EnvelopeType::class, 'project_envelope_type')
-            ->withTimestamps();
+        return $this->catalogItems()->where('project_catalog_items.tipo', 'envase');
     }
 
-    /** Diseños de etiqueta y pirámides elegidos de los catálogos de Marketing. */
+    /**
+     * Reemplaza los ítems elegidos de un tipo de catálogo sin tocar los de los
+     * demás tipos (un `sync` directo sobre la relación filtrada los quitaría).
+     */
+    public function syncCatalogItemsDeTipo(string $tipo, array $ids): void
+    {
+        $validos = ProjectCatalogItem::tipo($tipo)->whereIn('id', $ids)->pluck('id');
+        $otros   = $this->catalogItems()->where('project_catalog_items.tipo', '!=', $tipo)->pluck('project_catalog_items.id');
+        $this->catalogItems()->sync($otros->merge($validos)->all());
+    }
+
+    /** Envases, diseños de etiqueta y pirámides elegidos de los catálogos de Marketing. */
     public function catalogItems(): BelongsToMany
     {
         return $this->belongsToMany(ProjectCatalogItem::class, 'project_catalog_item_project', 'project_id', 'catalog_item_id')

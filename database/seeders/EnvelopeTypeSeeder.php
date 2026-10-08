@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\EnvelopeType;
+use App\Models\ProjectCatalogItem;
 use Illuminate\Database\Seeder;
 
 class EnvelopeTypeSeeder extends Seeder
@@ -28,8 +28,8 @@ class EnvelopeTypeSeeder extends Seeder
         ];
 
         foreach ($types as $type) {
-            EnvelopeType::firstOrCreate(
-                ['name' => $type['name']],
+            ProjectCatalogItem::firstOrCreate(
+                ['tipo' => 'envase', 'name' => $type['name']],
                 $type
             );
         }
