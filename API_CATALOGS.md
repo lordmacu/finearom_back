@@ -1,7 +1,7 @@
 # Catálogos de Marketing con carpetas virtuales
 
-Envases, diseños de etiqueta y pirámides comparten tabla (`project_catalog_items`), carpetas
-(`project_catalog_folders`) y controladores. `{tipo}` = `envase` | `etiqueta` | `piramide`.
+Envases, diseños de etiqueta, pirámides y presentaciones comparten tabla (`project_catalog_items`), carpetas
+(`project_catalog_folders`) y controladores. `{tipo}` = `envase` | `etiqueta` | `piramide` | `presentacion`.
 
 - Las carpetas son **virtuales** (solo en base de datos), con `parent_id`, sin límite de niveles.
   Un ítem vive en una carpeta (`folder_id`, `null` = raíz). Las carpetas no se mezclan entre tipos.

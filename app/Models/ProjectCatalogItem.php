@@ -18,6 +18,7 @@ class ProjectCatalogItem extends Model
         'envase'   => 'Catálogo Envases',
         'etiqueta' => 'Catálogo Diseño Etiquetas',
         'piramide' => 'Catálogo Pirámides',
+        'presentacion' => 'Catálogo Presentaciones',
     ];
 
     protected $table = 'project_catalog_items';

@@ -83,4 +83,27 @@ class ProjectCatalogItemsTest extends ProjectMailTestCase
         $this->assertStringContainsString('Pirámide floral', $html);
         $this->assertStringNotContainsString('Etiqueta A', $html);
     }
+
+    public function test_presentaciones_es_un_catalogo_mas_con_carpetas_y_va_en_el_correo(): void
+    {
+        $project = $this->project();
+        $carpeta = $this->postJson('/api/admin/project-catalog-folders', ['tipo' => 'presentacion', 'name' => 'Frascos'])
+            ->assertCreated()->json('data.id');
+        $id = $this->crear('presentacion', 'Frasco 50 ml', ['folder_id' => $carpeta, 'photo' => UploadedFile::fake()->image('p.png')]);
+        $etiqueta = $this->crear('etiqueta', 'Etiqueta A');
+
+        $this->getJson("/api/project-catalog-items/presentacion/browse?folder_id={$carpeta}")
+            ->assertOk()->assertJsonPath('data.0.name', 'Frasco 50 ml');
+
+        $this->putJson("/api/projects/{$project->id}/catalog-items/etiqueta", ['item_ids' => [$etiqueta]])->assertOk();
+        $this->putJson("/api/projects/{$project->id}/catalog-items/presentacion", ['item_ids' => [$id, $etiqueta]])
+            ->assertOk()->assertJsonCount(1, 'data');
+        $this->assertEqualsCanonicalizing([$etiqueta, $id], $project->catalogItems()->pluck('project_catalog_items.id')->all());
+
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
+        $this->template('project_created', 'Nuevo proyecto #|project_id|');
+        $this->postJson("/api/projects/{$project->id}/send-creation")->assertOk();
+        $html = $this->sentMessages()->last()->getOriginalMessage()->getHtmlBody();
+        $this->assertStringContainsString('Frasco 50 ml', $html);
+    }
 }
