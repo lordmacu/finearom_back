@@ -3,16 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\CorazonFormulaLine;
-use App\Models\ProductoFormulaLine;
-use App\Models\ProductoTerminado;
 use App\Models\RawMaterial;
+use App\Services\CorazonCostService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class CorazonFormulaController extends Controller
 {
-    public function __construct()
-    {
+    public function __construct(
+        private readonly CorazonCostService $costos
+    ) {
         $this->middleware('can:raw material edit');
     }
 
@@ -83,11 +83,17 @@ class CorazonFormulaController extends Controller
             'Un corazón no puede ser ingrediente de sí mismo.'
         );
 
+        // Un ingrediente puede ser una materia prima o OTRO corazón (anidado).
         $ingrediente = RawMaterial::find($validated['raw_material_id']);
         abort_if(
-            !$ingrediente || $ingrediente->tipo !== 'materia_prima',
+            !$ingrediente || !in_array($ingrediente->tipo, ['materia_prima', 'corazon'], true),
             422,
-            'Un corazón solo puede tener materias primas como ingredientes.'
+            'Un corazón solo puede tener materias primas o corazones como ingredientes.'
+        );
+        abort_if(
+            $this->costos->crearCiclo($rawMaterial->id, $ingrediente->id),
+            422,
+            'Ese corazón ya contiene a este (directa o indirectamente): agregarlo crearía un ciclo.'
         );
 
         $line = CorazonFormulaLine::updateOrCreate(
@@ -132,58 +138,11 @@ class CorazonFormulaController extends Controller
     }
 
     /**
-     * Recalculates and persists the costo_unitario of the corazon based on its current formula,
-     * then propagates that change to any producto terminado that uses this corazón as an ingredient.
+     * Recalcula el costo del corazón y lo propaga a los productos terminados y a los
+     * corazones que lo usan como ingrediente.
      */
     private function updateCorazonCosto(RawMaterial $corazon): void
     {
-        $lines = $corazon->corazonComponents()->with('rawMaterial')->get();
-
-        $costoTotal = 0.0;
-        foreach ($lines as $line) {
-            $rm = $line->rawMaterial;
-            if (!$rm) {
-                continue;
-            }
-            $factor      = $this->toKgFactor($rm->unidad);
-            $costoTotal += ((float) $line->porcentaje / 100) * ((float) $rm->costo_unitario / $factor);
-        }
-
-        $corazon->update(['costo_unitario' => round($costoTotal, 4)]);
-
-        $this->recalculateProductoTerminadoCosts($corazon);
-    }
-
-    /**
-     * Recalculates the costo_unitario of all productos terminados that use this corazón as an ingredient.
-     */
-    private function recalculateProductoTerminadoCosts(RawMaterial $corazon): void
-    {
-        $affectedIds = ProductoFormulaLine::where('raw_material_id', $corazon->id)
-            ->pluck('producto_terminado_id')
-            ->unique();
-
-        foreach ($affectedIds as $productoId) {
-            $producto = ProductoTerminado::find($productoId);
-            if (!$producto) {
-                continue;
-            }
-
-            $lines = ProductoFormulaLine::where('producto_terminado_id', $productoId)
-                ->with('rawMaterial')
-                ->get();
-
-            $costoTotal = 0.0;
-            foreach ($lines as $line) {
-                $rm = $line->rawMaterial;
-                if (!$rm) {
-                    continue;
-                }
-                $factor      = $this->toKgFactor($rm->unidad);
-                $costoTotal += ((float) $line->porcentaje / 100) * ((float) $rm->costo_unitario / $factor);
-            }
-
-            $producto->update(['costo_unitario' => round($costoTotal, 4)]);
-        }
+        $this->costos->recalcular($corazon);
     }
 }

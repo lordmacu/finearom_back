@@ -3,15 +3,15 @@
 namespace App\Services;
 
 use App\Models\CorazonFormulaLine;
-use App\Models\ProductoFormulaLine;
-use App\Models\ProductoTerminado;
 use App\Models\RawMaterial;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 /**
  * Importa corazones (con su fórmula) desde un Excel con formato fijo:
- * una fila por ingrediente, el corazón se repite en cada fila.
+ * una fila por ingrediente, el corazón se repite en cada fila. Un ingrediente puede
+ * ser una materia prima o OTRO corazón (existente o definido en el mismo archivo);
+ * no se permiten ciclos.
  *
  * El formato es estricto: si los encabezados no son exactamente los de la
  * plantilla, el archivo se rechaza. Es todo o nada: con un solo error de datos
@@ -20,6 +20,10 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
  */
 class CorazonImportService
 {
+    public function __construct(
+        private readonly CorazonCostService $costos
+    ) {}
+
     public const HEADERS = ['CODIGO CORAZON', 'NOMBRE CORAZON', 'DESCRIPCION', 'CODIGO INGREDIENTE', 'PORCENTAJE'];
     public const MAX_ROWS = 5000;
     private const MAX_ERRORS = 200;
@@ -113,6 +117,7 @@ class CorazonImportService
 
         $existentes = RawMaterial::whereIn('codigo', array_unique(array_column($filas, 'codigo')))->get()->keyBy('codigo');
         $ingredientes = RawMaterial::whereIn('codigo', array_unique(array_column($filas, 'ingrediente')))->get()->keyBy('codigo');
+        $codigosArchivo = array_flip(array_filter(array_unique(array_column($filas, 'codigo'))));
 
         $corazones = [];
         foreach ($filas as $f) {
@@ -136,11 +141,14 @@ class CorazonImportService
             if ($f['ingrediente'] === '') {
                 $error($n, 'CODIGO INGREDIENTE es obligatorio.');
                 $ok = false;
-            } elseif (!$ing) {
-                $error($n, "El ingrediente {$f['ingrediente']} no existe en materias primas.");
+            } elseif ($f['ingrediente'] === $f['codigo']) {
+                $error($n, "El corazón {$f['codigo']} no puede ser ingrediente de sí mismo.");
                 $ok = false;
-            } elseif ($ing->tipo !== 'materia_prima') {
-                $error($n, "El ingrediente {$f['ingrediente']} es un corazón: un corazón solo puede tener materias primas.");
+            } elseif (!$ing && !isset($codigosArchivo[$f['ingrediente']])) {
+                $error($n, "El ingrediente {$f['ingrediente']} no existe como materia prima ni como corazón.");
+                $ok = false;
+            } elseif ($ing && !in_array($ing->tipo, ['materia_prima', 'corazon'], true)) {
+                $error($n, "El ingrediente {$f['ingrediente']} no es una materia prima ni un corazón.");
                 $ok = false;
             }
 
@@ -168,13 +176,21 @@ class CorazonImportService
                 $c['descripcion'] = $f['descripcion'];
             }
             if ($ok) {
-                if (isset($c['lineas'][$ing->id])) {
+                if (isset($c['lineas'][$f['ingrediente']])) {
                     $error($n, "El ingrediente {$f['ingrediente']} está repetido en el corazón {$f['codigo']}.");
                 } else {
-                    $c['lineas'][$ing->id] = ['ing' => $ing, 'porcentaje' => $pct];
+                    // $ing es null cuando el ingrediente es un corazón que se crea en este mismo archivo
+                    $c['lineas'][$f['ingrediente']] = ['ing' => $ing, 'porcentaje' => $pct, 'fila' => $n];
                 }
             }
             unset($c);
+        }
+
+        if (!$errores) {
+            foreach ($this->corazonesEnCiclo($corazones) as $codigo) {
+                $fila = collect($filas)->firstWhere('codigo', $codigo)['fila'] ?? null;
+                $errores[] = ['fila' => $fila, 'mensaje' => "El corazón {$codigo} quedaría dentro de sí mismo (directa o indirectamente): hay un ciclo entre corazones."];
+            }
         }
 
         if (count($errores) > self::MAX_ERRORS) {
@@ -194,15 +210,75 @@ class CorazonImportService
         return is_numeric($valor) ? (float) $valor : null;
     }
 
+    /**
+     * Códigos de los corazones del archivo que terminarían conteniéndose a sí mismos.
+     *
+     * @return array<int, string>
+     */
+    private function corazonesEnCiclo(array $corazones): array
+    {
+        $hijos = function (string $codigo) use ($corazones): array {
+            if (isset($corazones[$codigo])) {
+                return array_keys($corazones[$codigo]['lineas']);
+            }
+            // Corazón que ya existe y no viene en el archivo: sus ingredientes actuales
+            $id = RawMaterial::where('codigo', $codigo)->where('tipo', 'corazon')->value('id');
+            if (!$id) {
+                return [];
+            }
+
+            return CorazonFormulaLine::where('corazon_id', $id)->join('raw_materials as r', 'r.id', '=', 'corazon_formula_lines.raw_material_id')
+                ->pluck('r.codigo')->map(fn ($c) => (string) $c)->all();
+        };
+
+        $enCiclo = [];
+        foreach (array_keys($corazones) as $inicio) {
+            $pendientes = array_keys($corazones[$inicio]['lineas']);
+            $vistos = [];
+            while ($pendientes) {
+                $actual = (string) array_pop($pendientes);
+                if ($actual === (string) $inicio) {
+                    $enCiclo[] = $inicio;
+                    break;
+                }
+                if (isset($vistos[$actual])) {
+                    continue;
+                }
+                $vistos[$actual] = true;
+                array_push($pendientes, ...$hijos($actual));
+            }
+        }
+
+        return $enCiclo;
+    }
+
+    /** Primero los corazones que otros del archivo necesitan como ingrediente. */
+    private function ordenarPorDependencia(array $corazones): array
+    {
+        $listos = [];
+        $visto = [];
+        $visitar = function (string $codigo) use (&$visitar, &$listos, &$visto, $corazones) {
+            if (isset($visto[$codigo]) || !isset($corazones[$codigo])) {
+                return;
+            }
+            $visto[$codigo] = true;
+            foreach (array_keys($corazones[$codigo]['lineas']) as $hijo) {
+                $visitar((string) $hijo);
+            }
+            $listos[] = $corazones[$codigo]; // se agrega cuando sus dependencias ya están
+        };
+        foreach (array_keys($corazones) as $codigo) {
+            $visitar((string) $codigo);
+        }
+
+        return $listos;
+    }
+
     private function aplicar(array $corazones): void
     {
-        foreach ($corazones as $c) {
+        foreach ($this->ordenarPorDependencia($corazones) as $c) {
             $suma = array_sum(array_column($c['lineas'], 'porcentaje'));
-            $costo = 0.0;
-            foreach ($c['lineas'] as $l) {
-                $costo += ($l['porcentaje'] / 100) * $this->costoKg($l['ing']);
-            }
-            $datos = ['nombre' => $c['nombre'], 'costo_unitario' => round($costo, 4), 'activo' => abs($suma - 100) < 0.01];
+            $datos = ['nombre' => $c['nombre'], 'activo' => abs($suma - 100) < 0.01];
             if ($c['descripcion'] !== '') {
                 $datos['descripcion'] = $c['descripcion'];
             }
@@ -215,33 +291,14 @@ class CorazonImportService
                 $corazon = RawMaterial::create([...$datos, 'codigo' => $c['codigo'], 'tipo' => 'corazon', 'unidad' => 'kg']);
             }
 
-            foreach ($c['lineas'] as $id => $l) {
-                CorazonFormulaLine::create(['corazon_id' => $corazon->id, 'raw_material_id' => $id, 'porcentaje' => $l['porcentaje']]);
+            foreach ($c['lineas'] as $codigoIng => $l) {
+                $ingId = RawMaterial::where('codigo', (string) $codigoIng)->value('id');
+                CorazonFormulaLine::create(['corazon_id' => $corazon->id, 'raw_material_id' => $ingId, 'porcentaje' => $l['porcentaje']]);
             }
 
-            $this->recalcularProductos($corazon);
-        }
-    }
-
-    private function costoKg(RawMaterial $rm): float
-    {
-        $factor = in_array($rm->unidad, ['g', 'ml'], true) ? 1 / 1000 : 1.0;
-
-        return (float) $rm->costo_unitario / $factor;
-    }
-
-    /** Los productos terminados que usan este corazón cambian de costo. */
-    private function recalcularProductos(RawMaterial $corazon): void
-    {
-        $ids = ProductoFormulaLine::where('raw_material_id', $corazon->id)->pluck('producto_terminado_id')->unique();
-        foreach ($ids as $id) {
-            $total = 0.0;
-            foreach (ProductoFormulaLine::where('producto_terminado_id', $id)->with('rawMaterial')->get() as $l) {
-                if ($l->rawMaterial) {
-                    $total += ((float) $l->porcentaje / 100) * $this->costoKg($l->rawMaterial);
-                }
-            }
-            ProductoTerminado::where('id', $id)->update(['costo_unitario' => round($total, 4)]);
+            // costo según la fórmula (con los costos ya vigentes de sus ingredientes) y
+            // propagación a los productos y corazones que lo usan
+            $this->costos->recalcular($corazon);
         }
     }
 
@@ -252,7 +309,7 @@ class CorazonImportService
         foreach ($corazones as $c) {
             $suma = round(array_sum(array_column($c['lineas'], 'porcentaje')), 4);
             $activo = abs($suma - 100) < 0.01;
-            $pendientes = count(array_filter($c['lineas'], fn ($l) => $l['ing']->pendiente_equivalencia));
+            $pendientes = count(array_filter($c['lineas'], fn ($l) => $l['ing']?->pendiente_equivalencia));
             $c['existente'] ? $actualizados++ : $creados++;
             $activo && $activos++;
             $pendientes && $conPendientes++;

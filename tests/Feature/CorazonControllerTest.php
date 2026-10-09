@@ -197,27 +197,40 @@ class CorazonControllerTest extends CorazonTestCase
             ->assertJsonPath('data.activo', false);
     }
 
-    public function test_agregar_corazon_como_ingrediente_de_otro_corazon_falla(): void
+    public function test_un_corazon_puede_llevar_otro_corazon_y_su_costo_se_propaga(): void
     {
-        $ingrediente = RawMaterial::create([
-            'codigo' => 'COR-060', 'nombre' => 'Corazón ingrediente', 'tipo' => 'corazon',
-            'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false,
-        ]);
-        $contenedor = RawMaterial::create([
-            'codigo' => 'COR-061', 'nombre' => 'Corazón contenedor', 'tipo' => 'corazon',
-            'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false,
-        ]);
+        $mp = RawMaterial::create(['codigo' => 'MP-1', 'nombre' => 'MP', 'tipo' => 'materia_prima', 'unidad' => 'kg', 'costo_unitario' => 10, 'activo' => true]);
+        $hijo = RawMaterial::create(['codigo' => 'COR-060', 'nombre' => 'Hijo', 'tipo' => 'corazon', 'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false]);
+        $padre = RawMaterial::create(['codigo' => 'COR-061', 'nombre' => 'Padre', 'tipo' => 'corazon', 'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false]);
 
-        $this->postJson("/api/raw-materials/{$contenedor->id}/corazon-formula", [
-            'raw_material_id' => $ingrediente->id,
-            'porcentaje'      => 30,
-        ])->assertStatus(422)
-          ->assertJsonPath('message', 'Un corazón solo puede tener materias primas como ingredientes.');
+        $this->postJson("/api/raw-materials/{$padre->id}/corazon-formula", ['raw_material_id' => $hijo->id, 'porcentaje' => 50])
+            ->assertStatus(201);
+        $this->assertDatabaseHas('corazon_formula_lines', ['corazon_id' => $padre->id, 'raw_material_id' => $hijo->id]);
 
-        $this->assertDatabaseMissing('corazon_formula_lines', [
-            'corazon_id'      => $contenedor->id,
-            'raw_material_id' => $ingrediente->id,
-        ]);
+        // al cambiar la fórmula del hijo, el costo del padre sube solo
+        $this->postJson("/api/raw-materials/{$hijo->id}/corazon-formula", ['raw_material_id' => $mp->id, 'porcentaje' => 100])
+            ->assertStatus(201);
+
+        $this->assertEqualsWithDelta(10.0, (float) $hijo->fresh()->costo_unitario, 0.0001);
+        $this->assertEqualsWithDelta(5.0, (float) $padre->fresh()->costo_unitario, 0.0001); // 50% de 10
+    }
+
+    public function test_un_corazon_no_puede_contenerse_a_si_mismo_ni_en_ciclo(): void
+    {
+        $a = RawMaterial::create(['codigo' => 'COR-070', 'nombre' => 'A', 'tipo' => 'corazon', 'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false]);
+        $b = RawMaterial::create(['codigo' => 'COR-071', 'nombre' => 'B', 'tipo' => 'corazon', 'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false]);
+        $c = RawMaterial::create(['codigo' => 'COR-072', 'nombre' => 'C', 'tipo' => 'corazon', 'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false]);
+
+        $this->postJson("/api/raw-materials/{$a->id}/corazon-formula", ['raw_material_id' => $a->id, 'porcentaje' => 10])
+            ->assertStatus(422);
+
+        // A contiene B, B contiene C: C no puede contener a A
+        $this->postJson("/api/raw-materials/{$a->id}/corazon-formula", ['raw_material_id' => $b->id, 'porcentaje' => 10])->assertStatus(201);
+        $this->postJson("/api/raw-materials/{$b->id}/corazon-formula", ['raw_material_id' => $c->id, 'porcentaje' => 10])->assertStatus(201);
+        $this->postJson("/api/raw-materials/{$c->id}/corazon-formula", ['raw_material_id' => $a->id, 'porcentaje' => 10])
+            ->assertStatus(422);
+
+        $this->assertDatabaseMissing('corazon_formula_lines', ['corazon_id' => $c->id, 'raw_material_id' => $a->id]);
     }
 
     public function test_destroy_bloquea_si_es_usado_como_ingrediente_de_producto_terminado(): void

@@ -99,16 +99,17 @@ class CorazonImportTest extends ProductoTerminadoTestCase
             ['750005', 'DUP', '', '100000', 50],               // fila 8: ingrediente repetido
             ['750006', 'NOMBRE A', '', '100000', 50],
             ['750006', 'NOMBRE B', '', '100000', 50],          // fila 10: nombres distintos
-            ['750007', 'ANIDADO', '', $corazonAjeno->codigo, 100], // fila 11: ingrediente es corazón
+            ['750007', 'ANIDADO', '', $corazonAjeno->codigo, 100], // fila 11: ingrediente corazón (permitido)
             ['', '', '', '100000', 10],                        // fila 12: faltan código y nombre
         ]));
 
         $res->assertStatus(422);
         $filas = collect($res->json('errors'))->pluck('fila')->all();
-        foreach ([3, 4, 5, 6, 8, 10, 11, 12] as $f) {
+        foreach ([3, 4, 5, 6, 8, 10, 12] as $f) {
             $this->assertContains($f, $filas, "falta error en fila {$f}");
         }
         $this->assertNotContains(2, $filas);
+        $this->assertNotContains(11, $filas, 'un corazón como ingrediente de otro corazón es válido');
         $this->assertSame(1, RawMaterial::where('tipo', 'corazon')->count(), 'solo existe el corazón ajeno: no se importó nada');
     }
 
@@ -174,6 +175,40 @@ class CorazonImportTest extends ProductoTerminadoTestCase
         // Round-trip: lo descargado se puede volver a subir tal cual
         $this->subir(new UploadedFile($path, 'corazones.xlsx', null, null, true), true)
             ->assertOk()->assertJsonPath('data.actualizados', 1);
+    }
+
+    public function test_acepta_corazones_dentro_de_corazones_y_calcula_costos_en_cascada(): void
+    {
+        $this->materiaPrima(['codigo' => '100000', 'costo_unitario' => 10]);
+        $existente = $this->materiaPrima(['codigo' => '750100', 'nombre' => 'YA EXISTE', 'tipo' => 'corazon', 'costo_unitario' => 8]);
+
+        // El padre aparece ANTES que su hijo en el archivo; el hijo se define en el mismo archivo
+        $this->subir($this->excel([
+            ['340100', 'PADRE', '', '340101', 50],       // corazón definido más abajo en el archivo
+            ['340100', 'PADRE', '', '750100', 50],       // corazón que ya existe
+            ['340101', 'HIJO', '', '100000', 100],
+        ]))->assertOk()->assertJsonPath('data.creados', 2)->assertJsonPath('data.activos', 2);
+
+        $hijo = RawMaterial::where('codigo', '340101')->first();
+        $padre = RawMaterial::where('codigo', '340100')->first();
+        $this->assertEqualsWithDelta(10.0, (float) $hijo->costo_unitario, 0.0001);
+        $this->assertEqualsWithDelta(9.0, (float) $padre->costo_unitario, 0.0001); // 0.5*10 + 0.5*8
+        $this->assertSame(2, CorazonFormulaLine::where('corazon_id', $padre->id)->count());
+    }
+
+    public function test_rechaza_ciclos_entre_corazones(): void
+    {
+        $this->materiaPrima(['codigo' => '100000']);
+
+        $this->subir($this->excel([
+            ['340200', 'A', '', '340201', 50],
+            ['340200', 'A', '', '100000', 50],
+            ['340201', 'B', '', '340200', 50],
+            ['340201', 'B', '', '100000', 50],
+        ]))->assertStatus(422);
+
+        $this->subir($this->excel([['340300', 'SOLO', '', '340300', 100]]))->assertStatus(422);
+        $this->assertSame(0, RawMaterial::where('tipo', 'corazon')->count());
     }
 
     public function test_por_ahora_no_exige_permisos_especificos(): void

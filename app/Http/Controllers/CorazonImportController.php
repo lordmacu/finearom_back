@@ -131,7 +131,7 @@ class CorazonImportController extends Controller
             '2. Cada fila es UN ingrediente de un corazón. Para un corazón con varios ingredientes, repite su código y nombre en cada fila.',
             '3. CODIGO CORAZON y NOMBRE CORAZON son obligatorios en todas las filas, y el nombre debe ser igual en todas las filas del mismo corazón.',
             '4. DESCRIPCION es opcional (pirámide olfativa). Si un corazón la trae en varias filas, se usa la primera que no esté vacía.',
-            '5. CODIGO INGREDIENTE debe ser el código de una materia prima que ya exista. Un corazón no puede ser ingrediente de otro corazón.',
+            '5. CODIGO INGREDIENTE debe ser el código de una materia prima o de un corazón (existente o definido en este mismo archivo). Un corazón puede llevar otros corazones, pero no puede contenerse a sí mismo.',
             '6. PORCENTAJE es un número mayor a 0 y hasta 100 (ej. 12.5). No repitas un ingrediente dentro del mismo corazón.',
             '7. Si el código del corazón ya existe, se actualiza: su fórmula se reemplaza por la del archivo. Si no existe, se crea.',
             '8. El corazón queda ACTIVO solo si sus porcentajes suman 100%; si no, queda en borrador.',
