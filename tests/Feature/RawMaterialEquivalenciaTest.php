@@ -47,6 +47,7 @@ class RawMaterialEquivalenciaTest extends ProductoTerminadoTestCase
 
     public function test_reemplazar_por_equivalente_mueve_lineas_suma_duplicados_y_recalcula(): void
     {
+        config(['custom.corazones_calcular_costos' => true]); // el cálculo está apagado por defecto
         $mp300 = $this->materiaPrima(['codigo' => '300100', 'costo_unitario' => 10]);
         $prov = $this->materiaPrima(['codigo' => '320003', 'costo_unitario' => 99, 'pendiente_equivalencia' => true, 'equivalente_id' => $mp300->id]);
         $sinEquiv = $this->materiaPrima(['codigo' => '320005', 'pendiente_equivalencia' => true]);

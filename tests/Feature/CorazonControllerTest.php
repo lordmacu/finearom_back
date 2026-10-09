@@ -199,6 +199,7 @@ class CorazonControllerTest extends CorazonTestCase
 
     public function test_un_corazon_puede_llevar_otro_corazon_y_su_costo_se_propaga(): void
     {
+        config(['custom.corazones_calcular_costos' => true]); // el cálculo está apagado por defecto
         $mp = RawMaterial::create(['codigo' => 'MP-1', 'nombre' => 'MP', 'tipo' => 'materia_prima', 'unidad' => 'kg', 'costo_unitario' => 10, 'activo' => true]);
         $hijo = RawMaterial::create(['codigo' => 'COR-060', 'nombre' => 'Hijo', 'tipo' => 'corazon', 'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false]);
         $padre = RawMaterial::create(['codigo' => 'COR-061', 'nombre' => 'Padre', 'tipo' => 'corazon', 'unidad' => 'kg', 'descripcion' => 'x', 'activo' => false]);
@@ -255,6 +256,7 @@ class CorazonControllerTest extends CorazonTestCase
 
     public function test_editar_formula_de_corazon_recalcula_producto_terminado_que_lo_usa(): void
     {
+        config(['custom.corazones_calcular_costos' => true]); // el cálculo está apagado por defecto
         $mp = $this->materiaPrima(['costo_unitario' => 10, 'unidad' => 'kg']);
         $corazon = RawMaterial::create([
             'codigo' => 'COR-071', 'nombre' => 'Recalculo', 'tipo' => 'corazon',

@@ -18,7 +18,7 @@ class RawMaterialUpdateRequest extends FormRequest
             'nombre'       => ['sometimes', 'required', 'string', 'max:255'],
             'cas'          => ['sometimes', 'nullable', 'string', 'max:255'],
             'descriptores' => ['sometimes', 'nullable', 'string', 'max:2000'],
-            // Provisionales 320/330: marca y la materia prima 300 equivalente
+            // Provisionales 320: marca y la materia prima 300 equivalente
             'pendiente_equivalencia' => ['sometimes', 'boolean'],
             'equivalente_id' => [
                 'sometimes', 'nullable', 'integer',

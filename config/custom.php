@@ -10,6 +10,11 @@ return [
     'ai_server_url' => env('AI_SERVER_URL', 'http://localhost:54321'),
     'ai_server_key' => env('AI_SERVER_KEY', 'finearom-ai-2025'),
 
+    // Por ahora los corazones NO calculan su costo a partir de la fórmula (el costo se carga a mano
+    // y las importaciones no lo tocan). Poner CORAZONES_CALCULAR_COSTOS=true para reactivar el
+    // cálculo automático y su propagación a corazones padre y productos terminados.
+    'corazones_calcular_costos' => env('CORAZONES_CALCULAR_COSTOS', false),
+
     'deepseek_api_key' => env('DEEPSEEK_API_KEY', ''),
 
     'dhl_username' => env('DHL_USERNAME', ''),

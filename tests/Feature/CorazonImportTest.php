@@ -37,6 +37,7 @@ class CorazonImportTest extends ProductoTerminadoTestCase
 
     public function test_importa_crea_corazon_activo_con_costo_y_ingredientes(): void
     {
+        config(['custom.corazones_calcular_costos' => true]); // el cálculo está apagado por defecto
         $a = $this->materiaPrima(['codigo' => '100000', 'costo_unitario' => 10]);
         $b = $this->materiaPrima(['codigo' => '100004', 'costo_unitario' => 20]);
 
@@ -115,6 +116,7 @@ class CorazonImportTest extends ProductoTerminadoTestCase
 
     public function test_actualiza_corazon_existente_y_recalcula_productos(): void
     {
+        config(['custom.corazones_calcular_costos' => true]); // el cálculo está apagado por defecto
         $a = $this->materiaPrima(['codigo' => '100000', 'costo_unitario' => 10]);
         $b = $this->materiaPrima(['codigo' => '100004', 'costo_unitario' => 30]);
         $corazon = $this->materiaPrima(['codigo' => '750001', 'nombre' => 'VIEJO', 'tipo' => 'corazon', 'costo_unitario' => 10, 'descripcion' => 'ya tenia']);
@@ -179,6 +181,7 @@ class CorazonImportTest extends ProductoTerminadoTestCase
 
     public function test_acepta_corazones_dentro_de_corazones_y_calcula_costos_en_cascada(): void
     {
+        config(['custom.corazones_calcular_costos' => true]); // el cálculo está apagado por defecto
         $this->materiaPrima(['codigo' => '100000', 'costo_unitario' => 10]);
         $existente = $this->materiaPrima(['codigo' => '750100', 'nombre' => 'YA EXISTE', 'tipo' => 'corazon', 'costo_unitario' => 8]);
 
@@ -209,6 +212,21 @@ class CorazonImportTest extends ProductoTerminadoTestCase
 
         $this->subir($this->excel([['340300', 'SOLO', '', '340300', 100]]))->assertStatus(422);
         $this->assertSame(0, RawMaterial::where('tipo', 'corazon')->count());
+    }
+
+    public function test_por_defecto_no_calcula_ni_toca_el_costo_de_los_corazones(): void
+    {
+        $this->materiaPrima(['codigo' => '100000', 'costo_unitario' => 10]);
+        $existente = $this->materiaPrima(['codigo' => '750100', 'nombre' => 'CON COSTO', 'tipo' => 'corazon', 'costo_unitario' => 57.23]);
+
+        $this->subir($this->excel([
+            ['750100', 'CON COSTO', '', '100000', 100],   // existente: conserva su costo cargado a mano
+            ['750101', 'NUEVO', '', '100000', 100],       // nuevo: queda en 0, no 10
+        ]))->assertOk();
+
+        $this->assertEqualsWithDelta(57.23, (float) $existente->fresh()->costo_unitario, 0.0001);
+        $this->assertEqualsWithDelta(0.0, (float) RawMaterial::where('codigo', '750101')->value('costo_unitario'), 0.0001);
+        $this->assertSame(1, \App\Models\CorazonFormulaLine::where('corazon_id', $existente->id)->count());
     }
 
     public function test_por_ahora_no_exige_permisos_especificos(): void

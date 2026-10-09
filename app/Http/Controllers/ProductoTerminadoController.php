@@ -36,7 +36,7 @@ class ProductoTerminadoController extends Controller
             $query->where('activo', filter_var($activo, FILTER_VALIDATE_BOOLEAN));
         }
 
-        // Productos que usan materias primas provisionales (320/330) a cambiar por su equivalente 300
+        // Productos que usan materias primas provisionales (320) a cambiar por su equivalente 300
         if ($request->boolean('pendientes')) {
             $query->whereHas('formulaLines.rawMaterial', fn ($q) => $q->where('pendiente_equivalencia', true));
         }

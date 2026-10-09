@@ -42,7 +42,7 @@ class RawMaterialController extends Controller
             $query->where('tipo', $request->tipo);
         }
 
-        // Provisionales 320/330 pendientes de cambiar por su equivalente 300
+        // Provisionales 320 pendientes de cambiar por su equivalente 300
         if ($request->boolean('pendiente')) {
             $query->where('pendiente_equivalencia', true);
         }

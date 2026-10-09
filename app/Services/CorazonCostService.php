@@ -38,9 +38,19 @@ class CorazonCostService
         return round($total, 4);
     }
 
+    /** El cálculo automático está apagado por ahora (config custom.corazones_calcular_costos). */
+    public function activo(): bool
+    {
+        return (bool) config('custom.corazones_calcular_costos', false);
+    }
+
     /** Guarda el costo del corazón y propaga el cambio a productos y corazones padre. */
     public function recalcular(RawMaterial $corazon, int $nivel = 0): void
     {
+        if (!$this->activo()) {
+            return;
+        }
+
         $corazon->update(['costo_unitario' => $this->calcular($corazon)]);
 
         $this->recalcularProductos($corazon);

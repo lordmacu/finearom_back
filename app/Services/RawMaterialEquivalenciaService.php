@@ -10,7 +10,7 @@ use App\Models\ReferenceFormulaLine;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Reemplaza las materias primas provisionales (códigos 320/321/330 marcados
+ * Reemplaza las materias primas provisionales (códigos 320/321 marcados
  * `pendiente_equivalencia`) por su equivalente código 300 en todas las
  * fórmulas: productos terminados, corazones y referencias.
  *
@@ -48,7 +48,9 @@ class RawMaterialEquivalenciaService
             }
 
             // Costos: primero corazones (un producto puede usarlos), luego productos
-            foreach ($corazones->unique() as $id) {
+            // Los corazones no calculan costo por ahora (config custom.corazones_calcular_costos)
+            $costosCorazones = (bool) config('custom.corazones_calcular_costos', false);
+            foreach ($costosCorazones ? $corazones->unique() : [] as $id) {
                 $corazon = RawMaterial::find($id);
                 if ($corazon) {
                     $corazon->update(['costo_unitario' => $this->costo(CorazonFormulaLine::where('corazon_id', $id)->with('rawMaterial')->get())]);
