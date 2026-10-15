@@ -83,8 +83,11 @@ class ReprocesarFaltantesProductosTerminados extends Command
                 $mover = [];
                 $quedan = [];
                 foreach ($p['items'] as $it) {
-                    if ($it['codigo'] !== null && isset($existentes[$it['codigo']])
-                        && !($existentes[$it['codigo']]->clave === 'pt:' . $productoId)) { // un producto no va dentro de sí mismo
+                    $esProducto = $it['codigo'] !== null && isset($existentes[$it['codigo']]) && str_starts_with($existentes[$it['codigo']]->clave, 'pt:');
+                    // un producto no va dentro de sí mismo ni dentro de otro que ya lo contiene (ciclo)
+                    $ciclo = $esProducto && app(\App\Services\ProductoCostService::class)
+                        ->crearCiclo((int) $productoId, (int) substr($existentes[$it['codigo']]->clave, 3));
+                    if ($it['codigo'] !== null && isset($existentes[$it['codigo']]) && !$ciclo) {
                         $clave = $existentes[$it['codigo']]->clave;
                         $mover[$clave] = ($mover[$clave] ?? 0) + $it['pct'];
                     } else {

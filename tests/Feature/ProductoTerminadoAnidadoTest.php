@@ -16,6 +16,26 @@ class ProductoTerminadoAnidadoTest extends ProductoTerminadoTestCase
         return ProductoTerminado::create(['codigo' => $codigo, 'nombre' => "PT {$codigo}", 'costo_unitario' => $costo]);
     }
 
+    public function test_una_misma_formula_mezcla_materias_primas_corazones_y_productos(): void
+    {
+        $mp = $this->materiaPrima(['codigo' => '100000', 'costo_unitario' => 10]);
+        $corazon = $this->materiaPrima(['codigo' => '750100', 'tipo' => 'corazon', 'costo_unitario' => 30]);
+        $base = $this->pt('14440', 20);
+        $padre = $this->pt('585001');
+
+        // cada LÍNEA lleva un solo ingrediente, pero la fórmula puede tener de los tres tipos
+        $this->postJson("/api/productos-terminados/{$padre->id}/formula", ['raw_material_id' => $mp->id, 'porcentaje' => 50])->assertStatus(201);
+        $this->postJson("/api/productos-terminados/{$padre->id}/formula", ['raw_material_id' => $corazon->id, 'porcentaje' => 20])->assertStatus(201);
+        $this->postJson("/api/productos-terminados/{$padre->id}/formula", ['ingrediente_producto_id' => $base->id, 'porcentaje' => 30])->assertStatus(201);
+
+        $res = $this->getJson("/api/productos-terminados/{$padre->id}/formula")->assertOk();
+        $this->assertCount(3, $res->json('data.lines'));
+        $this->assertEqualsWithDelta(100.0, (float) $res->json('data.suma_porcentajes'), 0.0001);
+        $this->assertEqualsWithDelta(17.0, (float) $padre->fresh()->costo_unitario, 0.0001); // 0.5*10 + 0.2*30 + 0.3*20
+
+        $this->postJson("/api/productos-terminados/{$padre->id}/activate")->assertOk();
+    }
+
     public function test_un_producto_puede_llevar_otro_producto_y_su_costo_se_propaga(): void
     {
         $mp = $this->materiaPrima(['codigo' => '100000', 'costo_unitario' => 10]);
@@ -122,5 +142,19 @@ class ProductoTerminadoAnidadoTest extends ProductoTerminadoTestCase
         $this->assertNotNull($linea->raw_material_id);
         $this->assertNull($linea->ingrediente_producto_id);
         $this->assertEqualsWithDelta(5.0, (float) $producto->fresh()->costo_unitario, 0.0001);
+    }
+
+    public function test_el_reproceso_no_carga_un_producto_que_crearia_un_ciclo(): void
+    {
+        $a = ProductoTerminado::create(['codigo' => 'A1', 'nombre' => 'A', 'activo' => false,
+            'observaciones' => 'Ingredientes no encontrados al importar: B1 (100%).']);
+        $b = ProductoTerminado::create(['codigo' => 'B1', 'nombre' => 'B', 'activo' => false,
+            'observaciones' => 'Ingredientes no encontrados al importar: A1 (100%).']);
+
+        $this->artisan('productos-terminados:reprocesar-faltantes')->assertSuccessful();
+
+        // uno de los dos se carga y el otro queda como faltante: nunca los dos a la vez
+        $this->assertSame(1, ProductoFormulaLine::whereIn('producto_terminado_id', [$a->id, $b->id])->count());
+        $this->assertSame(1, ProductoTerminado::whereIn('id', [$a->id, $b->id])->where('observaciones', 'like', '%no encontrados%')->count());
     }
 }
