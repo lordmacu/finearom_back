@@ -27,4 +27,10 @@ class ProductoTerminado extends Model
     {
         return $this->hasMany(ProductoFormulaLine::class, 'producto_terminado_id');
     }
+
+    /** Líneas de OTROS productos que usan este como ingrediente. */
+    public function usedInProductosTerminados(): HasMany
+    {
+        return $this->hasMany(ProductoFormulaLine::class, 'ingrediente_producto_id');
+    }
 }

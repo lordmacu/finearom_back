@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\DB;
  * importar" (texto guardado en `observaciones`).
  *
  * Ese texto es una foto del momento de la importación y no se reevalúa solo. Este comando
- * vuelve a buscar cada código faltante en TODO lo que hoy existe (materias primas y
- * corazones), carga las líneas que ahora sí existen, recalcula suma, costo, observaciones y
+ * vuelve a buscar cada código faltante en TODO lo que hoy existe (materias primas, corazones
+ * y, si no hay una materia prima/corazón con ese código, productos terminados), carga las líneas que ahora sí existen, recalcula suma, costo, observaciones y
  * estado, y activa el producto si ya no le falta nada y suma 100% (±0,01).
  *
  * Es idempotente: se puede correr cada vez que se cargue un lote de materias primas o
@@ -58,10 +58,17 @@ class ReprocesarFaltantesProductosTerminados extends Command
             $parseados[$p->id] = ['lineas' => $lineas, 'idx' => $idx, 'items' => $items, 'codigo' => $p->codigo];
         }
 
-        // Todo lo que existe hoy, sea materia prima o corazón (strings: nunca comparar como número)
+        // Todo lo que existe hoy (strings: nunca comparar como número). Si un código está como
+        // materia prima/corazón Y como producto terminado, manda la materia prima/corazón.
         $existentes = [];
         foreach (array_chunk(array_map('strval', array_keys($codigos)), 500) as $lote) {
+            foreach (DB::table('productos_terminados')->whereIn('codigo', $lote)->get(['id', 'codigo', 'costo_unitario']) as $pt) {
+                $pt->clave = 'pt:' . $pt->id;
+                $pt->unidad = 'kg';
+                $existentes[(string) $pt->codigo] = $pt;
+            }
             foreach (DB::table('raw_materials')->whereIn('codigo', $lote)->get(['id', 'codigo', 'costo_unitario', 'unidad']) as $rm) {
+                $rm->clave = 'rm:' . $rm->id;
                 $existentes[(string) $rm->codigo] = $rm;
             }
         }
@@ -76,9 +83,10 @@ class ReprocesarFaltantesProductosTerminados extends Command
                 $mover = [];
                 $quedan = [];
                 foreach ($p['items'] as $it) {
-                    if ($it['codigo'] !== null && isset($existentes[$it['codigo']])) {
-                        $id = $existentes[$it['codigo']]->id;
-                        $mover[$id] = ($mover[$id] ?? 0) + $it['pct'];
+                    if ($it['codigo'] !== null && isset($existentes[$it['codigo']])
+                        && !($existentes[$it['codigo']]->clave === 'pt:' . $productoId)) { // un producto no va dentro de sí mismo
+                        $clave = $existentes[$it['codigo']]->clave;
+                        $mover[$clave] = ($mover[$clave] ?? 0) + $it['pct'];
                     } else {
                         $quedan[] = $it;
                     }
@@ -91,34 +99,42 @@ class ReprocesarFaltantesProductosTerminados extends Command
                     continue;
                 }
 
-                foreach ($mover as $rmId => $pct) {
+                foreach ($mover as $clave => $pct) {
                     $r['lineas']++;
                     if ($this->dry) {
                         continue;
                     }
-                    $ex = DB::table('producto_formula_lines')->where('producto_terminado_id', $productoId)->where('raw_material_id', $rmId)->first();
+                    [$tipo, $id] = explode(':', $clave);
+                    $col = $tipo === 'pt' ? 'ingrediente_producto_id' : 'raw_material_id';
+                    $ex = DB::table('producto_formula_lines')->where('producto_terminado_id', $productoId)->where($col, $id)->first();
                     if ($ex) {
                         DB::table('producto_formula_lines')->where('id', $ex->id)->update(['porcentaje' => round($ex->porcentaje + $pct, 4), 'updated_at' => $ahora]);
                     } else {
-                        DB::table('producto_formula_lines')->insert(['producto_terminado_id' => $productoId, 'raw_material_id' => $rmId,
+                        DB::table('producto_formula_lines')->insert(['producto_terminado_id' => $productoId, $col => $id,
                             'porcentaje' => round($pct, 4), 'created_at' => $ahora, 'updated_at' => $ahora]);
                     }
                 }
 
-                $lineasBd = DB::table('producto_formula_lines as l')->join('raw_materials as rm', 'rm.id', '=', 'l.raw_material_id')
-                    ->where('l.producto_terminado_id', $productoId)->get(['l.porcentaje', 'rm.costo_unitario', 'rm.unidad']);
+                // fórmula actual (materias primas/corazones y productos internos)
+                $lineasBd = DB::table('producto_formula_lines as l')
+                    ->leftJoin('raw_materials as rm', 'rm.id', '=', 'l.raw_material_id')
+                    ->leftJoin('productos_terminados as pt', 'pt.id', '=', 'l.ingrediente_producto_id')
+                    ->where('l.producto_terminado_id', $productoId)
+                    ->get(['l.porcentaje', 'rm.costo_unitario as rm_costo', 'rm.unidad as rm_unidad', 'pt.costo_unitario as pt_costo', 'l.raw_material_id']);
                 $suma = (float) $lineasBd->sum('porcentaje');
                 $costo = 0.0;
                 foreach ($lineasBd as $l) {
-                    $factor = in_array($l->unidad, ['g', 'ml'], true) ? 1 / 1000 : 1.0;
-                    $costo += ((float) $l->porcentaje / 100) * ((float) $l->costo_unitario / $factor);
+                    $kg = $l->raw_material_id !== null
+                        ? (float) $l->rm_costo / (in_array($l->rm_unidad, ['g', 'ml'], true) ? 1 / 1000 : 1.0)
+                        : (float) $l->pt_costo;
+                    $costo += ((float) $l->porcentaje / 100) * $kg;
                 }
                 if ($this->dry) { // en seco las líneas no se escribieron: se suman a mano
                     $suma += array_sum($mover);
-                    foreach ($mover as $rmId => $pct) {
-                        $rm = collect($existentes)->first(fn ($x) => $x->id === $rmId);
-                        $factor = in_array($rm->unidad, ['g', 'ml'], true) ? 1 / 1000 : 1.0;
-                        $costo += ($pct / 100) * ((float) $rm->costo_unitario / $factor);
+                    foreach ($mover as $clave => $pct) {
+                        $x = collect($existentes)->first(fn ($e) => $e->clave === $clave);
+                        $kg = (float) $x->costo_unitario / (in_array($x->unidad, ['g', 'ml'], true) ? 1 / 1000 : 1.0);
+                        $costo += ($pct / 100) * $kg;
                     }
                 }
 
@@ -156,6 +172,17 @@ class ReprocesarFaltantesProductosTerminados extends Command
                         'costo_unitario' => round($costo, 4),
                         'updated_at'     => $ahora,
                     ]);
+                    // los productos que contienen a este también cambian de costo
+                    $producto = \App\Models\ProductoTerminado::find($productoId);
+                    if ($producto) {
+                        $padres = DB::table('producto_formula_lines')->where('ingrediente_producto_id', $productoId)->pluck('producto_terminado_id')->unique();
+                        foreach ($padres as $padreId) {
+                            $padre = \App\Models\ProductoTerminado::find($padreId);
+                            if ($padre) {
+                                app(\App\Services\ProductoCostService::class)->recalcular($padre);
+                            }
+                        }
+                    }
                 }
             }
         };

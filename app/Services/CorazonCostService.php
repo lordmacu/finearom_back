@@ -69,19 +69,13 @@ class CorazonCostService
 
     private function recalcularProductos(RawMaterial $corazon): void
     {
+        $productos = app(ProductoCostService::class);
         $ids = ProductoFormulaLine::where('raw_material_id', $corazon->id)->pluck('producto_terminado_id')->unique();
         foreach ($ids as $productoId) {
             $producto = ProductoTerminado::find($productoId);
-            if (!$producto) {
-                continue;
+            if ($producto) {
+                $productos->recalcular($producto); // también sube a los productos que lo contienen
             }
-            $total = 0.0;
-            foreach (ProductoFormulaLine::where('producto_terminado_id', $productoId)->with('rawMaterial')->get() as $line) {
-                if ($line->rawMaterial) {
-                    $total += ((float) $line->porcentaje / 100) * $this->costoKg($line->rawMaterial);
-                }
-            }
-            $producto->update(['costo_unitario' => round($total, 4)]);
         }
     }
 

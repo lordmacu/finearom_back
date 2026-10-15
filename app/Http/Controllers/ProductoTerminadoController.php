@@ -79,7 +79,7 @@ class ProductoTerminadoController extends Controller
 
     public function show(ProductoTerminado $productoTerminado): JsonResponse
     {
-        $productoTerminado->load('formulaLines.rawMaterial');
+        $productoTerminado->load(['formulaLines.rawMaterial', 'formulaLines.ingredienteProducto']);
         $productoTerminado->setAttribute(
             'suma_porcentajes',
             round((float) $productoTerminado->formulaLines()->sum('porcentaje'), 4)
@@ -131,6 +131,15 @@ class ProductoTerminadoController extends Controller
 
     public function destroy(ProductoTerminado $productoTerminado): JsonResponse
     {
+        $usos = $productoTerminado->usedInProductosTerminados()->count();
+        if ($usos > 0) {
+            return response()->json([
+                'message' => "No se puede eliminar: este producto es ingrediente de {$usos} fórmula(s) de otros productos terminados.",
+            ], 422);
+        }
+
+        // Sus propias líneas se van con él (en la BD ya es cascada; aquí no se depende de eso)
+        $productoTerminado->formulaLines()->delete();
         $productoTerminado->delete();
 
         return response()->json([

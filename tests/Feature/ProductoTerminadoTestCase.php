@@ -194,7 +194,8 @@ abstract class ProductoTerminadoTestCase extends TestCase
         Schema::create('producto_formula_lines', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('producto_terminado_id');
-            $t->unsignedBigInteger('raw_material_id');
+            $t->unsignedBigInteger('raw_material_id')->nullable();
+            $t->unsignedBigInteger('ingrediente_producto_id')->nullable();
             $t->decimal('porcentaje', 7, 4);
             $t->text('notas')->nullable();
             $t->timestamps();

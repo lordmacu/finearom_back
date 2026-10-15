@@ -61,7 +61,7 @@ class RawMaterialEquivalenciaService
             foreach ($productos->unique() as $id) {
                 $producto = ProductoTerminado::find($id);
                 if ($producto) {
-                    $producto->update(['costo_unitario' => $this->costo(ProductoFormulaLine::where('producto_terminado_id', $id)->with('rawMaterial')->get())]);
+                    app(ProductoCostService::class)->recalcular($producto);
                     $r['productos_recalculados']++;
                 }
             }
