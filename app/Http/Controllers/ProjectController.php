@@ -69,8 +69,17 @@ class ProjectController extends Controller
         return $fecha && $fecha->format('Y-m-d') === $valor ? $valor : null;
     }
 
-    private function buildQuery(Request $request): \Illuminate\Database\Eloquent\Builder
+    /**
+     * @param array<int, string> $ignorar filtros del request que NO se aplican (para calcular las
+     *                                    opciones de ese mismo filtro)
+     */
+    private function buildQuery(Request $request, array $ignorar = []): \Illuminate\Database\Eloquent\Builder
     {
+        // Un filtro ignorado se lee como ausente
+        if ($ignorar) {
+            $request = $request->duplicate(array_diff_key($request->query(), array_flip($ignorar)));
+        }
+
         $query = Project::query()->with(['client:id,client_name', 'prospect:id,nombre', 'product:id,nombre', 'desarrollador:id,name']);
 
         if ($tipo = $request->query('tipo')) {
@@ -426,6 +435,39 @@ class ProjectController extends Controller
             ->pluck('ejecutivo');
 
         return response()->json(['success' => true, 'data' => $ejecutivos]);
+    }
+
+    /**
+     * Opciones de los filtros de la lista, en cascada: cada filtro ofrece solo los valores que
+     * existen entre los proyectos que cumplen TODOS los demás filtros (los suyos no cuentan, para
+     * poder cambiar de opción). Recibe los mismos parámetros que el listado.
+     */
+    public function filtroOpciones(Request $request): JsonResponse
+    {
+        $ejecutivos = $this->buildQuery($request, ['ejecutivo'])
+            ->whereNotNull('ejecutivo')->where('ejecutivo', '!=', '')
+            ->distinct()->orderBy('ejecutivo')->pluck('ejecutivo')->values();
+
+        $desarrolladorIds = $this->buildQuery($request, ['desarrollador_id'])
+            ->whereNotNull('desarrollador_id')->distinct()->pluck('desarrollador_id');
+        $desarrolladores = User::whereIn('id', $desarrolladorIds)->orderBy('name')->get(['id', 'name']);
+        $haySinAsignar = $this->buildQuery($request, ['desarrollador_id'])->whereNull('desarrollador_id')->exists();
+
+        $estadosExternos = $this->buildQuery($request, ['estado_externo'])
+            ->whereNotNull('estado_externo')->distinct()->pluck('estado_externo')->values();
+        $estadosInternos = $this->buildQuery($request, ['estado_interno'])
+            ->whereNotNull('estado_interno')->distinct()->pluck('estado_interno')->values();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'ejecutivos'         => $ejecutivos,
+                'desarrolladores'    => $desarrolladores,
+                'hay_sin_asignar'    => $haySinAsignar,
+                'estados_externos'   => $estadosExternos,
+                'estados_internos'   => $estadosInternos,
+            ],
+        ]);
     }
 
     /** Usuarios con rol Desarrollo (para asignar el ingeniero del proyecto). */

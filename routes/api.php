@@ -347,6 +347,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/projects/kpi-stats', [ProjectController::class, 'kpiStats']);
     Route::get('/projects/ejecutivos', [ProjectController::class, 'ejecutivos']);
     Route::get('/projects/ejecutivos-filtro', [ProjectController::class, 'ejecutivosFiltro']);
+    Route::get('/projects/filtro-opciones', [ProjectController::class, 'filtroOpciones']);
     Route::get('/projects/desarrolladores', [ProjectController::class, 'desarrolladores']);
     Route::get('/projects', [ProjectController::class, 'index']);
     Route::post('/projects', [ProjectController::class, 'store']);
