@@ -22,6 +22,7 @@ class ProjectEvaluationRequest extends FormRequest
             'metodologia'            => ['nullable', 'in:olfativa,instrumental,mixta'],
             'observacion'            => ['nullable', 'string', 'max:2000'],
             'bench_text'             => ['nullable', 'string', 'max:2000'],
+            'bench_disponible'       => ['nullable', 'boolean'],
             'bench_image'            => ['nullable', 'file', 'max:10240', 'mimes:jpg,jpeg,png,webp'],
             'remove_bench_image'     => ['nullable', 'boolean'],
         ];

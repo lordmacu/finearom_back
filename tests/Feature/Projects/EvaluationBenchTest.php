@@ -105,4 +105,18 @@ class EvaluationBenchTest extends ProjectFieldsTestCase
         $this->get("/api/projects/{$project->id}/evaluation/bench-image")
             ->assertOk();
     }
+
+    public function test_guarda_si_el_bench_esta_disponible(): void
+    {
+        $project = $this->project();
+
+        $this->putJson("/api/projects/{$project->id}/evaluation", ['tipos' => ['Estabilidad'], 'bench_disponible' => true])->assertOk();
+        $this->assertTrue($project->fresh()->evaluation->bench_disponible);
+
+        $this->putJson("/api/projects/{$project->id}/evaluation", ['bench_disponible' => false])->assertOk();
+        $this->assertFalse($project->fresh()->evaluation->bench_disponible);
+        $this->assertSame(['Estabilidad'], $project->fresh()->evaluation->tipos, 'guardar el check no borra los tipos');
+
+        $this->putJson("/api/projects/{$project->id}/evaluation", ['bench_disponible' => 'tal vez'])->assertStatus(422);
+    }
 }

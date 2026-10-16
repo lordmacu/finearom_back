@@ -20,11 +20,13 @@ class ProjectEvaluation extends Model
         'observacion',
         'notas_entrega',
         'bench_text',
+        'bench_disponible',
         'bench_image',
     ];
 
     protected $casts = [
         'tipos' => 'array',
+        'bench_disponible' => 'boolean',
     ];
 
     public function project(): BelongsTo

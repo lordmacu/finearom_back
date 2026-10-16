@@ -43,4 +43,20 @@ class ProjectSeleccionEnvaseTest extends ProjectMailTestCase
         $this->putJson("/api/projects/{$project->id}", ['area_evaluaciones' => 'evaluacion_cabinas'])->assertOk();
         $this->assertSame('evaluacion_laundry', $project->fresh()->area_evaluaciones);
     }
+
+    public function test_requiere_aplicaciones_arranca_en_no_y_se_guarda(): void
+    {
+        $project = $this->project();
+        $this->assertFalse($project->fresh()->requiere_aplicaciones);
+
+        $this->putJson("/api/projects/{$project->id}", ['requiere_aplicaciones' => true])
+            ->assertOk()->assertJsonPath('data.requiere_aplicaciones', true);
+        $this->assertTrue($project->fresh()->requiere_aplicaciones);
+
+        $this->putJson("/api/projects/{$project->id}", ['requiere_aplicaciones' => false])->assertOk();
+        $this->assertFalse($project->fresh()->requiere_aplicaciones);
+
+        $this->putJson("/api/projects/{$project->id}", ['requiere_aplicaciones' => 'tal vez'])
+            ->assertStatus(422)->assertJsonValidationErrors('requiere_aplicaciones');
+    }
 }
