@@ -265,6 +265,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->id();
             $t->string('client_name')->nullable();
             $t->string('client_type')->nullable();
+            $t->decimal('default_factor', 8, 4)->nullable();
             $t->timestamps();
         });
 

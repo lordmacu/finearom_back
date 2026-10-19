@@ -56,7 +56,6 @@ class ProjectStoreRequest extends FormRequest
             // precio ya no se usa: el potencial USD se calcula con el rango máximo
             'dosis'           => 'nullable|numeric|min:0|max:100',
             'trm'             => 'nullable|numeric|min:0',
-            'factor'                       => 'nullable|numeric|min:0',
             'costo_perfumacion_especifico' => 'nullable|numeric|min:0',
             'costo_perfumacion_tonelada'   => 'nullable|numeric|min:0',
             'tipo_etiquetado'              => 'nullable|in:Estandar,SGA',

@@ -18,7 +18,6 @@ use App\Models\ProjectProductType;
 use App\Services\GoogleTaskService;
 use App\Services\ProjectMailService;
 use App\Services\ProjectTimeService;
-use App\Support\ProjectFactorPermission;
 use App\Support\ProjectOwnership;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -202,23 +201,14 @@ class ProjectController extends Controller
                 $data['ejecutivo_id'] = auth()->id();
             }
 
-            // Quien no ve el factor tampoco lo escribe: queda el automático
-            if (!ProjectFactorPermission::canView($request->user())) {
-                unset($data['factor']);
-            }
-
-            // Auto-poblar factor desde el default_factor del cliente si no se envió explícitamente
-            if (!isset($data['factor']) && !empty($data['client_id'])) {
+            // El factor ya no se escribe a mano: es siempre automático. Se toma del default del
+            // cliente; sin él aplica el DEFAULT de la columna (NOT NULL). Lo enviado se ignora.
+            unset($data['factor']);
+            if (!empty($data['client_id'])) {
                 $clientForFactor = Client::find($data['client_id']);
                 if ($clientForFactor && $clientForFactor->default_factor) {
                     $data['factor'] = $clientForFactor->default_factor;
                 }
-            }
-
-            // Factor vacío ("Auto") sin default del cliente: que aplique el
-            // DEFAULT de la columna (NOT NULL), no un null en el insert
-            if (($data['factor'] ?? null) === null) {
-                unset($data['factor']);
             }
 
             $project = Project::create(array_merge(
@@ -335,19 +325,12 @@ class ProjectController extends Controller
 
             $this->resolveProductType($validated);
 
-            // Factor vacío: se conserva el actual (la columna es NOT NULL)
-            if (array_key_exists('factor', $validated) && $validated['factor'] === null) {
-                unset($validated['factor']);
-            }
-
-            // Quien no ve el factor tampoco lo escribe; si cambia el potencial en
-            // Kg se recalcula solo, como hace el formulario de quien sí lo ve
-            if (!ProjectFactorPermission::canView($request->user())) {
-                unset($validated['factor']);
-                $factorAuto = $this->factorAutomatico($project, $validated);
-                if ($factorAuto !== null) {
-                    $validated['factor'] = $factorAuto;
-                }
+            // El factor es siempre automático: si cambia el potencial en Kg se recalcula solo
+            // (márgenes de contribución o default del cliente); lo enviado se ignora.
+            unset($validated['factor']);
+            $factorAuto = $this->factorAutomatico($project, $validated);
+            if ($factorAuto !== null) {
+                $validated['factor'] = $factorAuto;
             }
 
             // Si viene ejecutivo_id, resolver el nombre del usuario

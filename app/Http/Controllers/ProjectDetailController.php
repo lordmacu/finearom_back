@@ -17,7 +17,6 @@ use App\Services\ProjectTimeService;
 use App\Services\ProjectVariantBenchmarkImage;
 use App\Services\ProjectVariantMarketingSync;
 use Illuminate\Http\Request;
-use App\Support\ProjectFactorPermission;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -33,7 +32,6 @@ class ProjectDetailController extends Controller
     ) {
         $this->middleware('can:project edit')->except(['evaluationBenchImage', 'variantBenchmarkImage']);
         $this->middleware('can:project list')->only(['evaluationBenchImage', 'variantBenchmarkImage']);
-        $this->middleware('can:project factor edit')->only(['updateFactor']);
     }
 
     // ─── Muestra ──────────────────────────────────────────────────────────────
@@ -344,37 +342,5 @@ class ProjectDetailController extends Controller
         $project->update(['actualizado' => !$project->actualizado]);
 
         return response()->json(['success' => true, 'data' => $project->fresh(), 'message' => 'Estado actualizado']);
-    }
-
-    // ─── Cambiar factor y recalcular propuestas ────────────────────────────────
-    public function updateFactor(Request $request, Project $project): JsonResponse
-    {
-        // Cambiar el factor exige también poder verlo (Mónica y Desarrollo)
-        abort_unless(ProjectFactorPermission::canView($request->user()), 403);
-
-        $data = $request->validate(['factor' => 'required|numeric|min:0.0001']);
-
-        $factorNuevo = (float) $data['factor'];
-        $trm = (float) $project->trm;
-
-        $project->update(['factor' => $factorNuevo]);
-
-        if ($trm > 0) {
-            foreach ($project->variants()->with('proposals')->get() as $variant) {
-                foreach ($variant->proposals as $proposal) {
-                    if ($proposal->total_propuesta !== null) {
-                        $proposal->update([
-                            'total_propuesta_cop' => round((float) $proposal->total_propuesta * $trm * $factorNuevo, 0),
-                        ]);
-                    }
-                }
-            }
-        }
-
-        return response()->json([
-            'success' => true,
-            'data'    => $project->fresh(),
-            'message' => 'Factor actualizado y propuestas recalculadas',
-        ]);
     }
 }

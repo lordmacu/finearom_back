@@ -418,8 +418,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // Toggle actualizado
     Route::patch('/projects/{project}/actualizado', [ProjectDetailController::class, 'toggleActualizado']);
 
-    // Cambiar factor + recalcular propuestas
-    Route::patch('/projects/{project}/factor', [ProjectDetailController::class, 'updateFactor']);
 
     // Variantes del proyecto (solo Desarrollo)
     Route::post('/projects/{project}/variants', [ProjectDetailController::class, 'storeVariant']);
