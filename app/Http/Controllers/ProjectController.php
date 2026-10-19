@@ -473,7 +473,7 @@ class ProjectController extends Controller
                 'trm', 'factor', 'costo_perfumacion_especifico', 'costo_perfumacion_tonelada',
                 'tipo_etiquetado', 'max_variantes',
                 'base_cliente', 'proactivo', 'homologacion', 'tipo_homologacion',
-                'tipo_desarrollo', 'area_aplicacion', 'seleccion_envase_aplicacion', 'requiere_piramides', 'requiere_aplicaciones', 'internacional',
+                'tipo_desarrollo', 'area_aplicacion', 'seleccion_envase_aplicacion', 'requiere_piramides', 'requiere_aplicaciones', 'requiere_aceites', 'internacional',
                 'tipo_producto', 'fecha_requerida',
             ]);
 

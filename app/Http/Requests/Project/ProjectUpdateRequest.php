@@ -73,6 +73,7 @@ class ProjectUpdateRequest extends FormRequest
             'seleccion_envase_aplicacion' => 'sometimes|boolean',
             'requiere_piramides'          => 'sometimes|boolean',
             'requiere_aplicaciones'       => 'sometimes|boolean',
+            'requiere_aceites'            => 'sometimes|boolean',
             // area_evaluaciones ya no se usa (se quitó del formulario y del cálculo de tiempos)
             'nuevo_tipo_producto' => 'nullable|string|max:200',
             'internacional'   => 'nullable|boolean',

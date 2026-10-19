@@ -59,4 +59,22 @@ class ProjectSeleccionEnvaseTest extends ProjectMailTestCase
         $this->putJson("/api/projects/{$project->id}", ['requiere_aplicaciones' => 'tal vez'])
             ->assertStatus(422)->assertJsonValidationErrors('requiere_aplicaciones');
     }
+
+    public function test_requiere_aceites_arranca_en_no_y_se_guarda_independiente_de_aplicaciones(): void
+    {
+        $project = $this->project();
+        $this->assertFalse($project->fresh()->requiere_aceites);
+
+        $this->putJson("/api/projects/{$project->id}", ['requiere_aceites' => true])
+            ->assertOk()->assertJsonPath('data.requiere_aceites', true);
+        $this->assertTrue($project->fresh()->requiere_aceites);
+        $this->assertFalse($project->fresh()->requiere_aplicaciones, 'son preguntas independientes');
+
+        $this->putJson("/api/projects/{$project->id}", ['requiere_aplicaciones' => true, 'requiere_aceites' => false])->assertOk();
+        $this->assertTrue($project->fresh()->requiere_aplicaciones);
+        $this->assertFalse($project->fresh()->requiere_aceites);
+
+        $this->putJson("/api/projects/{$project->id}", ['requiere_aceites' => 'tal vez'])
+            ->assertStatus(422)->assertJsonValidationErrors('requiere_aceites');
+    }
 }
