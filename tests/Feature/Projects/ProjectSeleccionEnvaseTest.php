@@ -77,4 +77,32 @@ class ProjectSeleccionEnvaseTest extends ProjectMailTestCase
         $this->putJson("/api/projects/{$project->id}", ['requiere_aceites' => 'tal vez'])
             ->assertStatus(422)->assertJsonValidationErrors('requiere_aceites');
     }
+
+    public function test_tipo_de_etiqueta_acepta_laboratorio_y_marketing(): void
+    {
+        $project = $this->project();
+        $this->assertNull($project->fresh()->tipo_etiqueta);
+
+        foreach (['laboratorio', 'marketing'] as $tipo) {
+            $this->putJson("/api/projects/{$project->id}", ['tipo_etiqueta' => $tipo])
+                ->assertOk()->assertJsonPath('data.tipo_etiqueta', $tipo);
+            $this->assertSame($tipo, $project->fresh()->tipo_etiqueta);
+        }
+
+        $this->putJson("/api/projects/{$project->id}", ['tipo_etiqueta' => null])->assertOk();
+        $this->assertNull($project->fresh()->tipo_etiqueta);
+
+        $this->putJson("/api/projects/{$project->id}", ['tipo_etiqueta' => 'otro'])
+            ->assertStatus(422)->assertJsonValidationErrors('tipo_etiqueta');
+    }
+
+    public function test_tipo_de_etiqueta_es_independiente_del_tipo_de_etiquetado(): void
+    {
+        $project = $this->project();
+
+        $this->putJson("/api/projects/{$project->id}", ['tipo_etiquetado' => 'SGA', 'tipo_etiqueta' => 'marketing'])->assertOk();
+
+        $this->assertSame('SGA', $project->fresh()->tipo_etiquetado);
+        $this->assertSame('marketing', $project->fresh()->tipo_etiqueta);
+    }
 }

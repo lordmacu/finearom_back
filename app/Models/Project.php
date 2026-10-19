@@ -45,6 +45,7 @@ class Project extends Model
         'costo_perfumacion_especifico',
         'costo_perfumacion_tonelada',
         'tipo_etiquetado',
+        'tipo_etiqueta',
         'max_variantes',
         'homologacion',
         'tipo_homologacion',

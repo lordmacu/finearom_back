@@ -162,6 +162,7 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->boolean('requiere_piramides')->default(false);
             $t->boolean('requiere_aplicaciones')->default(false);
             $t->boolean('requiere_aceites')->default(false);
+            $t->string('tipo_etiqueta', 20)->nullable();
             $t->string('area_evaluaciones', 30)->nullable();
             $t->boolean('internacional')->default(false);
             $t->string('tipo_producto')->nullable();

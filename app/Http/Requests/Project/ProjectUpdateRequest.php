@@ -61,6 +61,7 @@ class ProjectUpdateRequest extends FormRequest
             'costo_perfumacion_especifico' => 'nullable|numeric|min:0',
             'costo_perfumacion_tonelada'   => 'nullable|numeric|min:0',
             'tipo_etiquetado'              => 'nullable|in:Estandar,SGA',
+            'tipo_etiqueta'                => 'nullable|in:laboratorio,marketing',
             'envelope_type_ids'            => 'nullable|array',
             'envelope_type_ids.*'          => 'integer|exists:project_catalog_items,id',
             // max_variantes ya no se administra (sin límite de variantes)
