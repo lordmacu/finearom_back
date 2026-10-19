@@ -66,7 +66,7 @@ class ProjectStoreRequest extends FormRequest
             'proactivo'       => 'nullable|boolean',
             'homologacion'    => 'nullable|boolean',
             'tipo_homologacion' => 'nullable|in:cromatografia,olfativa',
-            'tipo_desarrollo' => 'nullable|in:desde_cero,ajuste_formula,piramides_olfativas',
+            'tipo_desarrollo' => 'nullable|in:desde_cero,ajuste_formula,piramides_olfativas,evaluacion,solicitud_muestras',
             'area_aplicacion' => 'nullable|in:pesaje_aceites,aplicaciones_liquidas,aplicaciones_jabon,montaje_estabilidad',
             // area_evaluaciones ya no se usa (se quitó del formulario y del cálculo de tiempos)
             'nuevo_tipo_producto' => 'nullable|string|max:200',

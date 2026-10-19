@@ -68,7 +68,7 @@ class ProjectUpdateRequest extends FormRequest
             'proactivo'       => 'nullable|boolean',
             'homologacion'    => 'nullable|boolean',
             'tipo_homologacion' => 'nullable|in:cromatografia,olfativa',
-            'tipo_desarrollo' => 'nullable|in:desde_cero,ajuste_formula,piramides_olfativas',
+            'tipo_desarrollo' => 'nullable|in:desde_cero,ajuste_formula,piramides_olfativas,evaluacion,solicitud_muestras',
             'area_aplicacion' => 'nullable|in:pesaje_aceites,aplicaciones_liquidas,aplicaciones_jabon,montaje_estabilidad',
             'seleccion_envase_aplicacion' => 'sometimes|boolean',
             'requiere_piramides'          => 'sometimes|boolean',

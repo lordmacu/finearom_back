@@ -21,7 +21,7 @@ use Carbon\Carbon;
 class ProjectTimeService
 {
     private const DIAS_HOMOLOGACION = ['cromatografia' => 15, 'olfativa' => 3];
-    private const DIAS_DESARROLLO = ['desde_cero' => 3, 'ajuste_formula' => 2, 'piramides_olfativas' => 1];
+    private const DIAS_DESARROLLO = ['desde_cero' => 3, 'ajuste_formula' => 2, 'piramides_olfativas' => 1, 'evaluacion' => 0, 'solicitud_muestras' => 0];
     private const DIAS_AREA_APLICACION = ['pesaje_aceites' => 2, 'aplicaciones_liquidas' => 2, 'aplicaciones_jabon' => 8, 'montaje_estabilidad' => 20];
 
     private const CALIDAD_BASICO = ['MSDS', 'FDS', 'IFRA', 'Ficha Técnica', 'Certificados Alergenos', 'Certificado de análisis'];
