@@ -14,7 +14,7 @@ class ProjectMarketingVariant extends Model
     protected $table = 'project_marketing_variants';
 
     /** Tope de referencias por variante. */
-    public const MAX_REFERENCES = 3;
+    public const MAX_REFERENCES = 4;
 
     protected $fillable = [
         'project_id',

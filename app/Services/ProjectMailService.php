@@ -635,6 +635,7 @@ class ProjectMailService
                 'Diseños de etiqueta'  => $project->catalogItems->where('tipo', 'etiqueta')->pluck('name')->implode(', ') ?: null,
                 'Pirámides'            => $project->catalogItems->where('tipo', 'piramide')->pluck('name')->implode(', ') ?: null,
                 'Presentaciones'       => $project->catalogItems->where('tipo', 'presentacion')->pluck('name')->implode(', ') ?: null,
+                'Cajas'                => $project->catalogItems->where('tipo', 'caja')->pluck('name')->implode(', ') ?: null,
                 'Variantes de marketing' => $variantesMarketing ?: null,
             ]);
         }

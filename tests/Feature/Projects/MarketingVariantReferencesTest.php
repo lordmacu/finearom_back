@@ -3,6 +3,7 @@
 namespace Tests\Feature\Projects;
 
 use App\Models\Project;
+use App\Models\ProjectMarketingVariantReference;
 use App\Support\MarketingVariantPermissions;
 use Illuminate\Support\Facades\DB;
 
@@ -150,13 +151,25 @@ class MarketingVariantReferencesTest extends ProjectFieldsTestCase
         $this->assertSame('#ff0000', $data['color_etiqueta']);
     }
 
-    public function test_rechaza_una_cuarta_referencia(): void
+    public function test_acepta_hasta_cuatro_referencias(): void
     {
         $project = $this->project();
         $id      = $this->variante($project);
 
         $this->putJson("/api/projects/{$project->id}/marketing-variants/{$id}/references", [
             'referencias' => array_fill(0, 4, $this->referencia()),
+        ])->assertOk();
+
+        $this->assertSame(4, ProjectMarketingVariantReference::where('variant_id', $id)->count());
+    }
+
+    public function test_rechaza_una_quinta_referencia(): void
+    {
+        $project = $this->project();
+        $id      = $this->variante($project);
+
+        $this->putJson("/api/projects/{$project->id}/marketing-variants/{$id}/references", [
+            'referencias' => array_fill(0, 5, $this->referencia()),
         ])->assertStatus(422)->assertJsonValidationErrors('referencias');
     }
 

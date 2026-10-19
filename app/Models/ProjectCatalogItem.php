@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
- * Ítem de los catálogos de Marketing (envases, diseños de etiqueta y pirámides).
+ * Ítem de los catálogos de Marketing (envases, diseños de etiqueta, pirámides, presentaciones y cajas).
  * Cada ítem puede vivir en una carpeta virtual (`folder_id`, null = raíz).
  */
 class ProjectCatalogItem extends Model
@@ -19,6 +19,7 @@ class ProjectCatalogItem extends Model
         'etiqueta' => 'Catálogo Diseño Etiquetas',
         'piramide' => 'Catálogo Pirámides',
         'presentacion' => 'Catálogo Presentaciones',
+        'caja'     => 'Catálogo Cajas',
     ];
 
     protected $table = 'project_catalog_items';

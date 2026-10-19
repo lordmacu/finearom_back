@@ -106,4 +106,31 @@ class ProjectCatalogItemsTest extends ProjectMailTestCase
         $html = $this->sentMessages()->last()->getOriginalMessage()->getHtmlBody();
         $this->assertStringContainsString('Frasco 50 ml', $html);
     }
+
+    public function test_cajas_es_un_catalogo_mas_con_carpetas_y_va_en_el_correo(): void
+    {
+        $project = $this->project();
+        $carpeta = $this->postJson('/api/admin/project-catalog-folders', ['tipo' => 'caja', 'name' => 'Plegadizas'])
+            ->assertCreated()->json('data.id');
+        $id = $this->crear('caja', 'Caja plegadiza 30 ml', ['folder_id' => $carpeta, 'photo' => UploadedFile::fake()->image('c.png')]);
+        $this->crear('presentacion', 'Frasco 50 ml');
+
+        $this->getJson("/api/project-catalog-items/caja/browse?folder_id={$carpeta}")
+            ->assertOk()->assertJsonPath('data.0.name', 'Caja plegadiza 30 ml');
+        $this->getJson('/api/admin/project-catalog-items/caja')->assertOk()->assertJsonCount(1, 'data');
+
+        $this->putJson("/api/projects/{$project->id}/catalog-items/caja", ['item_ids' => [$id]])
+            ->assertOk()->assertJsonCount(1, 'data');
+
+        Process::create(['name' => 'Lab', 'email' => 'lab@finearom.co', 'process_type' => 'proyectos']);
+        $this->template('project_created', 'Nuevo proyecto #|project_id|');
+        $this->postJson("/api/projects/{$project->id}/send-creation")->assertOk();
+        $this->assertStringContainsString('Caja plegadiza 30 ml', $this->sentMessages()->last()->getOriginalMessage()->getHtmlBody());
+    }
+
+    public function test_un_tipo_de_catalogo_desconocido_sigue_dando_404(): void
+    {
+        $this->getJson('/api/project-catalog-items/cajon')->assertNotFound();
+        $this->assertContains($this->getJson('/api/admin/project-catalog-folders/cajon')->status(), [404, 405]);
+    }
 }
