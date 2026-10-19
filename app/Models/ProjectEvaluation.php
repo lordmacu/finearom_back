@@ -21,12 +21,15 @@ class ProjectEvaluation extends Model
         'notas_entrega',
         'bench_text',
         'bench_disponible',
+        'bench_listado',
+        'bench_correo_enviado_at',
         'bench_image',
     ];
 
     protected $casts = [
         'tipos' => 'array',
         'bench_disponible' => 'boolean',
+        'bench_correo_enviado_at' => 'datetime',
     ];
 
     public function project(): BelongsTo

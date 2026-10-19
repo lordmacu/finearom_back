@@ -233,6 +233,8 @@ abstract class ProjectFieldsTestCase extends TestCase
             $t->text('notas_entrega')->nullable();
             $t->text('bench_text')->nullable();
             $t->boolean('bench_disponible')->default(false);
+            $t->string('bench_listado', 150)->nullable();
+            $t->timestamp('bench_correo_enviado_at')->nullable();
             $t->string('bench_image')->nullable();
             $t->timestamps();
         });

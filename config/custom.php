@@ -15,6 +15,11 @@ return [
     // cálculo automático y su propagación a corazones padre y productos terminados.
     'corazones_calcular_costos' => env('CORAZONES_CALCULAR_COSTOS', false),
 
+    // Correo automático de compra del bench (evaluaciones sin bench disponible).
+    // Va con copia a la ejecutiva dueña del proyecto además de estos destinatarios.
+    'bench_request_to' => env('BENCH_REQUEST_TO', 'coordinadora.comercial@finearom.com'),
+    'bench_request_cc' => array_filter(array_map('trim', explode(',', (string) env('BENCH_REQUEST_CC', 'monica.castano@finearom.com')))),
+
     'deepseek_api_key' => env('DEEPSEEK_API_KEY', ''),
 
     'dhl_username' => env('DHL_USERNAME', ''),

@@ -8,6 +8,7 @@ use App\Http\Requests\Project\ProjectEvaluationRequest;
 use App\Http\Requests\Project\ProjectMarketingRequest;
 use App\Http\Requests\Project\ProjectVariantRequest;
 use App\Models\Project;
+use App\Models\ProjectEvaluation;
 use App\Models\ProjectFragrance;
 use App\Models\ProjectProposal;
 use App\Models\ProjectRequest as ProjectRequestModel;
@@ -88,12 +89,56 @@ class ProjectDetailController extends Controller
 
         unset($data['remove_bench_image']);
 
+        // Bench disponible: se limpia la marca del correo para que, si luego deja de estarlo,
+        // se pida la compra de nuevo
+        if (array_key_exists('bench_disponible', $data) && $data['bench_disponible']) {
+            $data['bench_correo_enviado_at'] = null;
+        }
+
         $evaluation = $project->evaluation()->updateOrCreate(
             ['project_id' => $project->id],
             $data
         );
 
-        return response()->json(['success' => true, 'data' => $evaluation, 'message' => 'Evaluación actualizada']);
+        $this->pedirCompraDelBench($project, $evaluation);
+
+        return response()->json(['success' => true, 'data' => $evaluation->fresh(), 'message' => 'Evaluación actualizada']);
+    }
+
+    /**
+     * Bench NO disponible, con foto y descripción: se avisa por correo a la coordinadora comercial
+     * (con copia a la ejecutiva dueña del proyecto y a quienes estén en config) para que lo compren.
+     * Se envía una sola vez; nunca rompe el guardado.
+     */
+    private function pedirCompraDelBench(Project $project, ProjectEvaluation $evaluation): void
+    {
+        if ($evaluation->bench_disponible || $evaluation->bench_correo_enviado_at
+            || !$evaluation->bench_image || trim((string) $evaluation->bench_text) === '') {
+            return;
+        }
+
+        $para = config('custom.bench_request_to');
+        if (!$para) {
+            return;
+        }
+        $cc = collect(config('custom.bench_request_cc', []))
+            ->push($project->ejecutivoUser?->email)
+            ->filter()
+            ->map(fn ($e) => strtolower(trim($e)))
+            ->reject(fn ($e) => $e === strtolower($para))
+            ->unique()
+            ->values()
+            ->all();
+
+        try {
+            \Illuminate\Support\Facades\Mail::to($para)->cc($cc)->send(new \App\Mail\ProjectBenchRequestMail($project, $evaluation));
+            $evaluation->forceFill(['bench_correo_enviado_at' => now()])->save();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('No se pudo enviar el correo de compra del bench', [
+                'project_id' => $project->id,
+                'error'      => $e->getMessage(),
+            ]);
+        }
     }
 
     public function evaluationBenchImage(Project $project): BinaryFileResponse
