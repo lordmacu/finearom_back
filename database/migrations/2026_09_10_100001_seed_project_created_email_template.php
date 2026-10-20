@@ -21,7 +21,7 @@ return new class extends Migration
 
             'subject' => 'Nuevo proyecto #|project_id| — |project_name| · |client_name|',
 
-            'title' => 'Nuevo proyecto',
+            'title' => 'Nuevo proyecto - |client_name|',
 
             'header_content' => '
 <p>Hola equipo,</p>
