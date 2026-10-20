@@ -3,7 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\Proforma\ProformaUploadRequest;
+use App\Http\Requests\Proforma\ProformaManualRequest;
+use App\Mail\ProformaMail;
 use App\Models\Client;
+use App\Models\Process;
+use App\Services\ProformaService;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Http\JsonResponse;
 use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -13,9 +19,95 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProformaController extends Controller
 {
-    public function __construct()
+    public function __construct(private readonly ProformaService $proformaService)
     {
         $this->middleware('can:proforma upload')->only(['upload']);
+        $this->middleware('can:purchase_order edit')->only(['manualPreview', 'manualDownload', 'manualSend']);
+    }
+
+    /** Arma cliente, líneas y parámetros de una proforma manual (sin orden de compra). */
+    private function manualData(ProformaManualRequest $request): array
+    {
+        $client = Client::findOrFail($request->integer('client_id'));
+        $country = $client->country ?: 'CO';
+        $date = $request->input('date') ?: now()->format('Y-m-d');
+        $params = [
+            'country' => $country,
+            'date' => $date,
+            'flete' => (float) $request->input('flete', 0),
+            'trm' => $this->proformaService->esNacional($country) ? $this->proformaService->trmDelDia($date) : 0.0,
+        ];
+
+        $lines = array_map(fn ($l) => [
+            'code' => $l['code'],
+            'description' => $l['description'],
+            'quantity' => (float) $l['quantity'],
+            'price_usd' => (float) $l['price_usd'],
+        ], $request->input('lines'));
+
+        return [$client, $lines, $params];
+    }
+
+    private function manualPdf(Client $client, array $lines, array $params): string
+    {
+        return $this->proformaService->renderPdf($client, $lines, $params, 'MANUAL-' . now()->format('Ymd-His'), 'M' . date('Ymd') . $client->id);
+    }
+
+    /** Totales y reglas (flete / retenciones) de una proforma manual. */
+    public function manualPreview(ProformaManualRequest $request): JsonResponse
+    {
+        [$client, $lines, $params] = $this->manualData($request);
+        $calc = $this->proformaService->calcular($client, $lines, $params['country'], $params['trm'], $params['flete']);
+
+        return response()->json(['data' => [
+            'country' => $params['country'],
+            'currency' => $this->proformaService->esNacional($params['country']) ? 'COP' : 'USD',
+            'trm' => $params['trm'],
+            'items' => $calc['items'],
+            'totals' => $calc['totals'],
+            'flete_aplica' => $calc['flete_aplica'],
+            'retenciones_aplican' => $calc['retenciones_aplican'],
+            'reglas' => [
+                'retenciones_desde' => ProformaService::RETENCIONES_DESDE,
+                'flete_hasta' => ProformaService::FLETE_HASTA,
+                'validez_dias_habiles' => ProformaService::VALIDEZ_DIAS_HABILES,
+            ],
+        ]]);
+    }
+
+    public function manualDownload(ProformaManualRequest $request): Response
+    {
+        [$client, $lines, $params] = $this->manualData($request);
+
+        return response($this->manualPdf($client, $lines, $params))
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'attachment; filename="proforma-manual-' . $client->id . '.pdf"');
+    }
+
+    /** Envía la proforma manual al correo del cliente (con copia a la ejecutiva y a los procesos). */
+    public function manualSend(ProformaManualRequest $request): JsonResponse
+    {
+        [$client, $lines, $params] = $this->manualData($request);
+
+        if (empty($client->email)) {
+            return response()->json(['success' => false, 'message' => 'El cliente no tiene un correo configurado.'], 422);
+        }
+
+        $cc = [];
+        if ($client->executive_email) {
+            $cc = array_map('trim', explode(',', $client->executive_email));
+        }
+        foreach (Process::whereIn('process_type', ['orden_de_compra', 'pedido'])->pluck('email') as $email) {
+            $cc = array_merge($cc, array_map('trim', explode(',', (string) $email)));
+        }
+        $cc = array_values(array_filter(array_unique($cc)));
+
+        $pdf = $this->manualPdf($client, $lines, $params);
+        $referencia = (object) ['order_consecutive' => 'MANUAL-' . now()->format('Ymd')];
+
+        Mail::to($client->email)->cc($cc)->send(new ProformaMail($referencia, $pdf));
+
+        return response()->json(['success' => true, 'message' => 'Proforma enviada al cliente.']);
     }
 
     /**

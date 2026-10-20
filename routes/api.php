@@ -221,6 +221,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Proforma
     Route::get('/proforma/template', [ProformaController::class, 'downloadTemplate']);
     Route::post('/proforma/upload', [ProformaController::class, 'upload']);
+    Route::post('/proforma/manual/preview', [ProformaController::class, 'manualPreview']);
+    Route::post('/proforma/manual/download', [ProformaController::class, 'manualDownload']);
+    Route::post('/proforma/manual/send', [ProformaController::class, 'manualSend']);
 
     // Portal de Ordenes de Compra (cliente)
     Route::get('/purchase-order-portal/metadata', [PurchaseOrderPortalController::class, 'metadata']);
@@ -255,6 +258,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/purchase-orders/{id}', [PurchaseOrderController::class, 'destroy']);
     Route::delete('/purchase-orders/{id}/attachment', [PurchaseOrderController::class, 'deleteAttachment']);
     Route::get('/purchase-orders/{id}/pdf', [PurchaseOrderController::class, 'downloadPdf']);
+    Route::get('/purchase-orders/{id}/proforma/preview', [PurchaseOrderController::class, 'previewProforma']);
     Route::get('/purchase-orders/{id}/proforma', [PurchaseOrderController::class, 'downloadProforma']);
     Route::post('/purchase-orders/{id}/proforma/resend', [PurchaseOrderController::class, 'resendProforma']);
     Route::get('/purchase-orders/{id}', [PurchaseOrderController::class, 'show']);

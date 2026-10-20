@@ -333,7 +333,7 @@
             <div class="additional-info">
                 <p><strong>Total Ítems:</strong> {{ count($items ?? []) }}</p>
                 <p><strong>TRM:</strong> Del día {{ $fecha_trm }} @if(isset($trm)) POR ${{ number_format($trm, 2) }} @endif</p>
-                <p><strong>Forma de Pago:</strong> Favor consignar en: CTA CTE No. 12279201300 Bancolombia</p>
+                <p><strong>Forma de Pago:</strong> Favor consignar en: {{ $cuenta_bancaria ?? 'ITAU COLOMBIA SA, cuenta corriente # 007455090' }}</p>
             </div>
 
             <div class="totals-section">
@@ -386,7 +386,7 @@
             </div>
         </div>
         <div class="validity-notice">
-            <p><strong>VALIDEZ:</strong> Esta proforma es válida por 8 días hábiles a partir de su emisión.</p>
+            <p><strong>VALIDEZ:</strong> Esta proforma es válida por {{ $validez_dias ?? 8 }} días hábiles a partir de su emisión. Pasado ese plazo los precios y la TRM deberán actualizarse.</p>
         </div>
 
         <!-- Disclaimer -->

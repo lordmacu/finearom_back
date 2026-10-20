@@ -37,6 +37,7 @@ class PurchaseOrder extends Model
         'subject_despacho',
         'subject_dispatch',
         'proforma_generada',
+        'proforma_generada_at',
         'drive_file_id',
         'drive_link',
         'drive_attachment_links',
@@ -52,10 +53,23 @@ class PurchaseOrder extends Model
         'is_new_win'               => 'boolean',
         'is_muestra'               => 'boolean',
         'proforma_generada'        => 'boolean',
+        'proforma_generada_at'     => 'datetime',
         'attachment'               => 'array',
         'drive_attachment_links'   => 'array',
         'sheets_exports'           => 'array',
     ];
+
+    protected $appends = ['proforma_vigencia'];
+
+    /** Vigencia de la última proforma emitida (null si nunca se generó con fecha). */
+    public function getProformaVigenciaAttribute(): ?array
+    {
+        if (! $this->proforma_generada_at) {
+            return null;
+        }
+
+        return app(\App\Services\ProformaService::class)->vigencia($this->proforma_generada_at);
+    }
 
     public function client()
     {

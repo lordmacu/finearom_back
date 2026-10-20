@@ -13,6 +13,7 @@ use App\Services\GoogleSheetsService;
 use App\Services\GoogleTaskService;
 use App\Services\ForecastAlertService;
 use App\Services\TrmService;
+use App\Services\ProformaService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -633,19 +634,15 @@ class PurchaseOrderController extends Controller
     {
         $purchase = PurchaseOrder::with(['client', 'products'])->findOrFail($id);
         
-        $params = [
-            'country' => $request->query('country', 'CO'),
-            'date' => $request->query('date', now()->format('Y-m-d')),
-            'flete' => (float) $request->query('flete', 0),
-            'trm' => (float) $request->query('trm', $purchase->trm),
-        ];
+        $params = $this->proformaParams($request->query());
 
         $pdfContent = $this->generateProformaPdfContent($purchase, $params);
 
         $filename = ($params['country'] === 'CO' ? 'proforma-nacional-' : 'proforma-export-') . $purchase->order_consecutive . '.pdf';
 
-        // Marcar proforma como generada
+        // Marcar proforma como generada (y cuándo, para controlar su validez)
         $purchase->proforma_generada = true;
+        $purchase->proforma_generada_at = now();
 
         // Subir a Google Drive si el usuario tiene acceso (silencioso, no bloquea)
         $userId = auth()->id();
@@ -699,12 +696,7 @@ class PurchaseOrderController extends Controller
         try {
             $purchase = PurchaseOrder::with(['client', 'products'])->findOrFail($id);
             
-            $params = [
-                'country' => $request->input('country', 'CO'),
-                'date' => $request->input('date', now()->format('Y-m-d')),
-                'flete' => (float) $request->input('flete', 0),
-                'trm' => (float) $request->input('trm', $purchase->trm),
-            ];
+            $params = $this->proformaParams($request->all());
 
             $pdfContent = $this->generateProformaPdfContent($purchase, $params);
 
@@ -736,11 +728,74 @@ class PurchaseOrderController extends Controller
                 ->cc($ccEmails)
                 ->send(new \App\Mail\ProformaMail($purchase, $pdfContent));
 
+            $purchase->proforma_generada = true;
+            $purchase->proforma_generada_at = now();
+            $purchase->save();
+
             return response()->json(['success' => true, 'message' => 'Proforma reenviada exitosamente.']);
         } catch (\Exception $e) {
             \Log::error('Error al reenviar proforma: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => 'Error al reenviar proforma.'], 500);
         }
+    }
+
+
+    private function proformaService(): ProformaService
+    {
+        return app(ProformaService::class);
+    }
+
+    /**
+     * Parámetros de la proforma. Nacional: en pesos con la TRM del día de la
+     * fecha de emisión (no la de la orden); exportación: en USD.
+     */
+    protected function proformaParams(array $input): array
+    {
+        $service = $this->proformaService();
+        $country = $input['country'] ?? 'CO';
+        $date = $input['date'] ?? now()->format('Y-m-d');
+
+        return [
+            'country' => $country,
+            'date' => $date,
+            'flete' => (float) ($input['flete'] ?? 0),
+            'trm' => $service->esNacional($country) ? $service->trmDelDia($date) : 0.0,
+        ];
+    }
+
+    /**
+     * Vista previa de la proforma: totales y reglas (flete / retenciones / vigencia)
+     * para que la pantalla sepa qué habilitar antes de generar el PDF.
+     */
+    public function previewProforma(int $id, Request $request): JsonResponse
+    {
+        $purchase = PurchaseOrder::with(['client', 'products'])->findOrFail($id);
+        $params = $this->proformaParams($request->query());
+        $service = $this->proformaService();
+
+        $lines = [];
+        foreach ($purchase->products as $product) {
+            $price = ($product->pivot->muestra == 1)
+                ? 0
+                : (($product->pivot->price > 0) ? $product->pivot->price : ($product->price ?? 0));
+            $lines[] = ['code' => $product->code, 'description' => $product->product_name, 'quantity' => $product->pivot->quantity, 'price_usd' => $price];
+        }
+
+        $calc = $service->calcular($purchase->client, $lines, $params['country'], $params['trm'], $params['flete']);
+
+        return response()->json(['data' => [
+            'country' => $params['country'],
+            'currency' => $service->esNacional($params['country']) ? 'COP' : 'USD',
+            'trm' => $params['trm'],
+            'totals' => $calc['totals'],
+            'flete_aplica' => $calc['flete_aplica'],
+            'retenciones_aplican' => $calc['retenciones_aplican'],
+            'reglas' => [
+                'retenciones_desde' => ProformaService::RETENCIONES_DESDE,
+                'flete_hasta' => ProformaService::FLETE_HASTA,
+                'validez_dias_habiles' => ProformaService::VALIDEZ_DIAS_HABILES,
+            ],
+        ]]);
     }
 
     /**
@@ -749,118 +804,34 @@ class PurchaseOrderController extends Controller
     protected function generateProformaPdfContent(PurchaseOrder $purchase, array $params): string
     {
         $client = $purchase->client;
-        $country = $params['country'];
-        $date = $params['date'];
-        $fleteValue = $params['flete'];
-        $trm = $params['trm'];
-        
-        $isNational = ($country === 'CO');
 
-        // Calcular ítems
-        $items = [];
-        $subtotal = 0;
-        $idx = 1;
-
+        $lines = [];
         foreach ($purchase->products as $product) {
-            $quantity = $product->pivot->quantity;
-            // Usar precio efectivo: 0 si muestra, sino pivot > 0, sino product->price
+            // Precio efectivo: 0 si muestra, sino pivot > 0, sino product->price
             $unitPriceUSD = ($product->pivot->muestra == 1)
                 ? 0
                 : (($product->pivot->price > 0) ? $product->pivot->price : ($product->price ?? 0));
-
-            if ($isNational) {
-                $unitPrice = round($unitPriceUSD * $trm, 2);
-            } else {
-                $unitPrice = $unitPriceUSD;
-            }
-
-            $total = round($quantity * $unitPrice, 2);
-            $subtotal += $total;
 
             $cleanCode = $product->code;
             if ($client->nit) {
                 $cleanCode = preg_replace('/^' . preg_quote($client->nit, '/') . '[-_\s]*/', '', $cleanCode);
             }
 
-            $items[] = [
-                'item' => $idx++,
+            $lines[] = [
                 'code' => $cleanCode,
                 'description' => $product->product_name,
-                'unit' => 'KG',
-                'quantity' => $quantity,
-                'unit_price' => $unitPrice,
-                'total' => $total
+                'quantity' => $product->pivot->quantity,
+                'price_usd' => $unitPriceUSD,
             ];
         }
 
-        $subtotal += $fleteValue;
-
-        // Impuestos
-        $totals = [
-            'subtotal' => $subtotal,
-            'flete' => $fleteValue,
-            'iva' => 0,
-            'rete_ica' => 0,
-            'rete_iva' => 0,
-            'rete_fte' => 0,
-            'total' => $subtotal
-        ];
-
-        if ($isNational) {
-            $totals['iva'] = $client->iva ? ($subtotal * ($client->iva / 100)) : 0;
-            $totals['rete_ica'] = $client->ica ? ($subtotal * ($client->ica / 100)) : 0;
-            $totals['rete_iva'] = $client->reteiva ? ($subtotal * ($client->reteiva / 100)) : 0;
-            $totals['rete_fte'] = $client->retefuente ? ($subtotal * ($client->retefuente / 100)) : 0;
-            $totals['total'] = $subtotal + $totals['iva'] - $totals['rete_ica'] - $totals['rete_iva'] - $totals['rete_fte'];
-        }
-
-        $carbonDate = \Carbon\Carbon::parse($date)->locale('es');
-        $fechaTrmText = $carbonDate->isoFormat('dddd DD [de] MMMM [del] YYYY');
-
-        $data = [
-            'logoUrl' => $this->getLogoBase64(),
-            'orden_compra' => $purchase->order_consecutive,
-            'fecha_trm' => $fechaTrmText,
-            'trm' => $isNational ? $trm : null,
-            'currency' => $isNational ? 'COP' : 'USD',
-            'company' => [
-                'name' => 'FINEAROM SAS',
-                'nit' => '900.220.672-8',
-                'address' => 'CRA 50 134 D 31',
-                'city' => 'BOGOTÁ - COLOMBIA',
-                'phone' => '57 1 6150035',
-                'email' => 'servicio.cliente@finearom.com'
-            ],
-            'client' => [
-                'name' => $client->client_name,
-                'nit' => $client->nit,
-                'address' => $client->address,
-                'city' => $client->city,
-                'phone' => $client->phone,
-                'email' => $client->email,
-            ],
-            'invoice' => [
-                'number' => date('Ymd') . $purchase->id,
-            ],
-            'items' => $items,
-            'client_rates' => [
-                'iva' => $client->iva,
-                'ica' => $client->ica,
-                'reteiva' => $client->reteiva,
-                'retefuente' => $client->retefuente,
-            ],
-            'totals' => $totals
-        ];
-
-        $pdf = \PDF::loadView('pdf.proforma', $data);
-        $pdf->setPaper('A4', 'portrait');
-        $pdf->setOptions([
-            'isHtml5ParserEnabled' => true,
-            'isPhpEnabled' => true,
-            'defaultFont' => 'Arial'
-        ]);
-
-        return $pdf->output();
+        return $this->proformaService()->renderPdf(
+            $client,
+            $lines,
+            $params,
+            $purchase->order_consecutive,
+            date('Ymd') . $purchase->id
+        );
     }
 
     /**
