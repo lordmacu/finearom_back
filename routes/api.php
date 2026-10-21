@@ -165,6 +165,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Email Campaigns
     Route::get('/email-campaigns/email-fields', [EmailCampaignController::class, 'emailFields']);
+    Route::get('/email-campaigns/custom-emails', [EmailCampaignController::class, 'customEmails']);
     Route::get('/email-campaigns/signature', [EmailCampaignController::class, 'signature']);
     Route::put('/email-campaigns/signature', [EmailCampaignController::class, 'updateSignature']);
     Route::get('/email-campaigns/placeholders', [EmailCampaignController::class, 'placeholders']);

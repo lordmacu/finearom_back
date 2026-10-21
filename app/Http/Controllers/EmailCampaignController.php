@@ -27,11 +27,29 @@ class EmailCampaignController extends Controller
     public function __construct()
     {
         $this->middleware('can:email campaign list')->only(['index', 'show']);
-        $this->middleware('can:email campaign create')->only(['store', 'sendTestEmail', 'signature', 'updateSignature']);
+        $this->middleware('can:email campaign create')->only(['store', 'sendTestEmail', 'signature', 'updateSignature', 'customEmails']);
         $this->middleware('can:email campaign edit')->only(['update', 'clone']);
         $this->middleware('can:email campaign delete')->only(['destroy']);
         $this->middleware('can:email campaign send')->only(['send']);
         $this->middleware('can:email campaign resend')->only(['resend', 'resendCustom', 'updateLogEmail']);
+    }
+
+    /**
+     * Emails personalizados que el usuario ya usó en sus campañas, para elegirlos
+     * de un selector en vez de volver a escribirlos.
+     */
+    public function customEmails(): JsonResponse
+    {
+        $emails = EmailCampaign::where('user_id', (int) auth()->id())
+            ->pluck('custom_emails')
+            ->flatten()
+            ->map(fn ($e) => strtolower(trim((string) $e)))
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values();
+
+        return response()->json(['data' => $emails]);
     }
 
     /** Firma del usuario autenticado (y la plantilla inicial para quien aún no tiene). */
