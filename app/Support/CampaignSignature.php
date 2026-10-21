@@ -32,19 +32,15 @@ final class CampaignSignature
         return trim($html);
     }
 
-    /** Plantilla inicial parecida a la firma corporativa, para que cada quien la complete. */
+    /**
+     * Plantilla inicial para que cada quien la complete en el editor de texto.
+     * Solo usa lo que el editor conserva (texto, negrita, enlaces e imagen).
+     */
     public static function plantilla(): string
     {
-        $logo = url('/images/logo.png');
-        $azul = '#2f5fb3';
-
-        return '<table style="border-collapse:collapse;border:none;margin:0;width:auto;"><tbody><tr>'
-            . '<td style="border:none;padding:0 16px 0 0;vertical-align:middle;"><img src="' . $logo . '" width="95" alt="Finearom"></td>'
-            . '<td style="border:none;padding:0 18px;vertical-align:middle;"><strong style="font-size:18px;color:#1a3a4a;">Nombre Apellido</strong><br>Cargo</td>'
-            . '<td style="border:none;border-left:1px solid ' . $azul . ';padding:0 0 0 18px;vertical-align:middle;">'
-            . '&#128222; <a href="tel:3000000000">3000000000</a> - <a href="tel:+576015956613">(601) 5956613 ext 000</a><br>'
-            . '&#9993; <a href="mailto:correo@finearom.com">correo@finearom.com</a></td>'
-            . '</tr></tbody></table>'
-            . '<div style="border-bottom:1px solid ' . $azul . ';width:60%;margin-top:12px;"></div>';
+        return '<p><img src="' . url('/images/logo.png') . '" width="95" alt="Finearom"></p>'
+            . '<p><strong>Nombre Apellido</strong><br>Cargo</p>'
+            . '<p>&#128222; <a href="tel:3000000000">3000000000</a> - <a href="tel:+576015956613">(601) 5956613 ext 000</a><br>'
+            . '&#9993; <a href="mailto:correo@finearom.com">correo@finearom.com</a></p>';
     }
 }
