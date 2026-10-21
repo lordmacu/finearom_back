@@ -186,9 +186,9 @@ class EmailCampaignController extends Controller
         $campaign = EmailCampaign::create([
             'campaign_name' => $validated['campaign_name'],
             'subject' => $validated['subject'],
-            'email_field_type' => $validated['email_field_type'],
+            'email_field_type' => $validated['email_field_type'] ?? [],
             'body' => $processedBody,
-            'client_ids' => $validated['client_ids'],
+            'client_ids' => $validated['client_ids'] ?? [],
             'custom_emails' => $validated['custom_emails'] ?? [],
             'status' => 'draft',
             'user_id' => (int) auth()->id(),
@@ -239,9 +239,9 @@ class EmailCampaignController extends Controller
         $campaign->update([
             'campaign_name' => $validated['campaign_name'],
             'subject' => $validated['subject'],
-            'email_field_type' => $validated['email_field_type'],
+            'email_field_type' => $validated['email_field_type'] ?? [],
             'body' => $processedBody,
-            'client_ids' => $validated['client_ids'],
+            'client_ids' => $validated['client_ids'] ?? [],
             'custom_emails' => $validated['custom_emails'] ?? [],
         ]);
 
