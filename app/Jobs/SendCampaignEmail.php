@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Mail\CampaignMail;
 use App\Support\CampaignPlaceholders;
+use App\Support\CampaignSignature;
 use App\Models\EmailCampaignLog;
 use Exception;
 use Illuminate\Bus\Queueable;
@@ -67,7 +68,7 @@ class SendCampaignEmail implements ShouldQueue
             // reemplazara alli, el segundo destinatario recibiria los datos del
             // primero.
             $asunto = CampaignPlaceholders::replace($campaign->subject, $client);
-            $cuerpo = CampaignPlaceholders::replace((string) $campaign->body, $client);
+            $cuerpo = CampaignPlaceholders::replace(CampaignSignature::append((string) $campaign->body, $campaign->user), $client);
 
             Mail::to($emails)->send(new CampaignMail(
                 $asunto,

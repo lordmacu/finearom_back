@@ -32,6 +32,7 @@ class User extends Authenticatable implements MustVerifyEmail
      * @var array<int, string>
      */
     protected $hidden = [
+        'campaign_signature',
         'password',
         'password',
         'remember_token',

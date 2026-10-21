@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Mail\CampaignMail;
 use App\Support\CampaignPlaceholders;
+use App\Support\CampaignSignature;
 use App\Models\EmailCampaignLog;
 use Exception;
 use Illuminate\Bus\Queueable;
@@ -48,7 +49,7 @@ class SendCampaignEmailCustom implements ShouldQueue
             // de ESTE log, sobre copias locales.
             Mail::to($emails)->send(new CampaignMail(
                 CampaignPlaceholders::replace($this->customSubject, $log->client),
-                CampaignPlaceholders::replace($this->customBody, $log->client),
+                CampaignPlaceholders::replace(CampaignSignature::append($this->customBody, $campaign->user), $log->client),
                 $this->attachments,
                 $this->logId
             ));

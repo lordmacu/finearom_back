@@ -17,6 +17,7 @@ use App\Support\CampaignPlaceholders;
 use App\Models\EmailCampaignLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Support\CampaignSignature;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
@@ -26,11 +27,31 @@ class EmailCampaignController extends Controller
     public function __construct()
     {
         $this->middleware('can:email campaign list')->only(['index', 'show']);
-        $this->middleware('can:email campaign create')->only(['store', 'sendTestEmail']);
+        $this->middleware('can:email campaign create')->only(['store', 'sendTestEmail', 'signature', 'updateSignature']);
         $this->middleware('can:email campaign edit')->only(['update', 'clone']);
         $this->middleware('can:email campaign delete')->only(['destroy']);
         $this->middleware('can:email campaign send')->only(['send']);
         $this->middleware('can:email campaign resend')->only(['resend', 'resendCustom', 'updateLogEmail']);
+    }
+
+    /** Firma del usuario autenticado (y la plantilla inicial para quien aún no tiene). */
+    public function signature(): JsonResponse
+    {
+        return response()->json(['data' => [
+            'signature' => (string) auth()->user()->campaign_signature,
+            'template' => CampaignSignature::plantilla(),
+        ]]);
+    }
+
+    public function updateSignature(Request $request): JsonResponse
+    {
+        $data = $request->validate(['signature' => ['nullable', 'string', 'max:200000']]);
+
+        $user = auth()->user();
+        $user->campaign_signature = CampaignSignature::sanitize((string) ($data['signature'] ?? ''));
+        $user->save();
+
+        return response()->json(['data' => ['signature' => $user->campaign_signature], 'message' => 'Firma guardada']);
     }
 
     public function index(Request $request): JsonResponse
@@ -325,7 +346,7 @@ class EmailCampaignController extends Controller
             // vea como queda el reemplazo antes de enviarle a nadie.
             Mail::to($request->validated()['test_email'])->send(new CampaignMail(
                 '[PRUEBA] ' . CampaignPlaceholders::replaceWithSample($request->validated()['subject']),
-                CampaignPlaceholders::replaceWithSample($processedBody),
+                CampaignPlaceholders::replaceWithSample(CampaignSignature::append($processedBody, auth()->user())),
                 $request->validated()['attachments'] ?? [],
                 null
             ));
