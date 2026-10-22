@@ -25,6 +25,7 @@ class UpdateEmailCampaignRequest extends FormRequest
             'client_ids.*' => ['integer', 'exists:clients,id'],
             'custom_emails' => ['nullable', 'array', 'required_without:client_ids'],
             'custom_emails.*' => ['email'],
+            'include_header' => ['nullable', 'boolean'],
             'attachments' => ['nullable', 'array'],
             'attachments.*' => ['file', 'max:10240'],
         ];

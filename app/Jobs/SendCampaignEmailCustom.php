@@ -51,7 +51,8 @@ class SendCampaignEmailCustom implements ShouldQueue
                 CampaignPlaceholders::replace($this->customSubject, $log->client),
                 CampaignPlaceholders::replace(CampaignSignature::append($this->customBody, $campaign->user), $log->client),
                 $this->attachments,
-                $this->logId
+                $this->logId,
+                (bool) $campaign->include_header
             ));
 
             $log->status = 'sent';

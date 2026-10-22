@@ -17,6 +17,7 @@ class SendTestEmailRequest extends FormRequest
             'test_email' => ['required', 'email'],
             'subject' => ['required', 'string', 'max:255'],
             'body' => ['required', 'string'],
+            'include_header' => ['nullable', 'boolean'],
             'attachments' => ['nullable', 'array'],
         ];
     }

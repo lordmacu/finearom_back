@@ -229,6 +229,7 @@ class EmailCampaignController extends Controller
             'body' => $processedBody,
             'client_ids' => $validated['client_ids'] ?? [],
             'custom_emails' => $validated['custom_emails'] ?? [],
+            'include_header' => $validated['include_header'] ?? true,
             'status' => 'draft',
             'user_id' => (int) auth()->id(),
         ]);
@@ -282,6 +283,7 @@ class EmailCampaignController extends Controller
             'body' => $processedBody,
             'client_ids' => $validated['client_ids'] ?? [],
             'custom_emails' => $validated['custom_emails'] ?? [],
+            'include_header' => $validated['include_header'] ?? true,
         ]);
 
         if ($request->hasFile('attachments')) {
@@ -366,7 +368,8 @@ class EmailCampaignController extends Controller
                 '[PRUEBA] ' . CampaignPlaceholders::replaceWithSample($request->validated()['subject']),
                 CampaignPlaceholders::replaceWithSample(CampaignSignature::append($processedBody, auth()->user())),
                 $request->validated()['attachments'] ?? [],
-                null
+                null,
+                (bool) ($request->validated()['include_header'] ?? true)
             ));
 
             return response()->json([

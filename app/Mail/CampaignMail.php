@@ -17,6 +17,7 @@ class CampaignMail extends Mailable
         public string $body,
         public array $attachmentPaths = [],
         public ?int $logId = null,
+        public bool $conEncabezado = true,
     ) {
     }
 
@@ -36,6 +37,12 @@ class CampaignMail extends Mailable
         ];
 
         $rendered = $service->renderTemplate('campaign', $variables);
+
+        // Sin encabezado: ni el logo ni el título ("Campaña Finearom") van en el correo
+        $rendered['show_header'] = $this->conEncabezado;
+        if (! $this->conEncabezado) {
+            $rendered['title'] = null;
+        }
 
         $email = $this->subject($this->mailSubject)
             ->view('emails.template', $rendered);

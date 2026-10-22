@@ -74,7 +74,8 @@ class SendCampaignEmail implements ShouldQueue
                 $asunto,
                 $cuerpo,
                 $attachments,
-                $this->logId
+                $this->logId,
+                (bool) $campaign->include_header
             ));
 
             Log::info('✅ [JOB] Mail::send() completado sin excepción', ['log_id' => $this->logId]);

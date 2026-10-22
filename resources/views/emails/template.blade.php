@@ -76,9 +76,11 @@
     </style>
 </head>
 <body>
+    @if($show_header ?? true)
     <header>
         <img class="logo" src="https://ordenes.finearom.co/images/logo.png" alt="Finearom Logo">
     </header>
+    @endif
 
     <main class="content-wrapper">
         @if(!empty($title))
