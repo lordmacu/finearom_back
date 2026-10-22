@@ -31,6 +31,7 @@ use App\Http\Controllers\PurchaseOrderExportController;
 use App\Http\Controllers\PurchaseOrderProductExportController;
 use App\Http\Controllers\PurchaseOrderImportController;
 use App\Http\Controllers\RecaudoImportController;
+use App\Http\Controllers\InternalEmailController;
 use App\Http\Controllers\ProformaController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\IaForecastController;
@@ -165,7 +166,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Email Campaigns
     Route::get('/email-campaigns/email-fields', [EmailCampaignController::class, 'emailFields']);
-    Route::get('/email-campaigns/custom-emails', [EmailCampaignController::class, 'customEmails']);
+    Route::get('/email-campaigns/internal-emails', [InternalEmailController::class, 'index']);
+    Route::post('/email-campaigns/internal-emails', [InternalEmailController::class, 'store']);
+    Route::delete('/email-campaigns/internal-emails/{id}', [InternalEmailController::class, 'destroy']);
     Route::get('/email-campaigns/signature', [EmailCampaignController::class, 'signature']);
     Route::put('/email-campaigns/signature', [EmailCampaignController::class, 'updateSignature']);
     Route::get('/email-campaigns/placeholders', [EmailCampaignController::class, 'placeholders']);

@@ -17,6 +17,7 @@ class EmailCampaign extends Model
         'client_ids',
         'custom_emails',
         'include_header',
+        'internal_emails',
         'status',
         'total_recipients',
         'sent_count',
@@ -30,6 +31,7 @@ class EmailCampaign extends Model
         'client_ids' => 'array',
         'custom_emails' => 'array',
         'include_header' => 'boolean',
+        'internal_emails' => 'array',
         'attachments' => 'array',
         'sent_at' => 'datetime',
     ];

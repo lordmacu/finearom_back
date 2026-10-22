@@ -31,6 +31,12 @@ class EmailCampaignRequestRulesTest extends TestCase
     }
 
     /** @dataProvider requests */
+    public function test_solo_correos_internos_es_valido(string $request): void
+    {
+        $this->assertSame([], $this->errores($request, $this->base(['internal_emails' => ['a@finearom.com']])));
+    }
+
+    /** @dataProvider requests */
     public function test_sin_clientes_ni_emails_falla(string $request): void
     {
         $e = $this->errores($request, $this->base());

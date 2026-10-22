@@ -27,29 +27,11 @@ class EmailCampaignController extends Controller
     public function __construct()
     {
         $this->middleware('can:email campaign list')->only(['index', 'show']);
-        $this->middleware('can:email campaign create')->only(['store', 'sendTestEmail', 'signature', 'updateSignature', 'customEmails']);
+        $this->middleware('can:email campaign create')->only(['store', 'sendTestEmail', 'signature', 'updateSignature']);
         $this->middleware('can:email campaign edit')->only(['update', 'clone']);
         $this->middleware('can:email campaign delete')->only(['destroy']);
         $this->middleware('can:email campaign send')->only(['send']);
         $this->middleware('can:email campaign resend')->only(['resend', 'resendCustom', 'updateLogEmail']);
-    }
-
-    /**
-     * Emails personalizados que el usuario ya usó en sus campañas, para elegirlos
-     * de un selector en vez de volver a escribirlos.
-     */
-    public function customEmails(): JsonResponse
-    {
-        $emails = EmailCampaign::where('user_id', (int) auth()->id())
-            ->pluck('custom_emails')
-            ->flatten()
-            ->map(fn ($e) => strtolower(trim((string) $e)))
-            ->filter()
-            ->unique()
-            ->sort()
-            ->values();
-
-        return response()->json(['data' => $emails]);
     }
 
     /** Firma del usuario autenticado (y la plantilla inicial para quien aún no tiene). */
@@ -229,6 +211,7 @@ class EmailCampaignController extends Controller
             'body' => $processedBody,
             'client_ids' => $validated['client_ids'] ?? [],
             'custom_emails' => $validated['custom_emails'] ?? [],
+            'internal_emails' => $validated['internal_emails'] ?? [],
             'include_header' => $validated['include_header'] ?? true,
             'status' => 'draft',
             'user_id' => (int) auth()->id(),
@@ -283,6 +266,7 @@ class EmailCampaignController extends Controller
             'body' => $processedBody,
             'client_ids' => $validated['client_ids'] ?? [],
             'custom_emails' => $validated['custom_emails'] ?? [],
+            'internal_emails' => $validated['internal_emails'] ?? [],
             'include_header' => $validated['include_header'] ?? true,
         ]);
 
@@ -402,15 +386,16 @@ class EmailCampaignController extends Controller
 
         $clients = Client::whereIn('id', $campaign->client_ids ?? [])->get();
         $totalRecipients = $clients->count();
-        if (! empty($campaign->custom_emails)) {
-            $totalRecipients += count($campaign->custom_emails);
-        }
+        // Emails sueltos (personalizados + internos), sin repetir
+        $directos = collect(array_merge($campaign->custom_emails ?? [], $campaign->internal_emails ?? []))
+            ->map(fn ($e) => trim((string) $e))->filter()->unique(fn ($e) => strtolower($e))->values();
+        $totalRecipients += $directos->count();
 
         $campaign->total_recipients = $totalRecipients;
         $campaign->save();
 
         try {
-            DB::transaction(function () use ($campaign, $clients) {
+            DB::transaction(function () use ($campaign, $clients, $directos) {
                 $emailFields = (array) $campaign->email_field_type;
                 $emailFieldUsed = implode(',', $emailFields);
 
@@ -449,18 +434,17 @@ class EmailCampaignController extends Controller
                     SendCampaignEmail::dispatch($campaign->id, $log->id);
                 }
 
-                if (! empty($campaign->custom_emails)) {
-                    foreach ($campaign->custom_emails as $customEmail) {
-                        $log = EmailCampaignLog::create([
-                            'email_campaign_id' => $campaign->id,
-                            'client_id' => null,
-                            'email_field_used' => 'custom',
-                            'email_sent_to' => $customEmail,
-                            'status' => 'pending',
-                        ]);
+                $internos = array_map('strtolower', (array) ($campaign->internal_emails ?? []));
+                foreach ($directos as $correo) {
+                    $log = EmailCampaignLog::create([
+                        'email_campaign_id' => $campaign->id,
+                        'client_id' => null,
+                        'email_field_used' => in_array(strtolower($correo), $internos, true) ? 'internal' : 'custom',
+                        'email_sent_to' => $correo,
+                        'status' => 'pending',
+                    ]);
 
-                        SendCampaignEmail::dispatch($campaign->id, $log->id);
-                    }
+                    SendCampaignEmail::dispatch($campaign->id, $log->id);
                 }
             });
         } catch (\Throwable $e) {
