@@ -33,4 +33,29 @@ class CampaignSignatureTest extends TestCase
         $this->assertStringNotContainsString('javascript:', $limpio);
         $this->assertStringContainsString('<p>a</p>', $limpio);
     }
+
+    public function test_la_tabla_de_la_firma_toma_el_diseno_corporativo(): void
+    {
+        $firma = '<figure class="table"><table><tbody><tr><td><img src="l.png"></td><td><strong>Ana</strong><br>Cargo</td><td>Tel<br>mail</td></tr></tbody></table></figure>';
+        $html = CampaignSignature::paraCorreo($firma);
+
+        $this->assertStringNotContainsString('<figure', $html);
+        $this->assertStringContainsString('border:none', $html);
+        $this->assertSame(1, substr_count($html, 'border-left:1px solid #2f5fb3'));   // solo antes del contacto
+        $this->assertStringContainsString('border-bottom:1px solid #2f5fb3', $html);  // línea final
+        $this->assertStringContainsString('<strong>Ana</strong>', $html);
+        $this->assertStringContainsString('Cargo', $html);
+    }
+
+    public function test_una_firma_sin_tabla_queda_igual(): void
+    {
+        $this->assertSame('<p>Ana<br>Cargo</p>', CampaignSignature::paraCorreo('<p>Ana<br>Cargo</p>'));
+    }
+
+    public function test_conserva_acentos(): void
+    {
+        $html = CampaignSignature::paraCorreo('<table><tbody><tr><td>Gestión</td><td>Teléfono ✉</td></tr></tbody></table>');
+        $this->assertStringContainsString('Gestión', $html);
+        $this->assertStringContainsString('Teléfono', $html);
+    }
 }
